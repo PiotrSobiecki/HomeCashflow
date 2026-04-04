@@ -1,9 +1,9 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { supabase } from '../lib/supabase';
+import { fetchFinanceData, saveFinanceDataOnServer } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 
 // Stałe
-const GUEST_STORAGE_KEY = 'financeflow-guest-data';
+const GUEST_STORAGE_KEY = 'homecashflow-guest-data';
 export const CURRENT_YEAR = 2026;
 export const MONTHS = [
   'Styczeń', 'Luty', 'Marzec', 'Kwiecień', 'Maj', 'Czerwiec',
@@ -24,12 +24,45 @@ export const getTotalDaysInMonth = (month, year) => new Date(year, month + 1, 0)
 const createEmptyMonthData = () => ({ incomes: [], expenses: [] });
 
 const createInitialData = () => {
-  const data = { months: {}, savingsGoal: { type: 'none', monthlyAmount: 0, yearlyAmount: 0, targetMonth: 11 } };
+  const data = { months: {}, savingsGoal: { type: 'none', monthlyAmount: 0, yearlyAmount: 0, targetMonth: 11 }, savingsAccounts: [] };
   for (let month = 0; month < 12; month++) {
     data.months[month] = createEmptyMonthData();
   }
   return data;
 };
+
+/** Pełna struktura z API / localStorage — pusty {} z Neon po INSERT nie ma `months`. */
+const normalizeFinanceData = (raw) => {
+  const initial = createInitialData();
+  if (!raw || typeof raw !== 'object') return initial;
+
+  const months = { ...initial.months };
+  if (raw.months && typeof raw.months === 'object') {
+    for (let m = 0; m < 12; m++) {
+      const src = raw.months[m] ?? raw.months[String(m)];
+      if (src && typeof src === 'object') {
+        months[m] = {
+          incomes: Array.isArray(src.incomes) ? src.incomes : [],
+          expenses: Array.isArray(src.expenses) ? src.expenses : [],
+        };
+      }
+    }
+  }
+
+  const sg = raw.savingsGoal && typeof raw.savingsGoal === 'object' ? raw.savingsGoal : {};
+  return {
+    months,
+    savingsGoal: { ...initial.savingsGoal, ...sg },
+    savingsAccounts: Array.isArray(raw.savingsAccounts) ? raw.savingsAccounts : [],
+  };
+};
+
+const hasPersistedMonthShape = (payload) =>
+  payload &&
+  typeof payload === 'object' &&
+  payload.months &&
+  typeof payload.months === 'object' &&
+  Object.keys(payload.months).length > 0;
 
 export const useFinanceData = () => {
   const { user, isGuest } = useAuth();
@@ -38,7 +71,7 @@ export const useFinanceData = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  // Pobierz dane - z Supabase lub localStorage
+  // Pobierz dane - z API (Neon) lub localStorage
   useEffect(() => {
     if (!user) return;
 
@@ -49,32 +82,25 @@ export const useFinanceData = () => {
           // Tryb gościa - użyj localStorage
           const saved = localStorage.getItem(GUEST_STORAGE_KEY);
           if (saved) {
-            setData(JSON.parse(saved));
+            try {
+              setData(normalizeFinanceData(JSON.parse(saved)));
+            } catch {
+              setData(createInitialData());
+            }
           } else {
             setData(createInitialData());
           }
         } else {
-          // Zalogowany użytkownik - użyj Supabase
-          const { data: userData, error } = await supabase
-            .from('user_finance_data')
-            .select('data')
-            .eq('user_id', user.id)
-            .single();
-
-          if (error && error.code !== 'PGRST116') {
-            console.error('Error fetching data:', error);
+          // Zalogowany użytkownik - użyj backendu opartego o Neon
+          const response = await fetchFinanceData();
+          const payload = response?.data;
+          const normalized = normalizeFinanceData(
+            payload && typeof payload === 'object' ? payload : null
+          );
+          if (!hasPersistedMonthShape(payload)) {
+            await saveFinanceDataOnServer(normalized);
           }
-
-          if (userData?.data) {
-            setData(userData.data);
-          } else {
-            const initialData = createInitialData();
-            await supabase.from('user_finance_data').insert({
-              user_id: user.id,
-              data: initialData
-            });
-            setData(initialData);
-          }
+          setData(normalized);
         }
       } catch (err) {
         console.error('Error:', err);
@@ -86,7 +112,7 @@ export const useFinanceData = () => {
     fetchData();
   }, [user, isGuest]);
 
-  // Zapisz dane - do Supabase lub localStorage
+  // Zapisz dane - do API (Neon) lub localStorage
   const saveData = useCallback(async (newData) => {
     if (!user) return;
     setSaving(true);
@@ -95,16 +121,8 @@ export const useFinanceData = () => {
         // Tryb gościa - zapisz do localStorage
         localStorage.setItem(GUEST_STORAGE_KEY, JSON.stringify(newData));
       } else {
-        // Zalogowany użytkownik - zapisz do Supabase
-        const { error } = await supabase
-          .from('user_finance_data')
-          .upsert({
-            user_id: user.id,
-            data: newData,
-            updated_at: new Date().toISOString()
-          }, { onConflict: 'user_id' });
-
-        if (error) console.error('Error saving data:', error);
+        // Zalogowany użytkownik - zapisz do backendu opartego o Neon
+        await saveFinanceDataOnServer(newData);
       }
     } catch (err) {
       console.error('Error:', err);
@@ -122,21 +140,66 @@ export const useFinanceData = () => {
     });
   }, [saveData]);
 
+  // ============ AUTO-PRZENOSZENIE STAŁYCH ============
+  // Przy wejściu w miesiąc, dokopiuj brakujące stałe przychody/wydatki z poprzedniego miesiąca
+  useEffect(() => {
+    if (loading) return;
+    if (selectedMonth === 0) return;
+
+    const monthData = data.months[selectedMonth];
+    if (!monthData) return;
+
+    // Szukaj najbliższego wcześniejszego miesiąca ze stałymi
+    let sourceMonth = null;
+    for (let m = selectedMonth - 1; m >= 0; m--) {
+      const md = data.months[m];
+      if (md && (md.incomes.some(i => i.isFixed) || md.expenses.some(e => e.isFixed))) {
+        sourceMonth = m;
+        break;
+      }
+    }
+    if (sourceMonth === null) return;
+
+    const source = data.months[sourceMonth];
+    const existingIncomeNames = new Set(monthData.incomes.filter(i => i.isFixed).map(i => i.name));
+    const existingExpenseNames = new Set(monthData.expenses.filter(e => e.isFixed).map(e => e.name));
+
+    const newFixedIncomes = source.incomes
+      .filter(i => i.isFixed && !existingIncomeNames.has(i.name))
+      .map(i => ({ ...i, id: Date.now() + Math.random() }));
+    const newFixedExpenses = source.expenses
+      .filter(e => e.isFixed && !existingExpenseNames.has(e.name))
+      .map(e => ({ ...e, id: Date.now() + Math.random(), date: `${CURRENT_YEAR}-${String(selectedMonth + 1).padStart(2, '0')}-01` }));
+
+    if (newFixedIncomes.length === 0 && newFixedExpenses.length === 0) return;
+
+    updateData(prev => ({
+      ...prev,
+      months: {
+        ...prev.months,
+        [selectedMonth]: {
+          incomes: [...prev.months[selectedMonth].incomes, ...newFixedIncomes],
+          expenses: [...prev.months[selectedMonth].expenses, ...newFixedExpenses],
+        }
+      }
+    }));
+  }, [selectedMonth, loading]);
+
   // ============ CRUD DLA PRZYCHODÓW ============
-  const addIncome = (name, amount) => {
+  const addIncome = (name, amount, isFixed = false) => {
     updateData(prev => ({
       ...prev,
       months: {
         ...prev.months,
         [selectedMonth]: {
           ...prev.months[selectedMonth],
-          incomes: [...prev.months[selectedMonth].incomes, { id: Date.now(), name, amount: parseFloat(amount) }]
+          incomes: [...prev.months[selectedMonth].incomes, { id: Date.now(), name, amount: parseFloat(amount), isFixed }]
         }
       }
     }));
   };
 
-  const updateIncome = (id, name, amount) => {
+  const updateIncome = (id, name, amount, isFixed) => {
     updateData(prev => ({
       ...prev,
       months: {
@@ -144,7 +207,7 @@ export const useFinanceData = () => {
         [selectedMonth]: {
           ...prev.months[selectedMonth],
           incomes: prev.months[selectedMonth].incomes.map(inc =>
-            inc.id === id ? { ...inc, name, amount: parseFloat(amount) } : inc
+            inc.id === id ? { ...inc, name, amount: parseFloat(amount), isFixed } : inc
           )
         }
       }
@@ -222,6 +285,30 @@ export const useFinanceData = () => {
     }
   };
 
+  // ============ CRUD DLA OSZCZĘDNOŚCI ============
+  const addSavingsAccount = (name, amount, icon = 'bank') => {
+    updateData(prev => ({
+      ...prev,
+      savingsAccounts: [...prev.savingsAccounts, { id: Date.now(), name, amount: parseFloat(amount), icon }]
+    }));
+  };
+
+  const updateSavingsAccount = (id, name, amount, icon) => {
+    updateData(prev => ({
+      ...prev,
+      savingsAccounts: prev.savingsAccounts.map(acc =>
+        acc.id === id ? { ...acc, name, amount: parseFloat(amount), icon } : acc
+      )
+    }));
+  };
+
+  const deleteSavingsAccount = (id) => {
+    updateData(prev => ({
+      ...prev,
+      savingsAccounts: prev.savingsAccounts.filter(acc => acc.id !== id)
+    }));
+  };
+
   // ============ OBLICZENIA ============
   const currentMonthData = data.months[selectedMonth] || createEmptyMonthData();
 
@@ -242,6 +329,11 @@ export const useFinanceData = () => {
 
   const totalExpenses = useMemo(() => fixedExpenses + variableExpenses, [fixedExpenses, variableExpenses]);
   const balance = useMemo(() => totalIncome - totalExpenses, [totalIncome, totalExpenses]);
+
+  const totalSavingsAccounts = useMemo(() =>
+    data.savingsAccounts.reduce((sum, acc) => sum + acc.amount, 0),
+    [data.savingsAccounts]
+  );
 
   // ============ CEL OSZCZĘDNOŚCIOWY - OBLICZENIA ============
   const savingsGoalData = useMemo(() => {
@@ -351,10 +443,11 @@ export const useFinanceData = () => {
       if (expenses > 0) { totalExpensesSum += expenses; monthsWithExpenses++; }
     }
 
+    const realSavings = totalSavingsAccounts > 0 ? totalSavingsAccounts : totalSavings;
     const avgMonthlyExpenses = monthsWithExpenses > 0 ? totalExpensesSum / monthsWithExpenses : 0;
-    const months = avgMonthlyExpenses > 0 ? totalSavings / avgMonthlyExpenses : 0;
-    return { totalSavings, avgMonthlyExpenses, months: Math.max(0, months), hasData: monthsWithExpenses > 0 };
-  }, [data]);
+    const months = avgMonthlyExpenses > 0 ? realSavings / avgMonthlyExpenses : 0;
+    return { totalSavings: realSavings, avgMonthlyExpenses, months: Math.max(0, months), hasData: monthsWithExpenses > 0, hasRealSavings: totalSavingsAccounts > 0 };
+  }, [data, totalSavingsAccounts]);
 
   // ============ FORECAST DATA ============
   const forecastData = useMemo(() => {
@@ -405,6 +498,7 @@ export const useFinanceData = () => {
     data, selectedMonth, setSelectedMonth, currentMonthData, totalIncome, totalExpenses, fixedExpenses, variableExpenses, balance,
     yearlySummary, monthlySummaries, addIncome, updateIncome, deleteIncome, addExpense, updateExpense, deleteExpense, clearAllData,
     financialRunway, forecastData, guiltFreeBurn, savingsGoal: data.savingsGoal, savingsGoalData, updateSavingsGoal,
+    savingsAccounts: data.savingsAccounts, totalSavingsAccounts, addSavingsAccount, updateSavingsAccount, deleteSavingsAccount,
     MONTHS, MONTHS_SHORT, CURRENT_YEAR, getCurrentMonth, loading, saving
   };
 };

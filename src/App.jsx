@@ -1,10 +1,15 @@
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { Auth } from './components/Auth'
 import { Dashboard } from './components/Dashboard'
+import { InviteAccept } from './components/InviteAccept'
 import { Loader2 } from 'lucide-react'
 
 const AppContent = () => {
   const { user, loading } = useAuth()
+
+  // Check for invite token in URL
+  const params = new URLSearchParams(window.location.search)
+  const inviteToken = params.get('invite')
 
   if (loading) {
     return (
@@ -15,6 +20,10 @@ const AppContent = () => {
         </div>
       </div>
     )
+  }
+
+  if (inviteToken) {
+    return user ? <InviteAccept token={inviteToken} /> : <Auth />
   }
 
   return user ? <Dashboard /> : <Auth />

@@ -1,0 +1,22 @@
+{
+  "name": "homecashflow-server",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "deploy": "wrangler deploy",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.19.12",
+    "@neondatabase/serverless": "^0.10.0",
+    "hono": "^4.7.0",
+    "jose": "^6.0.0"
+  },
+  "devDependencies": {
+    "dotenv": "^16.4.0",
+    "vitest": "^3.0.0"
+  }
+}

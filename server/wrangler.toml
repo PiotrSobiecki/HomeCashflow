@@ -1,0 +1,14 @@
+name = "homecashflow-api"
+main = "src/worker.js"
+compatibility_date = "2024-12-01"
+
+[vars]
+FRONTEND_URL = "https://homecashflow.org"
+NEXTAUTH_URL = "https://api.homecashflow.org"
+
+# Secrets (set via `wrangler secret put`):
+# - DATABASE_URL
+# - NEXTAUTH_SECRET
+# - GOOGLE_CLIENT_ID
+# - GOOGLE_CLIENT_SECRET
+# - RESEND_API_KEY

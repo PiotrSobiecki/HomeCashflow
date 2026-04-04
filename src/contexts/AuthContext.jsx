@@ -1,5 +1,8 @@
 import { createContext, useContext, useEffect, useState } from 'react'
-import { supabase } from '../lib/supabase'
+import { getApiUrl, saveFinanceDataOnServer } from '../lib/api'
+
+const GUEST_STORAGE_KEY = 'homecashflow-guest-data'
+const GUEST_MODE_KEY = 'homecashflow-guest-mode'
 
 const AuthContext = createContext({})
 
@@ -11,88 +14,86 @@ export const AuthProvider = ({ children }) => {
   const [isGuest, setIsGuest] = useState(false)
 
   useEffect(() => {
-    // Sprawdź czy jest zapisany tryb gościa
-    const guestMode = localStorage.getItem('financeflow-guest-mode')
+    const guestMode = localStorage.getItem(GUEST_MODE_KEY)
     if (guestMode === 'true') {
       setIsGuest(true)
-      setUser({ id: 'guest', email: 'guest@demo.local', user_metadata: { name: 'Gość' } })
+      setUser({ id: 'guest', email: 'guest@demo.local', name: 'Gość' })
       setLoading(false)
       return
     }
 
-    // Sprawdź aktualną sesję Supabase
-    const getSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession()
-      setUser(session?.user ?? null)
-      setLoading(false)
+    const checkSession = async () => {
+      try {
+        const apiUrl = getApiUrl()
+        const res = await fetch(`${apiUrl}/api/auth/me`, {
+          credentials: 'include'
+        })
+
+        if (res.ok) {
+          const { user } = await res.json()
+          setUser(user)
+
+          // Migrate guest data if present
+          const guestData = localStorage.getItem(GUEST_STORAGE_KEY)
+          if (guestData) {
+            try {
+              await saveFinanceDataOnServer(JSON.parse(guestData))
+            } catch {
+              // migration failed silently — data stays in localStorage for retry
+            }
+            localStorage.removeItem(GUEST_STORAGE_KEY)
+            localStorage.removeItem(GUEST_MODE_KEY)
+          }
+        } else {
+          setUser(null)
+        }
+      } catch {
+        setUser(null)
+      } finally {
+        setLoading(false)
+      }
     }
 
-    getSession()
-
-    // Nasłuchuj zmian w autoryzacji
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null)
-      setIsGuest(false)
-      setLoading(false)
-    })
-
-    return () => subscription.unsubscribe()
+    checkSession()
   }, [])
 
-  // Rejestracja
-  const signUp = async (email, password, name) => {
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: { name: name }
-      }
-    })
-    return { data, error }
+  const signInWithGoogle = () => {
+    const apiUrl = getApiUrl()
+    window.location.href = `${apiUrl}/api/auth/google`
   }
 
-  // Logowanie
-  const signIn = async (email, password) => {
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password
-    })
-    return { data, error }
-  }
-
-  // Kontynuuj jako gość
   const continueAsGuest = () => {
-    localStorage.setItem('financeflow-guest-mode', 'true')
+    localStorage.setItem(GUEST_MODE_KEY, 'true')
     setIsGuest(true)
-    setUser({ id: 'guest', email: 'guest@demo.local', user_metadata: { name: 'Gość' } })
+    setUser({ id: 'guest', email: 'guest@demo.local', name: 'Gość' })
   }
 
-  // Wylogowanie
   const signOut = async () => {
     if (isGuest) {
-      localStorage.removeItem('financeflow-guest-mode')
+      localStorage.removeItem(GUEST_MODE_KEY)
       setIsGuest(false)
       setUser(null)
-      return { error: null }
+      return
     }
-    const { error } = await supabase.auth.signOut()
-    return { error }
-  }
 
-  // Reset hasła
-  const resetPassword = async (email) => {
-    const { data, error } = await supabase.auth.resetPasswordForEmail(email)
-    return { data, error }
+    try {
+      const apiUrl = getApiUrl()
+      await fetch(`${apiUrl}/api/auth/logout`, {
+        method: 'POST',
+        credentials: 'include'
+      })
+    } catch {
+      // ignore
+    }
+    setUser(null)
   }
 
   const value = {
     user,
     loading,
     isGuest,
-    signUp,
-    signIn,
+    signInWithGoogle,
     signOut,
-    resetPassword,
     continueAsGuest
   }
 

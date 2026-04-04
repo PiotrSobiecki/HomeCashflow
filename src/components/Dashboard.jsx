@@ -1,23 +1,63 @@
-import { Trash2, Zap, LogOut, User, Loader2, Cloud, UserX, AlertTriangle } from 'lucide-react';
-import { useFinanceData } from '../hooks/useFinanceData';
-import { useAuth } from '../contexts/AuthContext';
-import { SummaryCard } from './SummaryCard';
-import { MonthSelector } from './MonthSelector';
-import { IncomeSection } from './IncomeSection';
-import { ExpenseSection } from './ExpenseSection';
-import { YearlySummary } from './YearlySummary';
-import { FinancialRunway } from './FinancialRunway';
-import { ForecastChart } from './ForecastChart';
-import { GuiltFreeBurn } from './GuiltFreeBurn';
-import { SavingsGoal } from './SavingsGoal';
+import {
+  Trash2,
+  Zap,
+  LogOut,
+  User,
+  Loader2,
+  Cloud,
+  UserX,
+  AlertTriangle,
+} from "lucide-react";
+import { useFinanceData } from "../hooks/useFinanceData";
+import { useAuth } from "../contexts/AuthContext";
+import { SummaryCard } from "./SummaryCard";
+import { MonthSelector } from "./MonthSelector";
+import { IncomeSection } from "./IncomeSection";
+import { ExpenseSection } from "./ExpenseSection";
+import { YearlySummary } from "./YearlySummary";
+import { FinancialRunway } from "./FinancialRunway";
+import { ForecastChart } from "./ForecastChart";
+import { GuiltFreeBurn } from "./GuiltFreeBurn";
+import { SavingsGoal } from "./SavingsGoal";
+import { SavingsAccounts } from "./SavingsAccounts";
+import { HouseholdMembers } from "./HouseholdMembers";
 
 export const Dashboard = () => {
   const { user, signOut, isGuest } = useAuth();
   const {
-    selectedMonth, setSelectedMonth, currentMonthData, totalIncome, totalExpenses, fixedExpenses, variableExpenses, balance,
-    yearlySummary, monthlySummaries, addIncome, updateIncome, deleteIncome, addExpense, updateExpense, deleteExpense, clearAllData,
-    financialRunway, forecastData, guiltFreeBurn, savingsGoal, savingsGoalData, updateSavingsGoal,
-    MONTHS, CURRENT_YEAR, getCurrentMonth, loading, saving
+    selectedMonth,
+    setSelectedMonth,
+    currentMonthData,
+    totalIncome,
+    totalExpenses,
+    fixedExpenses,
+    variableExpenses,
+    balance,
+    yearlySummary,
+    monthlySummaries,
+    addIncome,
+    updateIncome,
+    deleteIncome,
+    addExpense,
+    updateExpense,
+    deleteExpense,
+    clearAllData,
+    financialRunway,
+    forecastData,
+    guiltFreeBurn,
+    savingsGoal,
+    savingsGoalData,
+    updateSavingsGoal,
+    savingsAccounts,
+    totalSavingsAccounts,
+    addSavingsAccount,
+    updateSavingsAccount,
+    deleteSavingsAccount,
+    MONTHS,
+    CURRENT_YEAR,
+    getCurrentMonth,
+    loading,
+    saving,
   } = useFinanceData();
 
   const handleSignOut = async () => {
@@ -44,7 +84,9 @@ export const Dashboard = () => {
             <div className="flex flex-col sm:flex-row items-center justify-between gap-2">
               <div className="flex items-center gap-2 text-amber-300">
                 <AlertTriangle className="w-4 h-4" />
-                <span className="text-sm">Tryb demo - dane zapisywane tylko w tej przeglądarce</span>
+                <span className="text-sm">
+                  Tryb demo - dane zapisywane tylko w tej przeglądarce
+                </span>
               </div>
               <button
                 onClick={handleSignOut}
@@ -66,8 +108,10 @@ export const Dashboard = () => {
                 <Zap className="w-6 h-6 text-white" />
               </div>
               <div>
-                <h1 className="text-xl font-bold text-white">FinanceFlow</h1>
-                <p className="text-xs text-slate-400">Zarządzaj finansami inteligentnie</p>
+                <h1 className="text-xl font-bold text-white">HomeCashflow</h1>
+                <p className="text-xs text-slate-400">
+                  Zarządzaj finansami inteligentnie
+                </p>
               </div>
             </div>
 
@@ -76,18 +120,36 @@ export const Dashboard = () => {
               {!isGuest && (
                 <div className="flex items-center gap-2 text-xs">
                   {saving ? (
-                    <><Cloud className="w-4 h-4 text-amber-400 animate-pulse" /><span className="text-amber-400 hidden sm:inline">Zapisywanie...</span></>
+                    <>
+                      <Cloud className="w-4 h-4 text-amber-400 animate-pulse" />
+                      <span className="text-amber-400 hidden sm:inline">
+                        Zapisywanie...
+                      </span>
+                    </>
                   ) : (
-                    <><Cloud className="w-4 h-4 text-emerald-400" /><span className="text-emerald-400 hidden sm:inline">Zapisano</span></>
+                    <>
+                      <Cloud className="w-4 h-4 text-emerald-400" />
+                      <span className="text-emerald-400 hidden sm:inline">
+                        Zapisano
+                      </span>
+                    </>
                   )}
                 </div>
               )}
 
               {/* User info */}
-              <div className={`hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg ${isGuest ? 'bg-amber-500/20' : 'bg-slate-800/50'}`}>
-                {isGuest ? <UserX className="w-4 h-4 text-amber-400" /> : <User className="w-4 h-4 text-indigo-400" />}
-                <span className={`text-sm ${isGuest ? 'text-amber-300' : 'text-slate-300'}`}>
-                  {isGuest ? 'Gość' : (user?.user_metadata?.name || user?.email?.split('@')[0])}
+              <div
+                className={`hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg ${isGuest ? "bg-amber-500/20" : "bg-slate-800/50"}`}
+              >
+                {isGuest ? (
+                  <UserX className="w-4 h-4 text-amber-400" />
+                ) : (
+                  <User className="w-4 h-4 text-indigo-400" />
+                )}
+                <span
+                  className={`text-sm ${isGuest ? "text-amber-300" : "text-slate-300"}`}
+                >
+                  {isGuest ? "Gość" : user?.name || user?.email?.split("@")[0]}
                 </span>
               </div>
 
@@ -107,7 +169,9 @@ export const Dashboard = () => {
                 title={isGuest ? "Zaloguj się" : "Wyloguj się"}
               >
                 <LogOut className="w-4 h-4" />
-                <span className="hidden sm:inline text-sm">{isGuest ? 'Zaloguj' : 'Wyloguj'}</span>
+                <span className="hidden sm:inline text-sm">
+                  {isGuest ? "Zaloguj" : "Wyloguj"}
+                </span>
               </button>
             </div>
           </div>
@@ -116,24 +180,73 @@ export const Dashboard = () => {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <SavingsGoal savingsGoal={savingsGoal} savingsGoalData={savingsGoalData} updateSavingsGoal={updateSavingsGoal} months={MONTHS} />
-        <GuiltFreeBurn guiltFreeBurn={guiltFreeBurn} savingsGoalData={savingsGoalData} />
+        {!isGuest && <HouseholdMembers />}
+        <SavingsGoal
+          savingsGoal={savingsGoal}
+          savingsGoalData={savingsGoalData}
+          updateSavingsGoal={updateSavingsGoal}
+          months={MONTHS}
+        />
+        <SavingsAccounts
+          accounts={savingsAccounts}
+          totalSavings={totalSavingsAccounts}
+          addAccount={addSavingsAccount}
+          updateAccount={updateSavingsAccount}
+          deleteAccount={deleteSavingsAccount}
+        />
+        <GuiltFreeBurn
+          guiltFreeBurn={guiltFreeBurn}
+          savingsGoalData={savingsGoalData}
+        />
         <FinancialRunway financialRunway={financialRunway} />
-        <ForecastChart forecastData={forecastData} currentMonth={getCurrentMonth()} year={CURRENT_YEAR} />
-        <MonthSelector selectedMonth={selectedMonth} setSelectedMonth={setSelectedMonth} months={MONTHS} year={CURRENT_YEAR} />
-        <SummaryCard totalIncome={totalIncome} totalExpenses={totalExpenses} fixedExpenses={fixedExpenses} variableExpenses={variableExpenses} balance={balance} />
+        <ForecastChart
+          forecastData={forecastData}
+          currentMonth={getCurrentMonth()}
+          year={CURRENT_YEAR}
+        />
+        <MonthSelector
+          selectedMonth={selectedMonth}
+          setSelectedMonth={setSelectedMonth}
+          months={MONTHS}
+          year={CURRENT_YEAR}
+        />
+        <SummaryCard
+          totalIncome={totalIncome}
+          totalExpenses={totalExpenses}
+          fixedExpenses={fixedExpenses}
+          variableExpenses={variableExpenses}
+          balance={balance}
+        />
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <IncomeSection incomes={currentMonthData.incomes} addIncome={addIncome} updateIncome={updateIncome} deleteIncome={deleteIncome} />
-          <ExpenseSection expenses={currentMonthData.expenses} addExpense={addExpense} updateExpense={updateExpense} deleteExpense={deleteExpense} selectedMonth={selectedMonth} />
+          <IncomeSection
+            incomes={currentMonthData.incomes}
+            addIncome={addIncome}
+            updateIncome={updateIncome}
+            deleteIncome={deleteIncome}
+          />
+          <ExpenseSection
+            expenses={currentMonthData.expenses}
+            addExpense={addExpense}
+            updateExpense={updateExpense}
+            deleteExpense={deleteExpense}
+            selectedMonth={selectedMonth}
+          />
         </div>
-        <YearlySummary yearlySummary={yearlySummary} monthlySummaries={monthlySummaries} year={CURRENT_YEAR} />
+        <YearlySummary
+          yearlySummary={yearlySummary}
+          monthlySummaries={monthlySummaries}
+          year={CURRENT_YEAR}
+        />
       </main>
 
       {/* Footer */}
       <footer className="border-t border-slate-800 mt-12">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <p className="text-center text-sm text-slate-500">
-            FinanceFlow © {CURRENT_YEAR} • {isGuest ? 'Dane zapisywane lokalnie w przeglądarce' : 'Dane bezpiecznie przechowywane w chmurze'}
+            HomeCashflow © {CURRENT_YEAR} •{" "}
+            {isGuest
+              ? "Dane zapisywane lokalnie w przeglądarce"
+              : "Dane bezpiecznie przechowywane w chmurze"}
           </p>
         </div>
       </footer>
