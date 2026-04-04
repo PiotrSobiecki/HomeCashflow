@@ -1,5 +1,7 @@
-import { useMemo, useState } from 'react';
-import { History, ChevronDown, ChevronUp } from 'lucide-react';
+import { useMemo, useState, useEffect } from 'react';
+import { History, ChevronDown, ChevronUp, ChevronLeft, ChevronRight } from 'lucide-react';
+
+const PAGE_SIZE = 8;
 
 const formatCurrency = (amount) =>
   new Intl.NumberFormat('pl-PL', {
@@ -60,14 +62,26 @@ export function describeActivity(entry, MONTHS) {
 
 export const ActivityHistory = ({ entries, MONTHS }) => {
   const [open, setOpen] = useState(true);
+  const [page, setPage] = useState(0);
 
   const sorted = useMemo(() => {
     const list = Array.isArray(entries) ? [...entries] : [];
     return list.sort((a, b) => new Date(b.at) - new Date(a.at));
   }, [entries]);
 
+  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+  const pageSlice = useMemo(
+    () => sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE),
+    [sorted, page]
+  );
+
+  useEffect(() => {
+    const maxPage = Math.max(0, Math.ceil(sorted.length / PAGE_SIZE) - 1);
+    setPage((p) => Math.min(p, maxPage));
+  }, [sorted.length]);
+
   return (
-    <div className="bg-slate-800/50 border border-slate-700/50 rounded-2xl p-6 mb-6">
+    <div className="bg-slate-800/50 border border-slate-700/50 rounded-2xl p-6 mb-6 mt-6">
       <button
         type="button"
         onClick={() => setOpen(!open)}
@@ -98,20 +112,47 @@ export const ActivityHistory = ({ entries, MONTHS }) => {
             Brak zapisanych zdarzeń. Po dodaniu lub usunięciu wpisów pojawią się tutaj wraz z imieniem osoby.
           </p>
         ) : (
-          <ul className="mt-4 space-y-2 max-h-72 overflow-y-auto pr-1 border-t border-slate-700/50 pt-4">
-            {sorted.map((entry) => (
-              <li
-                key={entry.id}
-                className="text-sm text-slate-300 py-2 px-3 rounded-xl bg-slate-900/40 border border-slate-700/30"
-              >
-                <span className="text-indigo-300 font-medium">{entry.userName || 'Nieznany'}</span>
-                <span className="text-slate-500"> · </span>
-                <span className="text-slate-500 text-xs whitespace-nowrap">{formatWhen(entry.at)}</span>
-                <span className="text-slate-600"> — </span>
-                <span>{describeActivity(entry, MONTHS)}</span>
-              </li>
-            ))}
-          </ul>
+          <>
+            <ul className="mt-4 space-y-2 border-t border-slate-700/50 pt-4">
+              {pageSlice.map((entry) => (
+                <li
+                  key={entry.id}
+                  className="text-sm text-slate-300 py-2 px-3 rounded-xl bg-slate-900/40 border border-slate-700/30"
+                >
+                  <span className="text-indigo-300 font-medium">{entry.userName || 'Nieznany'}</span>
+                  <span className="text-slate-500"> · </span>
+                  <span className="text-slate-500 text-xs whitespace-nowrap">{formatWhen(entry.at)}</span>
+                  <span className="text-slate-600"> — </span>
+                  <span>{describeActivity(entry, MONTHS)}</span>
+                </li>
+              ))}
+            </ul>
+            {sorted.length > PAGE_SIZE && (
+              <div className="flex items-center justify-between gap-3 mt-4 pt-4 border-t border-slate-700/50">
+                <button
+                  type="button"
+                  disabled={page <= 0}
+                  onClick={() => setPage((p) => Math.max(0, p - 1))}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium text-slate-300 bg-slate-700/50 hover:bg-slate-700 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  Poprzednia
+                </button>
+                <span className="text-xs text-slate-400 tabular-nums">
+                  Strona {page + 1} z {totalPages}
+                </span>
+                <button
+                  type="button"
+                  disabled={page >= totalPages - 1}
+                  onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium text-slate-300 bg-slate-700/50 hover:bg-slate-700 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+                >
+                  Następna
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+          </>
         )
       )}
     </div>
