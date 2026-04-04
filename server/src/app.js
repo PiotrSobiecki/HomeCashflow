@@ -30,7 +30,17 @@ function getSecret(c) {
 }
 
 function getDb(c) {
-  return neon(getEnv(c, 'DATABASE_URL'))
+  const url = getEnv(c, 'DATABASE_URL')?.trim()
+  if (!url || !/^postgres(ql)?:\/\//i.test(url)) {
+    throw new Error('DATABASE_URL is missing or invalid (expected postgresql://…)')
+  }
+  return neon(url)
+}
+
+/** Bazowy URL API bez końcowego slasha — musi się zgadzać z redirect URI w Google Cloud. */
+function getApiBaseUrl(c) {
+  const raw = getEnv(c, 'NEXTAUTH_URL') || 'http://localhost:3000'
+  return String(raw).replace(/\/+$/, '')
 }
 
 function getFinanceDataKey(c) {
@@ -77,32 +87,49 @@ export async function upsertUserAndHousehold(sql, profile) {
 }
 
 async function exchangeCodeForProfile(c, code) {
-  const redirectUri = `${getEnv(c, 'NEXTAUTH_URL') || 'http://localhost:3000'}/api/auth/callback`
+  const redirectUri = `${getApiBaseUrl(c)}/api/auth/callback`
+  const clientId = getEnv(c, 'GOOGLE_CLIENT_ID')
+  const clientSecret = getEnv(c, 'GOOGLE_CLIENT_SECRET')
+  if (!clientId || !clientSecret) {
+    throw new Error('GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET is not configured')
+  }
 
-  // Exchange code for tokens
   const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
       code,
-      client_id: getEnv(c, 'GOOGLE_CLIENT_ID'),
-      client_secret: getEnv(c, 'GOOGLE_CLIENT_SECRET'),
+      client_id: clientId,
+      client_secret: clientSecret,
       redirect_uri: redirectUri,
       grant_type: 'authorization_code',
     }),
   })
   const tokens = await tokenRes.json()
+  if (!tokenRes.ok || tokens.error) {
+    const hint = tokens.error_description || tokens.error || tokenRes.statusText
+    throw new Error(`Google token exchange failed: ${hint} (redirect_uri must be exactly: ${redirectUri})`)
+  }
+  if (!tokens.access_token) {
+    throw new Error('Google token response had no access_token')
+  }
 
-  // Get user profile
   const profileRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
     headers: { Authorization: `Bearer ${tokens.access_token}` },
   })
-  return profileRes.json()
+  const profile = await profileRes.json()
+  if (!profileRes.ok || profile.error) {
+    throw new Error(`Google userinfo failed: ${profile.error || profileRes.statusText}`)
+  }
+  if (!profile.sub || !profile.email) {
+    throw new Error('Google profile missing sub or email')
+  }
+  return profile
 }
 
 app.get('/api/auth/google', (c) => {
   const clientId = getEnv(c, 'GOOGLE_CLIENT_ID')
-  const redirectUri = `${getEnv(c, 'NEXTAUTH_URL') || 'http://localhost:3000'}/api/auth/callback`
+  const redirectUri = `${getApiBaseUrl(c)}/api/auth/callback`
   const scope = 'openid email profile'
 
   // Przekaż invite token przez OAuth state parameter
@@ -123,6 +150,17 @@ app.get('/api/auth/google', (c) => {
 })
 
 app.get('/api/auth/callback', async (c) => {
+  const oauthErr = c.req.query('error')
+  if (oauthErr) {
+    return c.json(
+      {
+        error: 'OAuth error',
+        detail: c.req.query('error_description') || oauthErr,
+      },
+      400,
+    )
+  }
+
   const code = c.req.query('code')
   if (!code) {
     return c.json({ error: 'Missing code' }, 400)
@@ -138,18 +176,30 @@ app.get('/api/auth/callback', async (c) => {
       .setExpirationTime('7d')
       .sign(getSecret(c))
 
-    const frontendUrl = getEnv(c, 'FRONTEND_URL') || 'http://localhost:5173'
+    const frontendUrl = String(getEnv(c, 'FRONTEND_URL') || 'http://localhost:5173').replace(/\/+$/, '')
     const inviteState = c.req.query('state')
     const redirectUrl = inviteState ? `${frontendUrl}?invite=${inviteState}` : frontendUrl
+    const cookieParts = [
+      `token=${token}`,
+      'HttpOnly',
+      'Path=/',
+      `Max-Age=${7 * 24 * 60 * 60}`,
+      'SameSite=Lax',
+    ]
+    if (getApiBaseUrl(c).startsWith('https://')) {
+      cookieParts.push('Secure')
+    }
     return new Response(null, {
       status: 302,
       headers: {
         Location: redirectUrl,
-        'Set-Cookie': `token=${token}; HttpOnly; Path=/; Max-Age=${7 * 24 * 60 * 60}; SameSite=Lax`,
+        'Set-Cookie': cookieParts.join('; '),
       },
     })
   } catch (err) {
-    return c.json({ error: 'Auth failed' }, 500)
+    console.error('[auth/callback]', err)
+    const message = err instanceof Error ? err.message : String(err)
+    return c.json({ error: 'Auth failed', detail: message }, 500)
   }
 })
 
