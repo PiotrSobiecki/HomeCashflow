@@ -23,8 +23,15 @@ export const getTotalDaysInMonth = (month, year) => new Date(year, month + 1, 0)
 
 const createEmptyMonthData = () => ({ incomes: [], expenses: [] });
 
+const ACTIVITY_LOG_MAX = 150;
+
 const createInitialData = () => {
-  const data = { months: {}, savingsGoal: { type: 'none', monthlyAmount: 0, yearlyAmount: 0, targetMonth: 11 }, savingsAccounts: [] };
+  const data = {
+    months: {},
+    savingsGoal: { type: 'none', monthlyAmount: 0, yearlyAmount: 0, targetMonth: 11 },
+    savingsAccounts: [],
+    activityLog: [],
+  };
   for (let month = 0; month < 12; month++) {
     data.months[month] = createEmptyMonthData();
   }
@@ -50,10 +57,12 @@ const normalizeFinanceData = (raw) => {
   }
 
   const sg = raw.savingsGoal && typeof raw.savingsGoal === 'object' ? raw.savingsGoal : {};
+  const rawLog = Array.isArray(raw.activityLog) ? raw.activityLog : [];
   return {
     months,
     savingsGoal: { ...initial.savingsGoal, ...sg },
     savingsAccounts: Array.isArray(raw.savingsAccounts) ? raw.savingsAccounts : [],
+    activityLog: rawLog.slice(-ACTIVITY_LOG_MAX),
   };
 };
 
@@ -137,6 +146,18 @@ export const useFinanceData = () => {
     });
   }, [saveData]);
 
+  const appendActivity = useCallback((prev, partial) => {
+    const entry = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+      at: new Date().toISOString(),
+      userId: user?.id ?? null,
+      userName: user?.name || (user?.email ? user.email.split('@')[0] : '') || 'Gość',
+      ...partial,
+    };
+    const log = Array.isArray(prev.activityLog) ? prev.activityLog : [];
+    return [...log, entry].slice(-ACTIVITY_LOG_MAX);
+  }, [user]);
+
   // ============ AUTO-PRZENOSZENIE STAŁYCH ============
   // Przy wejściu w miesiąc, dokopiuj brakujące stałe przychody/wydatki z poprzedniego miesiąca
   useEffect(() => {
@@ -184,27 +205,31 @@ export const useFinanceData = () => {
 
   // ============ CRUD DLA PRZYCHODÓW ============
   const addIncome = (name, amount, isFixed = false, date = '') => {
+    const amt = parseFloat(amount);
     updateData(prev => ({
       ...prev,
+      activityLog: appendActivity(prev, { action: 'add', kind: 'income', month: selectedMonth, label: name, amount: amt }),
       months: {
         ...prev.months,
         [selectedMonth]: {
           ...prev.months[selectedMonth],
-          incomes: [...prev.months[selectedMonth].incomes, { id: Date.now(), name, amount: parseFloat(amount), isFixed, date }]
+          incomes: [...prev.months[selectedMonth].incomes, { id: Date.now(), name, amount: amt, isFixed, date }]
         }
       }
     }));
   };
 
   const updateIncome = (id, name, amount, isFixed, date) => {
+    const amt = parseFloat(amount);
     updateData(prev => ({
       ...prev,
+      activityLog: appendActivity(prev, { action: 'update', kind: 'income', month: selectedMonth, label: name, amount: amt }),
       months: {
         ...prev.months,
         [selectedMonth]: {
           ...prev.months[selectedMonth],
           incomes: prev.months[selectedMonth].incomes.map(inc =>
-            inc.id === id ? { ...inc, name, amount: parseFloat(amount), isFixed, date } : inc
+            inc.id === id ? { ...inc, name, amount: amt, isFixed, date } : inc
           )
         }
       }
@@ -212,41 +237,55 @@ export const useFinanceData = () => {
   };
 
   const deleteIncome = (id) => {
-    updateData(prev => ({
-      ...prev,
-      months: {
-        ...prev.months,
-        [selectedMonth]: {
-          ...prev.months[selectedMonth],
-          incomes: prev.months[selectedMonth].incomes.filter(inc => inc.id !== id)
+    updateData(prev => {
+      const inc = prev.months[selectedMonth]?.incomes.find(i => i.id === id);
+      return {
+        ...prev,
+        activityLog: appendActivity(prev, {
+          action: 'delete',
+          kind: 'income',
+          month: selectedMonth,
+          label: inc?.name,
+          amount: inc?.amount,
+        }),
+        months: {
+          ...prev.months,
+          [selectedMonth]: {
+            ...prev.months[selectedMonth],
+            incomes: prev.months[selectedMonth].incomes.filter(i => i.id !== id)
+          }
         }
-      }
-    }));
+      };
+    });
   };
 
   // ============ CRUD DLA WYDATKÓW ============
   const addExpense = (name, amount, date, isFixed = false) => {
+    const amt = parseFloat(amount);
     updateData(prev => ({
       ...prev,
+      activityLog: appendActivity(prev, { action: 'add', kind: 'expense', month: selectedMonth, label: name, amount: amt }),
       months: {
         ...prev.months,
         [selectedMonth]: {
           ...prev.months[selectedMonth],
-          expenses: [...prev.months[selectedMonth].expenses, { id: Date.now(), name, amount: parseFloat(amount), date, isFixed }]
+          expenses: [...prev.months[selectedMonth].expenses, { id: Date.now(), name, amount: amt, date, isFixed }]
         }
       }
     }));
   };
 
   const updateExpense = (id, name, amount, date, isFixed) => {
+    const amt = parseFloat(amount);
     updateData(prev => ({
       ...prev,
+      activityLog: appendActivity(prev, { action: 'update', kind: 'expense', month: selectedMonth, label: name, amount: amt }),
       months: {
         ...prev.months,
         [selectedMonth]: {
           ...prev.months[selectedMonth],
           expenses: prev.months[selectedMonth].expenses.map(exp =>
-            exp.id === id ? { ...exp, name, amount: parseFloat(amount), date, isFixed } : exp
+            exp.id === id ? { ...exp, name, amount: amt, date, isFixed } : exp
           )
         }
       }
@@ -254,54 +293,88 @@ export const useFinanceData = () => {
   };
 
   const deleteExpense = (id) => {
-    updateData(prev => ({
-      ...prev,
-      months: {
-        ...prev.months,
-        [selectedMonth]: {
-          ...prev.months[selectedMonth],
-          expenses: prev.months[selectedMonth].expenses.filter(exp => exp.id !== id)
+    updateData(prev => {
+      const exp = prev.months[selectedMonth]?.expenses.find(e => e.id === id);
+      return {
+        ...prev,
+        activityLog: appendActivity(prev, {
+          action: 'delete',
+          kind: 'expense',
+          month: selectedMonth,
+          label: exp?.name,
+          amount: exp?.amount,
+        }),
+        months: {
+          ...prev.months,
+          [selectedMonth]: {
+            ...prev.months[selectedMonth],
+            expenses: prev.months[selectedMonth].expenses.filter(e => e.id !== id)
+          }
         }
-      }
-    }));
+      };
+    });
   };
 
   // ============ CEL OSZCZĘDNOŚCIOWY ============
   const updateSavingsGoal = (goalData) => {
     updateData(prev => ({
       ...prev,
+      activityLog: appendActivity(prev, { action: 'update', kind: 'savingsGoal', label: 'Cel oszczędnościowy' }),
       savingsGoal: { ...prev.savingsGoal, ...goalData }
     }));
   };
 
   const clearAllData = () => {
     const initialData = createInitialData();
+    const entry = {
+      id: `${Date.now()}-clear`,
+      at: new Date().toISOString(),
+      userId: user?.id ?? null,
+      userName: user?.name || (user?.email ? user.email.split('@')[0] : '') || 'Gość',
+      action: 'clear',
+      kind: 'all',
+      label: 'Wszystkie dane finansowe',
+    };
+    initialData.activityLog = [entry];
     setData(initialData);
     saveData(initialData);
   };
 
   // ============ CRUD DLA OSZCZĘDNOŚCI ============
   const addSavingsAccount = (name, amount, icon = 'bank') => {
+    const amt = parseFloat(amount);
     updateData(prev => ({
       ...prev,
-      savingsAccounts: [...prev.savingsAccounts, { id: Date.now(), name, amount: parseFloat(amount), icon }]
+      activityLog: appendActivity(prev, { action: 'add', kind: 'savings', label: name, amount: amt }),
+      savingsAccounts: [...prev.savingsAccounts, { id: Date.now(), name, amount: amt, icon }]
     }));
   };
 
   const updateSavingsAccount = (id, name, amount, icon) => {
+    const amt = parseFloat(amount);
     updateData(prev => ({
       ...prev,
+      activityLog: appendActivity(prev, { action: 'update', kind: 'savings', label: name, amount: amt }),
       savingsAccounts: prev.savingsAccounts.map(acc =>
-        acc.id === id ? { ...acc, name, amount: parseFloat(amount), icon } : acc
+        acc.id === id ? { ...acc, name, amount: amt, icon } : acc
       )
     }));
   };
 
   const deleteSavingsAccount = (id) => {
-    updateData(prev => ({
-      ...prev,
-      savingsAccounts: prev.savingsAccounts.filter(acc => acc.id !== id)
-    }));
+    updateData(prev => {
+      const acc = prev.savingsAccounts.find(a => a.id === id);
+      return {
+        ...prev,
+        activityLog: appendActivity(prev, {
+          action: 'delete',
+          kind: 'savings',
+          label: acc?.name,
+          amount: acc?.amount,
+        }),
+        savingsAccounts: prev.savingsAccounts.filter(a => a.id !== id)
+      };
+    });
   };
 
   // ============ OBLICZENIA ============
@@ -489,11 +562,17 @@ export const useFinanceData = () => {
     return { chartData, avgIncome, avgExpenses, avgBalance, hasData: monthsWithData > 0 };
   }, [data]);
 
+  const activityLog = useMemo(() => {
+    const log = Array.isArray(data.activityLog) ? [...data.activityLog] : [];
+    return log.sort((a, b) => new Date(b.at) - new Date(a.at));
+  }, [data.activityLog]);
+
   return {
     data, selectedMonth, setSelectedMonth, currentMonthData, totalIncome, totalExpenses, fixedExpenses, variableExpenses, balance,
     yearlySummary, monthlySummaries, addIncome, updateIncome, deleteIncome, addExpense, updateExpense, deleteExpense, clearAllData,
     financialRunway, forecastData, guiltFreeBurn, savingsGoal: data.savingsGoal, savingsGoalData, updateSavingsGoal,
     savingsAccounts: data.savingsAccounts, totalSavingsAccounts, addSavingsAccount, updateSavingsAccount, deleteSavingsAccount,
+    activityLog,
     MONTHS, MONTHS_SHORT, CURRENT_YEAR, getCurrentMonth, loading, saving
   };
 };

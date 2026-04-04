@@ -24,6 +24,7 @@ import { SavingsGoal } from "./SavingsGoal";
 import { SavingsAccounts } from "./SavingsAccounts";
 import { HouseholdMembers } from "./HouseholdMembers";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { ActivityHistory } from "./ActivityHistory";
 
 export const Dashboard = () => {
   const { user, signOut, isGuest } = useAuth();
@@ -60,6 +61,7 @@ export const Dashboard = () => {
     addSavingsAccount,
     updateSavingsAccount,
     deleteSavingsAccount,
+    activityLog,
     MONTHS,
     CURRENT_YEAR,
     getCurrentMonth,
@@ -311,6 +313,7 @@ export const Dashboard = () => {
           monthlySummaries={monthlySummaries}
           year={CURRENT_YEAR}
         />
+        <ActivityHistory entries={activityLog} MONTHS={MONTHS} />
       </main>
 
       {/* Footer */}

@@ -202,7 +202,16 @@ app.get('/api/finance', authMiddleware, async (c) => {
 
 app.put('/api/finance', authMiddleware, async (c) => {
   const user = c.get('user')
-  const body = await c.req.json()
+  let body
+  try {
+    body = await c.req.json()
+  } catch {
+    return c.json({ error: 'Invalid JSON body' }, 400)
+  }
+  if (!body || typeof body.data !== 'object' || body.data === null || Array.isArray(body.data)) {
+    return c.json({ error: 'Field "data" must be a JSON object' }, 400)
+  }
+
   const sql = getDb(c)
 
   const [membership] = await sql`
@@ -212,11 +221,23 @@ app.put('/api/finance', authMiddleware, async (c) => {
     return c.json({ error: 'No household' }, 400)
   }
 
-  await sql`
-    UPDATE finance_data
-    SET data = ${JSON.stringify(body.data)}::jsonb, updated_at = NOW()
-    WHERE household_id = ${membership.household_id}
-  `
+  let jsonPayload
+  try {
+    jsonPayload = JSON.stringify(body.data)
+  } catch {
+    return c.json({ error: 'Data is not serializable' }, 400)
+  }
+
+  try {
+    await sql`
+      UPDATE finance_data
+      SET data = ${jsonPayload}::jsonb, updated_at = NOW()
+      WHERE household_id = ${membership.household_id}
+    `
+  } catch (err) {
+    console.error('PUT /api/finance DB error:', err)
+    return c.json({ error: 'Failed to save finance data' }, 500)
+  }
   return c.json({ ok: true })
 })
 
