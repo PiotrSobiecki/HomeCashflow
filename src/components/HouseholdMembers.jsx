@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Users, Mail, Crown, UserPlus, Loader2, X, Check, UserMinus, LogOut, Trash2 } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { getApiUrl } from '../lib/api'
+import { ConfirmDialog } from './ConfirmDialog'
 
 export const HouseholdMembers = () => {
   const { user } = useAuth()
@@ -14,7 +15,8 @@ export const HouseholdMembers = () => {
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  /** 0 = zamknięte, 1 = pierwsze ostrzeżenie, 2 = ostateczne potwierdzenie */
+  const [householdDeleteStep, setHouseholdDeleteStep] = useState(0)
 
   const apiUrl = getApiUrl()
 
@@ -110,7 +112,7 @@ export const HouseholdMembers = () => {
   }
 
   const handleDeleteHousehold = async () => {
-    setShowDeleteConfirm(false)
+    setHouseholdDeleteStep(0)
     try {
       const res = await fetch(`${apiUrl}/api/household`, {
         method: 'DELETE',
@@ -228,7 +230,8 @@ export const HouseholdMembers = () => {
         )}
         {isOwner && (
           <button
-            onClick={() => setShowDeleteConfirm(true)}
+            type="button"
+            onClick={() => setHouseholdDeleteStep(1)}
             className="flex items-center gap-2 px-3 py-2 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 border border-slate-600 rounded-xl text-sm transition-all"
           >
             <Trash2 className="w-4 h-4" />
@@ -237,36 +240,35 @@ export const HouseholdMembers = () => {
         )}
       </div>
 
-      {/* Modal potwierdzenia usunięcia */}
-      {showDeleteConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowDeleteConfirm(false)}>
-          <div className="bg-slate-800 border border-slate-600 rounded-2xl p-6 max-w-md mx-4 shadow-2xl" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center gap-3 mb-4">
-              <div className="bg-rose-500/20 p-2.5 rounded-xl">
-                <Trash2 className="w-5 h-5 text-rose-400" />
-              </div>
-              <h4 className="text-lg font-semibold text-white">Usunąć gospodarstwo?</h4>
-            </div>
-            <p className="text-slate-300 text-sm mb-6">
-              Czy na pewno chcesz usunąć całe gospodarstwo? Wszyscy członkowie stracą dostęp do wspólnych danych finansowych. Tej operacji nie można cofnąć.
-            </p>
-            <div className="flex gap-3 justify-end">
-              <button
-                onClick={() => setShowDeleteConfirm(false)}
-                className="px-4 py-2.5 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-xl text-sm font-medium transition-all"
-              >
-                Anuluj
-              </button>
-              <button
-                onClick={handleDeleteHousehold}
-                className="px-4 py-2.5 bg-rose-500 hover:bg-rose-600 text-white rounded-xl text-sm font-medium transition-all"
-              >
-                Tak, usuń
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDialog
+        open={householdDeleteStep === 1}
+        onClose={() => setHouseholdDeleteStep(0)}
+        onConfirm={() => setHouseholdDeleteStep(2)}
+        title="Usunąć gospodarstwo?"
+        description={
+          'Zamierzasz usunąć całe gospodarstwo domowe.\n\n' +
+          'Wszyscy członkowie natychmiast stracą dostęp do wspólnych danych finansowych. Dane zostaną usunięte z serwera.\n\n' +
+          'W kolejnym kroku poprosimy Cię o ostateczne potwierdzenie — tej operacji nie można cofnąć.'
+        }
+        confirmLabel="Rozumiem, kontynuuj"
+        cancelLabel="Anuluj"
+        variant="warning"
+      />
+
+      <ConfirmDialog
+        open={householdDeleteStep === 2}
+        onClose={() => setHouseholdDeleteStep(0)}
+        onConfirm={handleDeleteHousehold}
+        title="Ostateczne potwierdzenie"
+        description={
+          'To ostatnia szansa na anulowanie.\n\n' +
+          'Po kliknięciu „Usuń bezpowrotnie” gospodarstwo zostanie skasowane wraz ze wszystkimi przychodami, wydatkami i ustawieniami. Ty i pozostali członkowie otrzymacie nowe, puste gospodarstwa.\n\n' +
+          'Tej operacji nie da się cofnąć.'
+        }
+        confirmLabel="Usuń bezpowrotnie"
+        cancelLabel="Anuluj"
+        variant="danger"
+      />
 
       {message && (
         <div className="mt-3 p-2.5 bg-emerald-500/20 border border-emerald-500/30 rounded-xl flex items-center gap-2">
