@@ -183,20 +183,20 @@ export const useFinanceData = () => {
   }, [selectedMonth, loading]);
 
   // ============ CRUD DLA PRZYCHODÓW ============
-  const addIncome = (name, amount, isFixed = false) => {
+  const addIncome = (name, amount, isFixed = false, date = '') => {
     updateData(prev => ({
       ...prev,
       months: {
         ...prev.months,
         [selectedMonth]: {
           ...prev.months[selectedMonth],
-          incomes: [...prev.months[selectedMonth].incomes, { id: Date.now(), name, amount: parseFloat(amount), isFixed }]
+          incomes: [...prev.months[selectedMonth].incomes, { id: Date.now(), name, amount: parseFloat(amount), isFixed, date }]
         }
       }
     }));
   };
 
-  const updateIncome = (id, name, amount, isFixed) => {
+  const updateIncome = (id, name, amount, isFixed, date) => {
     updateData(prev => ({
       ...prev,
       months: {
@@ -204,7 +204,7 @@ export const useFinanceData = () => {
         [selectedMonth]: {
           ...prev.months[selectedMonth],
           incomes: prev.months[selectedMonth].incomes.map(inc =>
-            inc.id === id ? { ...inc, name, amount: parseFloat(amount), isFixed } : inc
+            inc.id === id ? { ...inc, name, amount: parseFloat(amount), isFixed, date } : inc
           )
         }
       }

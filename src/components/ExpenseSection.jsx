@@ -17,7 +17,13 @@ export const ExpenseSection = ({ expenses, addExpense, updateExpense, deleteExpe
   const [editDate, setEditDate] = useState('');
   const [editIsFixed, setEditIsFixed] = useState(false);
 
-  const getDefaultDate = () => `${CURRENT_YEAR}-${String(selectedMonth + 1).padStart(2, '0')}-01`;
+  const getDefaultDate = () => {
+    const today = new Date();
+    const y = today.getFullYear();
+    const m = String(today.getMonth() + 1).padStart(2, '0');
+    const d = String(today.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  };
   const handleAdd = () => { if (newName.trim() && newAmount) { addExpense(newName.trim(), newAmount, newDate || getDefaultDate(), newIsFixed); setNewName(''); setNewAmount(''); setNewDate(''); setNewIsFixed(false); setIsAdding(false); } };
   const handleEdit = (expense) => { setEditingId(expense.id); setEditName(expense.name); setEditAmount(expense.amount.toString()); setEditDate(expense.date || ''); setEditIsFixed(expense.isFixed || false); };
   const handleSaveEdit = (id) => { if (editName.trim() && editAmount) { updateExpense(id, editName.trim(), editAmount, editDate, editIsFixed); setEditingId(null); } };
