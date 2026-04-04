@@ -9,6 +9,7 @@ import { SignJWT } from 'jose'
 const ENV = {
   DATABASE_URL: process.env.DATABASE_URL,
   NEXTAUTH_SECRET: process.env.NEXTAUTH_SECRET || 'test-secret',
+  FINANCE_DATA_KEY: process.env.FINANCE_DATA_KEY,
   GOOGLE_CLIENT_ID: 'test-client-id',
   GOOGLE_CLIENT_SECRET: 'test-client-secret',
   NEXTAUTH_URL: 'http://localhost:3000',

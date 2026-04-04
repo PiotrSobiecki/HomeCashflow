@@ -103,7 +103,7 @@ describe('PUT /api/finance', () => {
   })
 
   it('saves and retrieves finance data', async () => {
-    const { token } = await setupUserWithHousehold()
+    const { token, user } = await setupUserWithHousehold()
 
     const financeData = {
       months: { 0: { incomes: [{ id: 1, name: 'Pensja', amount: 5000 }], expenses: [] } },
@@ -129,5 +129,13 @@ describe('PUT /api/finance', () => {
     const body = await getRes.json()
     expect(body.data.months['0'].incomes[0].name).toBe('Pensja')
     expect(body.data.savingsGoal.type).toBe('monthly')
+
+    const [row] = await sql`
+      SELECT data FROM finance_data
+      JOIN household_members hm ON hm.household_id = finance_data.household_id
+      WHERE hm.user_id = ${user.id}
+    `
+    expect(String(row.data)).toMatch(/^ff1:/)
+    expect(String(row.data)).not.toContain('Pensja')
   })
 })

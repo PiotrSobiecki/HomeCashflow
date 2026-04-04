@@ -9,6 +9,7 @@ NEXTAUTH_URL = "https://api.homecashflow.org"
 # Secrets (set via `wrangler secret put`):
 # - DATABASE_URL
 # - NEXTAUTH_SECRET
+# - FINANCE_DATA_KEY (32 B hex lub Base64 — szyfrowanie finance_data)
 # - GOOGLE_CLIENT_ID
 # - GOOGLE_CLIENT_SECRET
 # - RESEND_API_KEY

@@ -2,7 +2,25 @@ import dotenv from 'dotenv'
 dotenv.config({ path: '../.env' })
 import { neon } from '@neondatabase/serverless'
 
-const sql = neon(process.env.DATABASE_URL)
+// Testy wymagają stałego klucza (32 B hex); w .env możesz nadpisać FINANCE_DATA_KEY.
+if (!process.env.FINANCE_DATA_KEY) {
+  process.env.FINANCE_DATA_KEY =
+    '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+}
+
+/** Lazy init — żeby suite bez DB (np. finance-crypto) nie padał przy złym DATABASE_URL w .env */
+let sqlSingleton = null
+function getTestSql() {
+  if (sqlSingleton) return sqlSingleton
+  const raw = process.env.DATABASE_URL?.trim() ?? ''
+  if (!/^postgres(ql)?:\/\//i.test(raw)) {
+    throw new Error(
+      '[vitest] DATABASE_URL musi zaczynać się od postgresql:// (bez komendy psql w tej samej linii).',
+    )
+  }
+  sqlSingleton = neon(raw)
+  return sqlSingleton
+}
 
 /**
  * Kasuje WSZYSTKIE wiersze w tabelach aplikacji (users, households, finance_data, …).
@@ -24,6 +42,7 @@ export async function cleanDb() {
     )
   }
 
+  const sql = getTestSql()
   await sql`DELETE FROM invitations`
   await sql`DELETE FROM finance_data`
   await sql`DELETE FROM household_members`

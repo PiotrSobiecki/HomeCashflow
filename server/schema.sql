@@ -26,11 +26,11 @@ CREATE TABLE IF NOT EXISTS household_members (
   PRIMARY KEY (household_id, user_id)
 );
 
--- Finance data (JSONB per household)
+-- Finance data per household: TEXT = zaszyfrowany blob (prefiks ff1:) albo legacy jawny JSON
 CREATE TABLE IF NOT EXISTS finance_data (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   household_id UUID NOT NULL UNIQUE REFERENCES households(id) ON DELETE CASCADE,
-  data JSONB NOT NULL DEFAULT '{}',
+  data TEXT NOT NULL DEFAULT '{}',
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 

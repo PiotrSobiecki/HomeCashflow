@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "node --watch src/index.js",
     "deploy": "wrangler deploy",
+    "migrate:finance-data-text": "node scripts/run-migration-001.js",
+    "migrate:finance-data-text:prod": "node scripts/run-migration-001.js --production",
     "test": "vitest run",
     "test:watch": "vitest"
   },

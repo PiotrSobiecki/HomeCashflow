@@ -2,6 +2,11 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { jwtVerify, SignJWT } from 'jose'
 import { neon } from '@neondatabase/serverless'
+import {
+  decodeFinanceDataKey,
+  encryptFinancePayload,
+  parseStoredFinanceData,
+} from './finance-crypto.js'
 
 export const app = new Hono()
 
@@ -26,6 +31,10 @@ function getSecret(c) {
 
 function getDb(c) {
   return neon(getEnv(c, 'DATABASE_URL'))
+}
+
+function getFinanceDataKey(c) {
+  return decodeFinanceDataKey(getEnv(c, 'FINANCE_DATA_KEY'))
 }
 
 function parseCookie(header, name) {
@@ -197,7 +206,13 @@ app.get('/api/finance', authMiddleware, async (c) => {
   const [fd] = await sql`
     SELECT data FROM finance_data WHERE household_id = ${membership.household_id}
   `
-  return c.json({ data: fd?.data || {} })
+  try {
+    const data = await parseStoredFinanceData(fd?.data, getFinanceDataKey(c))
+    return c.json({ data })
+  } catch (err) {
+    console.error('GET /api/finance decrypt/parse error:', err)
+    return c.json({ error: 'Failed to load finance data' }, 500)
+  }
 })
 
 app.put('/api/finance', authMiddleware, async (c) => {
@@ -221,6 +236,14 @@ app.put('/api/finance', authMiddleware, async (c) => {
     return c.json({ error: 'No household' }, 400)
   }
 
+  const rawKey = getFinanceDataKey(c)
+  if (!rawKey) {
+    return c.json(
+      { error: 'Server misconfiguration: set FINANCE_DATA_KEY (32-byte hex or Base64)' },
+      500,
+    )
+  }
+
   let jsonPayload
   try {
     jsonPayload = JSON.stringify(body.data)
@@ -228,10 +251,18 @@ app.put('/api/finance', authMiddleware, async (c) => {
     return c.json({ error: 'Data is not serializable' }, 400)
   }
 
+  let encryptedPayload
+  try {
+    encryptedPayload = await encryptFinancePayload(jsonPayload, rawKey)
+  } catch (err) {
+    console.error('PUT /api/finance encrypt error:', err)
+    return c.json({ error: 'Failed to encrypt finance data' }, 500)
+  }
+
   try {
     await sql`
       UPDATE finance_data
-      SET data = ${jsonPayload}::jsonb, updated_at = NOW()
+      SET data = ${encryptedPayload}, updated_at = NOW()
       WHERE household_id = ${membership.household_id}
     `
   } catch (err) {
