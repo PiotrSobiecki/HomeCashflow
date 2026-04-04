@@ -1,12 +1,35 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { Zap, Loader2, UserX } from "lucide-react";
+
+const AUTH_ERR_MESSAGES = {
+  oauth_redirect:
+    "Google odrzucił logowanie — adres zwrotny (redirect URI) nie zgadza się z konfiguracją. W Google Cloud Console dodaj dokładnie: https://api.homecashflow.org/api/auth/callback",
+  google_token:
+    "Google nie wymienił kodu na token (zwykle kod już został użyty albo sesja wygasła). Kliknij „Zaloguj przez Google” ponownie — bez odświeżania starego linku z Google.",
+  config_db: "Błąd konfiguracji serwera (połączenie z bazą).",
+  config_oauth: "Błąd konfiguracji Google OAuth po stronie serwera.",
+  profile: "Konto Google nie zwróciło wymaganego adresu e-mail.",
+  google_profile: "Nie udało się pobrać profilu z Google.",
+  unknown: "Logowanie nie powiodło się. Spróbuj ponownie.",
+};
 
 export const Auth = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   const { signInWithGoogle, continueAsGuest } = useAuth();
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const authErr = params.get("auth_err");
+    if (!authErr) return;
+    setError(AUTH_ERR_MESSAGES[authErr] ?? AUTH_ERR_MESSAGES.unknown);
+    params.delete("auth_err");
+    const qs = params.toString();
+    const next = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
+    window.history.replaceState({}, "", next);
+  }, []);
 
   const handleGoogleLogin = () => {
     setError("");

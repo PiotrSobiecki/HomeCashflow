@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
+import { HTTPException } from 'hono/http-exception'
 import { jwtVerify, SignJWT } from 'jose'
 import { neon } from '@neondatabase/serverless'
 import {
@@ -10,11 +11,36 @@ import {
 
 export const app = new Hono()
 
-// Env helper — czyta z c.env (Workers bindings) z fallbackiem na process.env (local dev)
-// c.env ma zawsze priorytet gdy jest ustawione (Workers runtime lub test bindings)
+app.onError((err, c) => {
+  console.error('[hono onError]', err)
+  if (err instanceof HTTPException) {
+    return err.getResponse()
+  }
+  const msg = err instanceof Error ? err.message : String(err)
+  return c.json({ error: 'Server error', detail: msg }, 500)
+})
+
+// Env: Workers — c.env.[key] (sekrety + vars); lokalnie process.env. Bez samego `in` (Edge czasem inaczej enumeruje bindings).
 function getEnv(c, key) {
-  if (c.env && typeof c.env === 'object' && key in c.env) return c.env[key]
-  return process.env[key]
+  let v = c?.env?.[key]
+  if (typeof v === 'string') v = v.trim()
+  if (v !== undefined && v !== null && v !== '') return v
+  let p = process.env[key]
+  if (typeof p === 'string') p = p.trim()
+  if (p !== undefined && p !== null && p !== '') return p
+  return undefined
+}
+
+/** Krótki kod do ?auth_err= na froncie (bez pełnej treści błędu w URL). */
+function authFailureCode(message) {
+  const m = String(message || '')
+  if (m.includes('redirect_uri must be exactly')) return 'oauth_redirect'
+  if (m.includes('Google token exchange failed')) return 'google_token'
+  if (m.includes('DATABASE_URL')) return 'config_db'
+  if (m.includes('GOOGLE_CLIENT')) return 'config_oauth'
+  if (m.includes('Google profile missing')) return 'profile'
+  if (m.includes('Google userinfo failed')) return 'google_profile'
+  return 'unknown'
 }
 
 app.use('/api/*', cors({
@@ -105,7 +131,13 @@ async function exchangeCodeForProfile(c, code) {
       grant_type: 'authorization_code',
     }),
   })
-  const tokens = await tokenRes.json()
+  const tokenBody = await tokenRes.text()
+  let tokens
+  try {
+    tokens = JSON.parse(tokenBody)
+  } catch {
+    throw new Error(`Google token response was not JSON: ${tokenBody.slice(0, 200)}`)
+  }
   if (!tokenRes.ok || tokens.error) {
     const hint = tokens.error_description || tokens.error || tokenRes.statusText
     throw new Error(`Google token exchange failed: ${hint} (redirect_uri must be exactly: ${redirectUri})`)
@@ -171,7 +203,7 @@ app.get('/api/auth/callback', async (c) => {
     const sql = getDb(c)
     const user = await upsertUserAndHousehold(sql, profile)
 
-    const token = await new SignJWT({ userId: user.id })
+    const token = await new SignJWT({ userId: String(user.id) })
       .setProtectedHeader({ alg: 'HS256' })
       .setExpirationTime('7d')
       .sign(getSecret(c))
@@ -199,7 +231,18 @@ app.get('/api/auth/callback', async (c) => {
   } catch (err) {
     console.error('[auth/callback]', err)
     const message = err instanceof Error ? err.message : String(err)
-    return c.json({ error: 'Auth failed', detail: message }, 500)
+    const code = authFailureCode(message)
+    const frontendUrl = String(getEnv(c, 'FRONTEND_URL') || 'http://localhost:5173').replace(/\/+$/, '')
+    const accept = c.req.header('Accept') || ''
+    // Przekierowanie z Google to nawigacja HTML — zwykle nie chcemy pokazywać surowego JSON.
+    if (accept.includes('text/html')) {
+      const u = new URL(frontendUrl)
+      u.searchParams.set('auth_err', code)
+      const inviteState = c.req.query('state')
+      if (inviteState) u.searchParams.set('invite', inviteState)
+      return c.redirect(u.toString(), 302)
+    }
+    return c.json({ error: 'Auth failed', detail: message, code }, 500)
   }
 })
 
