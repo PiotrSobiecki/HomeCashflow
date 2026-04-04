@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Trash2,
   Zap,
@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { useFinanceData } from "../hooks/useFinanceData";
 import { useAuth } from "../contexts/AuthContext";
+import { getApiUrl } from "../lib/api";
 import { SummaryCard } from "./SummaryCard";
 import { MonthSelector } from "./MonthSelector";
 import { IncomeSection } from "./IncomeSection";
@@ -28,6 +29,8 @@ export const Dashboard = () => {
   const { user, signOut, isGuest } = useAuth();
   /** 0 = zamknięte, 1 = pierwsze ostrzeżenie, 2 = ostateczne potwierdzenie (wyczyść wszystkie dane) */
   const [clearAllStep, setClearAllStep] = useState(0);
+  /** null = jeszcze nie wiadomo (zalogowany); tylko właściciel może czyścić wspólne dane w chmurze */
+  const [isHouseholdOwner, setIsHouseholdOwner] = useState(null);
   const {
     selectedMonth,
     setSelectedMonth,
@@ -63,6 +66,34 @@ export const Dashboard = () => {
     loading,
     saving,
   } = useFinanceData();
+
+  useEffect(() => {
+    if (isGuest || !user) {
+      setIsHouseholdOwner(false);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${getApiUrl()}/api/household`, {
+          credentials: "include",
+        });
+        if (!res.ok) {
+          if (!cancelled) setIsHouseholdOwner(false);
+          return;
+        }
+        const data = await res.json();
+        if (!cancelled) setIsHouseholdOwner(!!data.isOwner);
+      } catch {
+        if (!cancelled) setIsHouseholdOwner(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isGuest, user?.id]);
+
+  const showClearAllButton = isGuest || isHouseholdOwner === true;
 
   const handleSignOut = async () => {
     await signOut();
@@ -162,15 +193,17 @@ export const Dashboard = () => {
                 </span>
               </div>
 
-              {/* Reset */}
-              <button
-                type="button"
-                onClick={() => setClearAllStep(1)}
-                className="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-all"
-                title="Wyczyść wszystkie dane"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
+              {/* Reset — tylko gość (local) lub właściciel gospodarstwa (wspólne dane w chmurze) */}
+              {showClearAllButton && (
+                <button
+                  type="button"
+                  onClick={() => setClearAllStep(1)}
+                  className="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-all"
+                  title="Wyczyść wszystkie dane"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              )}
 
               {/* Logout */}
               <button

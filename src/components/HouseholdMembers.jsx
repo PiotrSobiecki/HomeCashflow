@@ -17,6 +17,7 @@ export const HouseholdMembers = () => {
   const [loading, setLoading] = useState(true)
   /** 0 = zamknięte, 1 = pierwsze ostrzeżenie, 2 = ostateczne potwierdzenie */
   const [householdDeleteStep, setHouseholdDeleteStep] = useState(0)
+  const [removeMemberTarget, setRemoveMemberTarget] = useState(null)
 
   const apiUrl = getApiUrl()
 
@@ -72,9 +73,10 @@ export const HouseholdMembers = () => {
     }
   }
 
-  const handleRemoveMember = async (memberId, memberName) => {
-    if (!confirm(`Czy na pewno chcesz usunąć ${memberName} z gospodarstwa?`)) return
-
+  const executeRemoveMember = async () => {
+    if (!removeMemberTarget) return
+    const { id: memberId, name: memberName } = removeMemberTarget
+    setRemoveMemberTarget(null)
     try {
       const res = await fetch(`${apiUrl}/api/household/members/${memberId}`, {
         method: 'DELETE',
@@ -167,7 +169,13 @@ export const HouseholdMembers = () => {
               {/* Owner can remove non-owner members */}
               {isOwner && member.id !== user?.id && (
                 <button
-                  onClick={() => handleRemoveMember(member.id, member.name || member.email)}
+                  type="button"
+                  onClick={() =>
+                    setRemoveMemberTarget({
+                      id: member.id,
+                      name: member.name || member.email,
+                    })
+                  }
                   className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-all"
                   title="Usuń z gospodarstwa"
                 >
@@ -266,6 +274,21 @@ export const HouseholdMembers = () => {
           'Tej operacji nie da się cofnąć.'
         }
         confirmLabel="Usuń bezpowrotnie"
+        cancelLabel="Anuluj"
+        variant="danger"
+      />
+
+      <ConfirmDialog
+        open={removeMemberTarget !== null}
+        onClose={() => setRemoveMemberTarget(null)}
+        onConfirm={executeRemoveMember}
+        title="Usunąć członka z gospodarstwa?"
+        description={
+          removeMemberTarget
+            ? `„${removeMemberTarget.name}” straci dostęp do tego gospodarstwa i otrzyma nowe, puste gospodarstwo. Wspólny budżet i dane pozostałych członków nie znikną. Tej operacji nie cofniesz z poziomu aplikacji.`
+            : ''
+        }
+        confirmLabel="Tak, usuń z gospodarstwa"
         cancelLabel="Anuluj"
         variant="danger"
       />
