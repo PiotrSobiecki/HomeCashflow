@@ -275,6 +275,39 @@ app.post('/api/household/invite', authMiddleware, async (c) => {
     RETURNING id, email, token, expires_at, created_at
   `
 
+  // Wyślij email z zaproszeniem przez Resend
+  const resendKey = getEnv(c, 'RESEND_API_KEY')
+  const frontendUrl = getEnv(c, 'FRONTEND_URL') || 'http://localhost:5173'
+  const inviteLink = `${frontendUrl}?invite=${token}`
+
+  if (resendKey) {
+    try {
+      await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${resendKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          from: 'HomeCashflow <noreply@homecashflow.org>',
+          to: [email],
+          subject: `${user.name || user.email} zaprasza Cię do wspólnego gospodarstwa`,
+          html: `
+            <div style="font-family: sans-serif; max-width: 500px; margin: 0 auto;">
+              <h2>Zaproszenie do HomeCashflow</h2>
+              <p><strong>${user.name || user.email}</strong> zaprasza Cię do wspólnego zarządzania budżetem domowym.</p>
+              <p><a href="${inviteLink}" style="display: inline-block; padding: 12px 24px; background: #6366f1; color: white; text-decoration: none; border-radius: 8px; font-weight: bold;">Dołącz do gospodarstwa</a></p>
+              <p style="color: #666; font-size: 14px;">Link ważny 7 dni. Po kliknięciu zaloguj się kontem Google z adresem <strong>${email}</strong>.</p>
+            </div>
+          `,
+        }),
+      })
+    } catch (err) {
+      console.error('Resend error:', err)
+      // Nie blokujemy — zaproszenie i tak jest w bazie, link dostępny w UI
+    }
+  }
+
   return c.json({ invitation })
 })
 
