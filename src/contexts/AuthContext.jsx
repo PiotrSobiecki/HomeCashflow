@@ -59,7 +59,10 @@ export const AuthProvider = ({ children }) => {
 
   const signInWithGoogle = () => {
     const apiUrl = getApiUrl()
-    window.location.href = `${apiUrl}/api/auth/google`
+    const params = new URLSearchParams(window.location.search)
+    const invite = params.get('invite')
+    const url = invite ? `${apiUrl}/api/auth/google?invite=${invite}` : `${apiUrl}/api/auth/google`
+    window.location.href = url
   }
 
   const continueAsGuest = () => {

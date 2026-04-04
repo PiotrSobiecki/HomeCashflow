@@ -96,6 +96,9 @@ app.get('/api/auth/google', (c) => {
   const redirectUri = `${getEnv(c, 'NEXTAUTH_URL') || 'http://localhost:3000'}/api/auth/callback`
   const scope = 'openid email profile'
 
+  // Przekaż invite token przez OAuth state parameter
+  const inviteToken = c.req.query('invite')
+
   const url = new URL('https://accounts.google.com/o/oauth2/v2/auth')
   url.searchParams.set('client_id', clientId)
   url.searchParams.set('redirect_uri', redirectUri)
@@ -103,6 +106,9 @@ app.get('/api/auth/google', (c) => {
   url.searchParams.set('scope', scope)
   url.searchParams.set('access_type', 'offline')
   url.searchParams.set('prompt', 'consent')
+  if (inviteToken) {
+    url.searchParams.set('state', inviteToken)
+  }
 
   return c.redirect(url.toString())
 })
@@ -124,10 +130,12 @@ app.get('/api/auth/callback', async (c) => {
       .sign(getSecret(c))
 
     const frontendUrl = getEnv(c, 'FRONTEND_URL') || 'http://localhost:5173'
+    const inviteState = c.req.query('state')
+    const redirectUrl = inviteState ? `${frontendUrl}?invite=${inviteState}` : frontendUrl
     return new Response(null, {
       status: 302,
       headers: {
-        Location: frontendUrl,
+        Location: redirectUrl,
         'Set-Cookie': `token=${token}; HttpOnly; Path=/; Max-Age=${7 * 24 * 60 * 60}; SameSite=Lax`,
       },
     })
