@@ -293,12 +293,54 @@ app.post('/api/household/invite', authMiddleware, async (c) => {
           to: [email],
           subject: `${user.name || user.email} zaprasza Cię do wspólnego gospodarstwa`,
           html: `
-            <div style="font-family: sans-serif; max-width: 500px; margin: 0 auto;">
-              <h2>Zaproszenie do HomeCashflow</h2>
-              <p><strong>${user.name || user.email}</strong> zaprasza Cię do wspólnego zarządzania budżetem domowym.</p>
-              <p><a href="${inviteLink}" style="display: inline-block; padding: 12px 24px; background: #6366f1; color: white; text-decoration: none; border-radius: 8px; font-weight: bold;">Dołącz do gospodarstwa</a></p>
-              <p style="color: #666; font-size: 14px;">Link ważny 7 dni. Po kliknięciu zaloguj się kontem Google z adresem <strong>${email}</strong>.</p>
-            </div>
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin: 0; padding: 0; background-color: #0f172a; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #0f172a; padding: 40px 20px;">
+    <tr><td align="center">
+      <table width="500" cellpadding="0" cellspacing="0" style="max-width: 500px; width: 100%;">
+        <!-- Logo -->
+        <tr><td align="center" style="padding-bottom: 32px;">
+          <table cellpadding="0" cellspacing="0"><tr>
+            <td style="background: linear-gradient(135deg, #6366f1, #9333ea); padding: 12px; border-radius: 16px;">
+              <span style="font-size: 24px; color: white;">⚡</span>
+            </td>
+            <td style="padding-left: 12px;">
+              <span style="font-size: 22px; font-weight: bold; color: white;">HomeCashflow</span>
+            </td>
+          </tr></table>
+        </td></tr>
+        <!-- Card -->
+        <tr><td style="background-color: #1e293b; border: 1px solid #334155; border-radius: 16px; padding: 40px 32px;">
+          <h1 style="margin: 0 0 8px; font-size: 24px; color: white; text-align: center;">Zaproszenie do gospodarstwa</h1>
+          <p style="margin: 0 0 24px; color: #94a3b8; text-align: center; font-size: 15px;">Wspólne zarządzanie budżetem domowym</p>
+          <div style="background-color: #0f172a; border: 1px solid #334155; border-radius: 12px; padding: 20px; margin-bottom: 24px;">
+            <p style="margin: 0 0 4px; color: #94a3b8; font-size: 13px;">Zaprasza:</p>
+            <p style="margin: 0; color: white; font-size: 16px; font-weight: 600;">${user.name || user.email}</p>
+          </div>
+          <p style="color: #cbd5e1; font-size: 15px; line-height: 1.6; margin: 0 0 28px;">
+            Zostałeś zaproszony do wspólnego gospodarstwa domowego. Dołącz, aby razem śledzić przychody, wydatki i oszczędności.
+          </p>
+          <table width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">
+            <a href="${inviteLink}" style="display: inline-block; padding: 14px 32px; background: linear-gradient(135deg, #6366f1, #8b5cf6); color: white; text-decoration: none; border-radius: 12px; font-weight: 600; font-size: 16px;">Dołącz do gospodarstwa</a>
+          </td></tr></table>
+          <div style="margin-top: 28px; padding-top: 20px; border-top: 1px solid #334155;">
+            <p style="margin: 0 0 8px; color: #64748b; font-size: 13px;">⚠️ Zaloguj się kontem Google z adresem:</p>
+            <p style="margin: 0; color: #818cf8; font-size: 14px; font-weight: 500;">${email}</p>
+            <p style="margin: 8px 0 0; color: #475569; font-size: 12px;">Link ważny 7 dni</p>
+          </div>
+        </td></tr>
+        <!-- Footer -->
+        <tr><td style="padding-top: 24px; text-align: center;">
+          <p style="margin: 0; color: #475569; font-size: 12px;">HomeCashflow — zarządzaj finansami inteligentnie</p>
+          <p style="margin: 4px 0 0; color: #334155; font-size: 11px;">Ten email został wysłany automatycznie. Nie odpowiadaj na niego.</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>
           `,
         }),
       })
