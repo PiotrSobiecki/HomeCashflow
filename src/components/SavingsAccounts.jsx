@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { PiggyBank, Plus, Pencil, Trash2, Check, X, Landmark, Wallet, TrendingUp } from 'lucide-react';
+import { ConfirmDialog } from './ConfirmDialog';
 
 const formatCurrency = (amount) => new Intl.NumberFormat('pl-PL', { style: 'currency', currency: 'PLN', minimumFractionDigits: 2 }).format(amount);
 
@@ -26,6 +27,7 @@ export const SavingsAccounts = ({ accounts, totalSavings, addAccount, updateAcco
   const [editName, setEditName] = useState('');
   const [editAmount, setEditAmount] = useState('');
   const [editIcon, setEditIcon] = useState('bank');
+  const [deleteTarget, setDeleteTarget] = useState(null);
 
   const handleAdd = () => {
     if (newName.trim() && newAmount) {
@@ -142,7 +144,7 @@ export const SavingsAccounts = ({ accounts, totalSavings, addAccount, updateAcco
                     <span className="text-indigo-400 font-semibold">{formatCurrency(acc.amount)}</span>
                     <div className="flex gap-1">
                       <button onClick={() => handleEdit(acc)} className="p-2 text-slate-400 hover:text-white hover:bg-slate-600 rounded-lg transition-all"><Pencil className="w-4 h-4" /></button>
-                      <button onClick={() => deleteAccount(acc.id)} className="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-500/20 rounded-lg transition-all"><Trash2 className="w-4 h-4" /></button>
+                      <button type="button" onClick={() => setDeleteTarget({ id: acc.id, name: acc.name, amountLabel: formatCurrency(acc.amount) })} className="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-500/20 rounded-lg transition-all"><Trash2 className="w-4 h-4" /></button>
                     </div>
                   </div>
                 </>
@@ -151,6 +153,24 @@ export const SavingsAccounts = ({ accounts, totalSavings, addAccount, updateAcco
           );
         })}
       </div>
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => {
+          if (deleteTarget) deleteAccount(deleteTarget.id);
+          setDeleteTarget(null);
+        }}
+        title="Usunąć źródło oszczędności?"
+        description={
+          deleteTarget
+            ? `Wpis „${deleteTarget.name}” (${deleteTarget.amountLabel}) zostanie trwale usunięty z listy oszczędności. Tej operacji nie można cofnąć.`
+            : ''
+        }
+        confirmLabel="Tak, usuń"
+        cancelLabel="Anuluj"
+        variant="danger"
+      />
     </div>
   );
 };

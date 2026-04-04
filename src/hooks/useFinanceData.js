@@ -275,11 +275,9 @@ export const useFinanceData = () => {
   };
 
   const clearAllData = () => {
-    if (confirm('Czy na pewno chcesz usunąć wszystkie dane?')) {
-      const initialData = createInitialData();
-      setData(initialData);
-      saveData(initialData);
-    }
+    const initialData = createInitialData();
+    setData(initialData);
+    saveData(initialData);
   };
 
   // ============ CRUD DLA OSZCZĘDNOŚCI ============

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   Trash2,
   Zap,
@@ -21,9 +22,12 @@ import { GuiltFreeBurn } from "./GuiltFreeBurn";
 import { SavingsGoal } from "./SavingsGoal";
 import { SavingsAccounts } from "./SavingsAccounts";
 import { HouseholdMembers } from "./HouseholdMembers";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 export const Dashboard = () => {
   const { user, signOut, isGuest } = useAuth();
+  /** 0 = zamknięte, 1 = pierwsze ostrzeżenie, 2 = ostateczne potwierdzenie (wyczyść wszystkie dane) */
+  const [clearAllStep, setClearAllStep] = useState(0);
   const {
     selectedMonth,
     setSelectedMonth,
@@ -62,6 +66,11 @@ export const Dashboard = () => {
 
   const handleSignOut = async () => {
     await signOut();
+  };
+
+  const handleClearAllFinal = () => {
+    setClearAllStep(0);
+    clearAllData();
   };
 
   if (loading) {
@@ -155,7 +164,8 @@ export const Dashboard = () => {
 
               {/* Reset */}
               <button
-                onClick={clearAllData}
+                type="button"
+                onClick={() => setClearAllStep(1)}
                 className="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-all"
                 title="Wyczyść wszystkie dane"
               >
@@ -177,6 +187,37 @@ export const Dashboard = () => {
           </div>
         </div>
       </header>
+
+      <ConfirmDialog
+        open={clearAllStep === 1}
+        onClose={() => setClearAllStep(0)}
+        onConfirm={() => setClearAllStep(2)}
+        title="Wyczyścić wszystkie dane finansowe?"
+        description={
+          "Zostaną usunięte wszystkie przychody, wydatki, cele oszczędnościowe, wpisy w sekcji Moje oszczędności oraz dane we wszystkich miesiącach. Widoki i podsumowania wrócą do stanu początkowego.\n\n" +
+          (isGuest
+            ? "Dane zostaną skasowane tylko w tej przeglądarce (localStorage)."
+            : "Zmiana zapisze się w chmurze — wszyscy członkowie gospodarstwa stracą te wpisy w udostępnionym budżecie.") +
+          "\n\nW kolejnym kroku poprosimy o ostateczne potwierdzenie. Tej operacji nie można cofnąć z poziomu aplikacji."
+        }
+        confirmLabel="Rozumiem, kontynuuj"
+        cancelLabel="Anuluj"
+        variant="warning"
+      />
+
+      <ConfirmDialog
+        open={clearAllStep === 2}
+        onClose={() => setClearAllStep(0)}
+        onConfirm={handleClearAllFinal}
+        title="Ostateczne potwierdzenie"
+        description={
+          "To ostatnia szansa na anulowanie.\n\n" +
+          "Po kliknięciu „Wyczyść bezpowrotnie” wszystkie powyższe dane znikną. Nie ma w aplikacji kosza ani przywracania — chyba że masz własną kopię zapasową."
+        }
+        confirmLabel="Wyczyść bezpowrotnie"
+        cancelLabel="Anuluj"
+        variant="danger"
+      />
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
