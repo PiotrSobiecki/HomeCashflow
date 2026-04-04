@@ -18,6 +18,7 @@ export const HouseholdMembers = () => {
   /** 0 = zamknięte, 1 = pierwsze ostrzeżenie, 2 = ostateczne potwierdzenie */
   const [householdDeleteStep, setHouseholdDeleteStep] = useState(0)
   const [removeMemberTarget, setRemoveMemberTarget] = useState(null)
+  const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false)
 
   const apiUrl = getApiUrl()
 
@@ -94,9 +95,8 @@ export const HouseholdMembers = () => {
     }
   }
 
-  const handleLeave = async () => {
-    if (!confirm('Czy na pewno chcesz opuścić to gospodarstwo? Otrzymasz nowe, puste gospodarstwo.')) return
-
+  const executeLeaveHousehold = async () => {
+    setLeaveConfirmOpen(false)
     try {
       const res = await fetch(`${apiUrl}/api/household/leave`, {
         method: 'POST',
@@ -229,7 +229,8 @@ export const HouseholdMembers = () => {
       <div className="flex gap-2">
         {!isOwner && members.length > 1 && (
           <button
-            onClick={handleLeave}
+            type="button"
+            onClick={() => setLeaveConfirmOpen(true)}
             className="flex items-center gap-2 px-3 py-2 text-slate-400 hover:text-amber-400 hover:bg-amber-500/10 border border-slate-600 rounded-xl text-sm transition-all"
           >
             <LogOut className="w-4 h-4" />
@@ -276,6 +277,20 @@ export const HouseholdMembers = () => {
         confirmLabel="Usuń bezpowrotnie"
         cancelLabel="Anuluj"
         variant="danger"
+      />
+
+      <ConfirmDialog
+        open={leaveConfirmOpen}
+        onClose={() => setLeaveConfirmOpen(false)}
+        onConfirm={executeLeaveHousehold}
+        title="Opuścić gospodarstwo?"
+        description={
+          'Stracisz dostęp do wspólnego budżetu tego gospodarstwa. Otrzymasz nowe, puste gospodarstwo tylko dla siebie.\n\n' +
+          'Pozostali członkowie zachowają dostęp do dotychczasowych danych. Do tego gospodarstwa nie wrócisz bez nowego zaproszenia od właściciela.'
+        }
+        confirmLabel="Tak, opuszczam"
+        cancelLabel="Anuluj"
+        variant="warning"
       />
 
       <ConfirmDialog
