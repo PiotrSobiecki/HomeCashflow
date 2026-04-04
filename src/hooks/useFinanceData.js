@@ -97,9 +97,6 @@ export const useFinanceData = () => {
           const normalized = normalizeFinanceData(
             payload && typeof payload === 'object' ? payload : null
           );
-          if (!hasPersistedMonthShape(payload)) {
-            await saveFinanceDataOnServer(normalized);
-          }
           setData(normalized);
         }
       } catch (err) {
