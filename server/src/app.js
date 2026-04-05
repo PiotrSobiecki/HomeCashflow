@@ -1,82 +1,89 @@
-import { Hono } from 'hono'
-import { cors } from 'hono/cors'
-import { HTTPException } from 'hono/http-exception'
-import { jwtVerify, SignJWT } from 'jose'
-import { neon } from '@neondatabase/serverless'
+import { Hono } from "hono";
+import { cors } from "hono/cors";
+import { HTTPException } from "hono/http-exception";
+import { jwtVerify, SignJWT } from "jose";
+import { neon } from "@neondatabase/serverless";
 import {
   decodeFinanceDataKey,
   encryptFinancePayload,
   parseStoredFinanceData,
-} from './finance-crypto.js'
+} from "./finance-crypto.js";
 
-export const app = new Hono()
+export const app = new Hono();
 
 app.onError((err, c) => {
-  console.error('[hono onError]', err)
+  console.error("[hono onError]", err);
   if (err instanceof HTTPException) {
-    return err.getResponse()
+    return err.getResponse();
   }
-  const msg = err instanceof Error ? err.message : String(err)
-  return c.json({ error: 'Server error', detail: msg }, 500)
-})
+  const msg = err instanceof Error ? err.message : String(err);
+  return c.json({ error: "Server error", detail: msg }, 500);
+});
 
 // Env: Workers — c.env.[key] (sekrety + vars); lokalnie process.env. Bez samego `in` (Edge czasem inaczej enumeruje bindings).
 function getEnv(c, key) {
-  let v = c?.env?.[key]
-  if (typeof v === 'string') v = v.trim()
-  if (v !== undefined && v !== null && v !== '') return v
-  let p = process.env[key]
-  if (typeof p === 'string') p = p.trim()
-  if (p !== undefined && p !== null && p !== '') return p
-  return undefined
+  let v = c?.env?.[key];
+  if (typeof v === "string") v = v.trim();
+  if (v !== undefined && v !== null && v !== "") return v;
+  let p = process.env[key];
+  if (typeof p === "string") p = p.trim();
+  if (p !== undefined && p !== null && p !== "") return p;
+  return undefined;
 }
 
 /** Krótki kod do ?auth_err= na froncie (bez pełnej treści błędu w URL). */
 function authFailureCode(message) {
-  const m = String(message || '')
-  if (m.includes('redirect_uri must be exactly')) return 'oauth_redirect'
-  if (m.includes('Google token exchange failed')) return 'google_token'
-  if (m.includes('DATABASE_URL')) return 'config_db'
-  if (m.includes('GOOGLE_CLIENT')) return 'config_oauth'
-  if (m.includes('Google profile missing')) return 'profile'
-  if (m.includes('Google userinfo failed')) return 'google_profile'
-  return 'unknown'
+  const m = String(message || "");
+  if (m.includes("redirect_uri must be exactly")) return "oauth_redirect";
+  if (m.includes("Google token exchange failed")) return "google_token";
+  if (m.includes("DATABASE_URL")) return "config_db";
+  if (m.includes("GOOGLE_CLIENT")) return "config_oauth";
+  if (m.includes("Google profile missing")) return "profile";
+  if (m.includes("Google userinfo failed")) return "google_profile";
+  return "unknown";
 }
 
-app.use('/api/*', cors({
-  origin: (origin, c) => {
-    const allowed = getEnv(c, 'FRONTEND_URL') || 'http://localhost:5173'
-    return origin === allowed ? origin : null
-  },
-  credentials: true,
-}))
+app.use(
+  "/api/*",
+  cors({
+    origin: (origin, c) => {
+      const allowed = getEnv(c, "FRONTEND_URL") || "http://localhost:5173";
+      return origin === allowed ? origin : null;
+    },
+    credentials: true,
+  }),
+);
 
 function getSecret(c) {
-  return new TextEncoder().encode(getEnv(c, 'NEXTAUTH_SECRET') || 'test-secret')
+  return new TextEncoder().encode(
+    getEnv(c, "NEXTAUTH_SECRET") || "test-secret",
+  );
 }
 
 function getDb(c) {
-  const url = getEnv(c, 'DATABASE_URL')?.trim()
+  const url = getEnv(c, "DATABASE_URL")?.trim();
   if (!url || !/^postgres(ql)?:\/\//i.test(url)) {
-    throw new Error('DATABASE_URL is missing or invalid (expected postgresql://…)')
+    throw new Error(
+      "DATABASE_URL is missing or invalid (expected postgresql://…)",
+    );
   }
-  return neon(url)
+  return neon(url);
 }
 
 /** Bazowy URL API bez końcowego slasha — musi się zgadzać z redirect URI w Google Cloud. */
 function getApiBaseUrl(c) {
-  const raw = getEnv(c, 'NEXTAUTH_URL') || 'http://localhost:3000'
-  return String(raw).replace(/\/+$/, '')
+  const raw = getEnv(c, "NEXTAUTH_URL") || "http://localhost:3000";
+  return String(raw).replace(/\/+$/, "");
 }
 
 function getFinanceDataKey(c) {
-  return decodeFinanceDataKey(getEnv(c, 'FINANCE_DATA_KEY'))
+  return decodeFinanceDataKey(getEnv(c, "FINANCE_DATA_KEY"));
 }
 
 function parseCookie(header, name) {
-  if (!header) return null
-  const match = header.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`))
-  return match ? match[1] : null
+  if (!header) return null;
+  const match = header.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
+  return match ? match[1] : null;
 }
 
 export async function upsertUserAndHousehold(sql, profile) {
@@ -89,267 +96,293 @@ export async function upsertUserAndHousehold(sql, profile) {
       name = EXCLUDED.name,
       avatar_url = EXCLUDED.avatar_url
     RETURNING *
-  `
+  `;
 
   // Check if user already has a household (as owner or member)
   const [existing] = await sql`
     SELECT household_id FROM household_members WHERE user_id = ${user.id}
-  `
+  `;
 
   if (!existing) {
     // Create household + membership + finance_data
     const [household] = await sql`
       INSERT INTO households (owner_id) VALUES (${user.id}) RETURNING *
-    `
+    `;
     await sql`
       INSERT INTO household_members (household_id, user_id) VALUES (${household.id}, ${user.id})
-    `
+    `;
     await sql`
       INSERT INTO finance_data (household_id) VALUES (${household.id})
-    `
+    `;
   }
 
-  return user
+  return user;
 }
 
 async function exchangeCodeForProfile(c, code) {
-  const redirectUri = `${getApiBaseUrl(c)}/api/auth/callback`
-  const clientId = getEnv(c, 'GOOGLE_CLIENT_ID')
-  const clientSecret = getEnv(c, 'GOOGLE_CLIENT_SECRET')
+  const redirectUri = `${getApiBaseUrl(c)}/api/auth/callback`;
+  const clientId = getEnv(c, "GOOGLE_CLIENT_ID");
+  const clientSecret = getEnv(c, "GOOGLE_CLIENT_SECRET");
   if (!clientId || !clientSecret) {
-    throw new Error('GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET is not configured')
+    throw new Error(
+      "GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET is not configured",
+    );
   }
 
-  const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
       code,
       client_id: clientId,
       client_secret: clientSecret,
       redirect_uri: redirectUri,
-      grant_type: 'authorization_code',
+      grant_type: "authorization_code",
     }),
-  })
-  const tokenBody = await tokenRes.text()
-  let tokens
+  });
+  const tokenBody = await tokenRes.text();
+  let tokens;
   try {
-    tokens = JSON.parse(tokenBody)
+    tokens = JSON.parse(tokenBody);
   } catch {
-    throw new Error(`Google token response was not JSON: ${tokenBody.slice(0, 200)}`)
+    throw new Error(
+      `Google token response was not JSON: ${tokenBody.slice(0, 200)}`,
+    );
   }
   if (!tokenRes.ok || tokens.error) {
-    const hint = tokens.error_description || tokens.error || tokenRes.statusText
-    throw new Error(`Google token exchange failed: ${hint} (redirect_uri must be exactly: ${redirectUri})`)
+    const hint =
+      tokens.error_description || tokens.error || tokenRes.statusText;
+    throw new Error(
+      `Google token exchange failed: ${hint} (redirect_uri must be exactly: ${redirectUri})`,
+    );
   }
   if (!tokens.access_token) {
-    throw new Error('Google token response had no access_token')
+    throw new Error("Google token response had no access_token");
   }
 
-  const profileRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-    headers: { Authorization: `Bearer ${tokens.access_token}` },
-  })
-  const profile = await profileRes.json()
+  const profileRes = await fetch(
+    "https://www.googleapis.com/oauth2/v3/userinfo",
+    {
+      headers: { Authorization: `Bearer ${tokens.access_token}` },
+    },
+  );
+  const profile = await profileRes.json();
   if (!profileRes.ok || profile.error) {
-    throw new Error(`Google userinfo failed: ${profile.error || profileRes.statusText}`)
+    throw new Error(
+      `Google userinfo failed: ${profile.error || profileRes.statusText}`,
+    );
   }
   if (!profile.sub || !profile.email) {
-    throw new Error('Google profile missing sub or email')
+    throw new Error("Google profile missing sub or email");
   }
-  return profile
+  return profile;
 }
 
-app.get('/api/auth/google', (c) => {
-  const clientId = getEnv(c, 'GOOGLE_CLIENT_ID')
-  const redirectUri = `${getApiBaseUrl(c)}/api/auth/callback`
-  const scope = 'openid email profile'
+app.get("/api/auth/google", (c) => {
+  const clientId = getEnv(c, "GOOGLE_CLIENT_ID");
+  const redirectUri = `${getApiBaseUrl(c)}/api/auth/callback`;
+  const scope = "openid email profile";
 
   // Przekaż invite token przez OAuth state parameter
-  const inviteToken = c.req.query('invite')
+  const inviteToken = c.req.query("invite");
 
-  const url = new URL('https://accounts.google.com/o/oauth2/v2/auth')
-  url.searchParams.set('client_id', clientId)
-  url.searchParams.set('redirect_uri', redirectUri)
-  url.searchParams.set('response_type', 'code')
-  url.searchParams.set('scope', scope)
-  url.searchParams.set('access_type', 'offline')
-  url.searchParams.set('prompt', 'consent')
+  const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+  url.searchParams.set("client_id", clientId);
+  url.searchParams.set("redirect_uri", redirectUri);
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("scope", scope);
+  url.searchParams.set("access_type", "offline");
+  url.searchParams.set("prompt", "consent");
   if (inviteToken) {
-    url.searchParams.set('state', inviteToken)
+    url.searchParams.set("state", inviteToken);
   }
 
-  return c.redirect(url.toString())
-})
+  return c.redirect(url.toString());
+});
 
-app.get('/api/auth/callback', async (c) => {
-  const oauthErr = c.req.query('error')
+app.get("/api/auth/callback", async (c) => {
+  const oauthErr = c.req.query("error");
   if (oauthErr) {
     return c.json(
       {
-        error: 'OAuth error',
-        detail: c.req.query('error_description') || oauthErr,
+        error: "OAuth error",
+        detail: c.req.query("error_description") || oauthErr,
       },
       400,
-    )
+    );
   }
 
-  const code = c.req.query('code')
+  const code = c.req.query("code");
   if (!code) {
-    return c.json({ error: 'Missing code' }, 400)
+    return c.json({ error: "Missing code" }, 400);
   }
 
   try {
-    const profile = await exchangeCodeForProfile(c, code)
-    const sql = getDb(c)
-    const user = await upsertUserAndHousehold(sql, profile)
+    const profile = await exchangeCodeForProfile(c, code);
+    const sql = getDb(c);
+    const user = await upsertUserAndHousehold(sql, profile);
 
     const token = await new SignJWT({ userId: String(user.id) })
-      .setProtectedHeader({ alg: 'HS256' })
-      .setExpirationTime('7d')
-      .sign(getSecret(c))
+      .setProtectedHeader({ alg: "HS256" })
+      .setExpirationTime("7d")
+      .sign(getSecret(c));
 
-    const frontendUrl = String(getEnv(c, 'FRONTEND_URL') || 'http://localhost:5173').replace(/\/+$/, '')
-    const inviteState = c.req.query('state')
-    const redirectUrl = inviteState ? `${frontendUrl}?invite=${inviteState}` : frontendUrl
+    const frontendUrl = String(
+      getEnv(c, "FRONTEND_URL") || "http://localhost:5173",
+    ).replace(/\/+$/, "");
+    const inviteState = c.req.query("state");
+    const redirectUrl = inviteState
+      ? `${frontendUrl}?invite=${inviteState}`
+      : frontendUrl;
     const cookieParts = [
       `token=${token}`,
-      'HttpOnly',
-      'Path=/',
+      "HttpOnly",
+      "Path=/",
       `Max-Age=${7 * 24 * 60 * 60}`,
-      'SameSite=Lax',
-    ]
-    if (getApiBaseUrl(c).startsWith('https://')) {
-      cookieParts.push('Secure')
+      "SameSite=Lax",
+    ];
+    if (getApiBaseUrl(c).startsWith("https://")) {
+      cookieParts.push("Secure");
     }
     return new Response(null, {
       status: 302,
       headers: {
         Location: redirectUrl,
-        'Set-Cookie': cookieParts.join('; '),
+        "Set-Cookie": cookieParts.join("; "),
       },
-    })
+    });
   } catch (err) {
-    console.error('[auth/callback]', err)
-    const message = err instanceof Error ? err.message : String(err)
-    const code = authFailureCode(message)
-    const frontendUrl = String(getEnv(c, 'FRONTEND_URL') || 'http://localhost:5173').replace(/\/+$/, '')
-    const accept = c.req.header('Accept') || ''
+    console.error("[auth/callback]", err);
+    const message = err instanceof Error ? err.message : String(err);
+    const code = authFailureCode(message);
+    const frontendUrl = String(
+      getEnv(c, "FRONTEND_URL") || "http://localhost:5173",
+    ).replace(/\/+$/, "");
+    const accept = c.req.header("Accept") || "";
     // Przekierowanie z Google to nawigacja HTML — zwykle nie chcemy pokazywać surowego JSON.
-    if (accept.includes('text/html')) {
-      const u = new URL(frontendUrl)
-      u.searchParams.set('auth_err', code)
-      const inviteState = c.req.query('state')
-      if (inviteState) u.searchParams.set('invite', inviteState)
-      return c.redirect(u.toString(), 302)
+    if (accept.includes("text/html")) {
+      const u = new URL(frontendUrl);
+      u.searchParams.set("auth_err", code);
+      const inviteState = c.req.query("state");
+      if (inviteState) u.searchParams.set("invite", inviteState);
+      return c.redirect(u.toString(), 302);
     }
-    return c.json({ error: 'Auth failed', detail: message, code }, 500)
+    return c.json({ error: "Auth failed", detail: message, code }, 500);
   }
-})
+});
 
-app.post('/api/auth/logout', (c) => {
+app.post("/api/auth/logout", (c) => {
   return new Response(JSON.stringify({ ok: true }), {
     status: 200,
     headers: {
-      'Content-Type': 'application/json',
-      'Set-Cookie': 'token=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax',
+      "Content-Type": "application/json",
+      "Set-Cookie": "token=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax",
     },
-  })
-})
+  });
+});
 
 // Auth middleware - extracts user from JWT, sets c.user
 async function authMiddleware(c, next) {
-  const token = parseCookie(c.req.header('cookie'), 'token')
+  const token = parseCookie(c.req.header("cookie"), "token");
   if (!token) {
-    return c.json({ error: 'Unauthorized' }, 401)
+    return c.json({ error: "Unauthorized" }, 401);
   }
 
   try {
-    const { payload } = await jwtVerify(token, getSecret(c))
-    const sql = getDb(c)
+    const { payload } = await jwtVerify(token, getSecret(c));
+    const sql = getDb(c);
     const [user] = await sql`
       SELECT id, email, name, avatar_url FROM users WHERE id = ${payload.userId}
-    `
+    `;
     if (!user) {
-      return c.json({ error: 'Unauthorized' }, 401)
+      return c.json({ error: "Unauthorized" }, 401);
     }
-    c.set('user', user)
-    await next()
+    c.set("user", user);
+    await next();
   } catch {
-    return c.json({ error: 'Unauthorized' }, 401)
+    return c.json({ error: "Unauthorized" }, 401);
   }
 }
 
-app.get('/api/auth/me', authMiddleware, (c) => {
-  return c.json({ user: c.get('user') })
-})
+app.get("/api/auth/me", authMiddleware, (c) => {
+  return c.json({ user: c.get("user") });
+});
 
 // ============ FINANCE ENDPOINTS ============
 
-app.get('/api/finance', authMiddleware, async (c) => {
-  const user = c.get('user')
-  const sql = getDb(c)
+app.get("/api/finance", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
 
   const [membership] = await sql`
     SELECT household_id FROM household_members WHERE user_id = ${user.id}
-  `
+  `;
   if (!membership) {
-    return c.json({ data: {} })
+    return c.json({ data: {} });
   }
 
   const [fd] = await sql`
     SELECT data FROM finance_data WHERE household_id = ${membership.household_id}
-  `
+  `;
   try {
-    const data = await parseStoredFinanceData(fd?.data, getFinanceDataKey(c))
-    return c.json({ data })
+    const data = await parseStoredFinanceData(fd?.data, getFinanceDataKey(c));
+    return c.json({ data });
   } catch (err) {
-    console.error('GET /api/finance decrypt/parse error:', err)
-    return c.json({ error: 'Failed to load finance data' }, 500)
+    console.error("GET /api/finance decrypt/parse error:", err);
+    return c.json({ error: "Failed to load finance data" }, 500);
   }
-})
+});
 
-app.put('/api/finance', authMiddleware, async (c) => {
-  const user = c.get('user')
-  let body
+app.put("/api/finance", authMiddleware, async (c) => {
+  const user = c.get("user");
+  let body;
   try {
-    body = await c.req.json()
+    body = await c.req.json();
   } catch {
-    return c.json({ error: 'Invalid JSON body' }, 400)
+    return c.json({ error: "Invalid JSON body" }, 400);
   }
-  if (!body || typeof body.data !== 'object' || body.data === null || Array.isArray(body.data)) {
-    return c.json({ error: 'Field "data" must be a JSON object' }, 400)
+  if (
+    !body ||
+    typeof body.data !== "object" ||
+    body.data === null ||
+    Array.isArray(body.data)
+  ) {
+    return c.json({ error: 'Field "data" must be a JSON object' }, 400);
   }
 
-  const sql = getDb(c)
+  const sql = getDb(c);
 
   const [membership] = await sql`
     SELECT household_id FROM household_members WHERE user_id = ${user.id}
-  `
+  `;
   if (!membership) {
-    return c.json({ error: 'No household' }, 400)
+    return c.json({ error: "No household" }, 400);
   }
 
-  const rawKey = getFinanceDataKey(c)
+  const rawKey = getFinanceDataKey(c);
   if (!rawKey) {
     return c.json(
-      { error: 'Server misconfiguration: set FINANCE_DATA_KEY (32-byte hex or Base64)' },
+      {
+        error:
+          "Server misconfiguration: set FINANCE_DATA_KEY (32-byte hex or Base64)",
+      },
       500,
-    )
+    );
   }
 
-  let jsonPayload
+  let jsonPayload;
   try {
-    jsonPayload = JSON.stringify(body.data)
+    jsonPayload = JSON.stringify(body.data);
   } catch {
-    return c.json({ error: 'Data is not serializable' }, 400)
+    return c.json({ error: "Data is not serializable" }, 400);
   }
 
-  let encryptedPayload
+  let encryptedPayload;
   try {
-    encryptedPayload = await encryptFinancePayload(jsonPayload, rawKey)
+    encryptedPayload = await encryptFinancePayload(jsonPayload, rawKey);
   } catch (err) {
-    console.error('PUT /api/finance encrypt error:', err)
-    return c.json({ error: 'Failed to encrypt finance data' }, 500)
+    console.error("PUT /api/finance encrypt error:", err);
+    return c.json({ error: "Failed to encrypt finance data" }, 500);
   }
 
   try {
@@ -357,30 +390,30 @@ app.put('/api/finance', authMiddleware, async (c) => {
       UPDATE finance_data
       SET data = ${encryptedPayload}, updated_at = NOW()
       WHERE household_id = ${membership.household_id}
-    `
+    `;
   } catch (err) {
-    console.error('PUT /api/finance DB error:', err)
-    return c.json({ error: 'Failed to save finance data' }, 500)
+    console.error("PUT /api/finance DB error:", err);
+    return c.json({ error: "Failed to save finance data" }, 500);
   }
-  return c.json({ ok: true })
-})
+  return c.json({ ok: true });
+});
 
 // ============ HOUSEHOLD ENDPOINTS ============
 
-app.get('/api/household', authMiddleware, async (c) => {
-  const user = c.get('user')
-  const sql = getDb(c)
+app.get("/api/household", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
 
   const [membership] = await sql`
     SELECT household_id FROM household_members WHERE user_id = ${user.id}
-  `
+  `;
   if (!membership) {
-    return c.json({ error: 'No household' }, 400)
+    return c.json({ error: "No household" }, 400);
   }
 
   const [household] = await sql`
     SELECT id, name, owner_id, created_at FROM households WHERE id = ${membership.household_id}
-  `
+  `;
 
   const members = await sql`
     SELECT u.id, u.email, u.name, u.avatar_url, hm.joined_at
@@ -388,61 +421,61 @@ app.get('/api/household', authMiddleware, async (c) => {
     JOIN users u ON u.id = hm.user_id
     WHERE hm.household_id = ${household.id}
     ORDER BY hm.joined_at
-  `
+  `;
 
   const pendingInvitations = await sql`
     SELECT id, email, created_at FROM invitations
     WHERE household_id = ${household.id} AND status = 'pending'
-  `
+  `;
 
   return c.json({
     household,
     members,
     pendingInvitations,
     isOwner: household.owner_id === user.id,
-  })
-})
+  });
+});
 
-app.post('/api/household/invite', authMiddleware, async (c) => {
-  const user = c.get('user')
-  const { email } = await c.req.json()
-  const sql = getDb(c)
+app.post("/api/household/invite", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const { email } = await c.req.json();
+  const sql = getDb(c);
 
   // Check ownership
   const [household] = await sql`
     SELECT h.id FROM households h
     JOIN household_members hm ON hm.household_id = h.id
     WHERE hm.user_id = ${user.id} AND h.owner_id = ${user.id}
-  `
+  `;
   if (!household) {
-    return c.json({ error: 'Only owner can invite' }, 403)
+    return c.json({ error: "Only owner can invite" }, 403);
   }
 
   // Generate token
-  const token = crypto.randomUUID()
-  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 days
+  const token = crypto.randomUUID();
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
 
   const [invitation] = await sql`
     INSERT INTO invitations (household_id, email, invited_by, token, expires_at)
     VALUES (${household.id}, ${email}, ${user.id}, ${token}, ${expiresAt.toISOString()})
     RETURNING id, email, token, expires_at, created_at
-  `
+  `;
 
   // Wyślij email z zaproszeniem przez Resend
-  const resendKey = getEnv(c, 'RESEND_API_KEY')
-  const frontendUrl = getEnv(c, 'FRONTEND_URL') || 'http://localhost:5173'
-  const inviteLink = `${frontendUrl}?invite=${token}`
+  const resendKey = getEnv(c, "RESEND_API_KEY");
+  const frontendUrl = getEnv(c, "FRONTEND_URL") || "http://localhost:5173";
+  const inviteLink = `${frontendUrl}?invite=${token}`;
 
   if (resendKey) {
     try {
-      await fetch('https://api.resend.com/emails', {
-        method: 'POST',
+      await fetch("https://api.resend.com/emails", {
+        method: "POST",
         headers: {
-          'Authorization': `Bearer ${resendKey}`,
-          'Content-Type': 'application/json',
+          Authorization: `Bearer ${resendKey}`,
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          from: 'HomeCashflow <noreply@homecashflow.org>',
+          from: "HomeCashflow <noreply@homecashflow.org>",
           to: [email],
           subject: `${user.name || user.email} zaprasza Cię do wspólnego gospodarstwa`,
           html: `
@@ -496,55 +529,55 @@ app.post('/api/household/invite', authMiddleware, async (c) => {
 </html>
           `,
         }),
-      })
+      });
     } catch (err) {
-      console.error('Resend error:', err)
+      console.error("Resend error:", err);
       // Nie blokujemy — zaproszenie i tak jest w bazie, link dostępny w UI
     }
   }
 
-  return c.json({ invitation })
-})
+  return c.json({ invitation });
+});
 
-app.post('/api/household/invite/:token/accept', authMiddleware, async (c) => {
-  const user = c.get('user')
-  const inviteToken = c.req.param('token')
-  const sql = getDb(c)
+app.post("/api/household/invite/:token/accept", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const inviteToken = c.req.param("token");
+  const sql = getDb(c);
 
   // Find invitation
   const [invitation] = await sql`
     SELECT * FROM invitations
     WHERE token = ${inviteToken} AND status = 'pending' AND expires_at > NOW()
-  `
+  `;
   if (!invitation) {
-    return c.json({ error: 'Invalid or expired invitation' }, 404)
+    return c.json({ error: "Invalid or expired invitation" }, 404);
   }
 
   // Check email matches
   if (invitation.email !== user.email) {
-    return c.json({ error: 'Email does not match invitation' }, 403)
+    return c.json({ error: "Email does not match invitation" }, 403);
   }
 
   // Remove user from their current household
   const [currentMembership] = await sql`
     SELECT household_id FROM household_members WHERE user_id = ${user.id}
-  `
+  `;
   if (currentMembership) {
     const [currentHousehold] = await sql`
       SELECT id, owner_id FROM households WHERE id = ${currentMembership.household_id}
-    `
+    `;
     // Only clean up if user owns this household and is the only member
     if (currentHousehold && currentHousehold.owner_id === user.id) {
       const memberCount = await sql`
         SELECT count(*) as cnt FROM household_members WHERE household_id = ${currentHousehold.id}
-      `
+      `;
       if (parseInt(memberCount[0].cnt) === 1) {
-        await sql`DELETE FROM finance_data WHERE household_id = ${currentHousehold.id}`
-        await sql`DELETE FROM household_members WHERE household_id = ${currentHousehold.id}`
-        await sql`DELETE FROM households WHERE id = ${currentHousehold.id}`
+        await sql`DELETE FROM finance_data WHERE household_id = ${currentHousehold.id}`;
+        await sql`DELETE FROM household_members WHERE household_id = ${currentHousehold.id}`;
+        await sql`DELETE FROM households WHERE id = ${currentHousehold.id}`;
       }
     } else {
-      await sql`DELETE FROM household_members WHERE user_id = ${user.id} AND household_id = ${currentMembership.household_id}`
+      await sql`DELETE FROM household_members WHERE user_id = ${user.id} AND household_id = ${currentMembership.household_id}`;
     }
   }
 
@@ -553,103 +586,103 @@ app.post('/api/household/invite/:token/accept', authMiddleware, async (c) => {
     INSERT INTO household_members (household_id, user_id)
     VALUES (${invitation.household_id}, ${user.id})
     ON CONFLICT DO NOTHING
-  `
+  `;
 
   // Mark invitation as accepted
   await sql`
     UPDATE invitations SET status = 'accepted' WHERE id = ${invitation.id}
-  `
+  `;
 
-  return c.json({ ok: true })
-})
+  return c.json({ ok: true });
+});
 
 // Helper: create a fresh household for a user
 async function createFreshHousehold(sql, userId) {
   const [household] = await sql`
     INSERT INTO households (owner_id) VALUES (${userId}) RETURNING *
-  `
+  `;
   await sql`
     INSERT INTO household_members (household_id, user_id) VALUES (${household.id}, ${userId})
-  `
+  `;
   await sql`
     INSERT INTO finance_data (household_id) VALUES (${household.id})
-  `
-  return household
+  `;
+  return household;
 }
 
-app.delete('/api/household/members/:userId', authMiddleware, async (c) => {
-  const user = c.get('user')
-  const targetUserId = c.req.param('userId')
-  const sql = getDb(c)
+app.delete("/api/household/members/:userId", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const targetUserId = c.req.param("userId");
+  const sql = getDb(c);
 
   if (targetUserId === user.id) {
-    return c.json({ error: 'Cannot remove yourself' }, 400)
+    return c.json({ error: "Cannot remove yourself" }, 400);
   }
 
   const [household] = await sql`
     SELECT h.id, h.owner_id FROM households h
     JOIN household_members hm ON hm.household_id = h.id
     WHERE hm.user_id = ${user.id} AND h.owner_id = ${user.id}
-  `
+  `;
   if (!household) {
-    return c.json({ error: 'Only owner can remove members' }, 403)
+    return c.json({ error: "Only owner can remove members" }, 403);
   }
 
   await sql`
     DELETE FROM household_members WHERE user_id = ${targetUserId} AND household_id = ${household.id}
-  `
-  await createFreshHousehold(sql, targetUserId)
+  `;
+  await createFreshHousehold(sql, targetUserId);
 
-  return c.json({ ok: true })
-})
+  return c.json({ ok: true });
+});
 
-app.post('/api/household/leave', authMiddleware, async (c) => {
-  const user = c.get('user')
-  const sql = getDb(c)
+app.post("/api/household/leave", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
 
   const [membership] = await sql`
     SELECT hm.household_id, h.owner_id FROM household_members hm
     JOIN households h ON h.id = hm.household_id
     WHERE hm.user_id = ${user.id}
-  `
+  `;
   if (!membership) {
-    return c.json({ error: 'No household' }, 400)
+    return c.json({ error: "No household" }, 400);
   }
 
   if (membership.owner_id === user.id) {
-    return c.json({ error: 'Owner cannot leave' }, 400)
+    return c.json({ error: "Owner cannot leave" }, 400);
   }
 
   await sql`
     DELETE FROM household_members WHERE user_id = ${user.id} AND household_id = ${membership.household_id}
-  `
-  await createFreshHousehold(sql, user.id)
+  `;
+  await createFreshHousehold(sql, user.id);
 
-  return c.json({ ok: true })
-})
+  return c.json({ ok: true });
+});
 
-app.delete('/api/household', authMiddleware, async (c) => {
-  const user = c.get('user')
-  const sql = getDb(c)
+app.delete("/api/household", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
 
   const [household] = await sql`
     SELECT h.id, h.owner_id FROM households h
     JOIN household_members hm ON hm.household_id = h.id
     WHERE hm.user_id = ${user.id}
-  `
+  `;
   if (!household || household.owner_id !== user.id) {
-    return c.json({ error: 'Only owner can delete household' }, 403)
+    return c.json({ error: "Only owner can delete household" }, 403);
   }
 
   const members = await sql`
     SELECT user_id FROM household_members WHERE household_id = ${household.id}
-  `
+  `;
 
-  await sql`DELETE FROM households WHERE id = ${household.id}`
+  await sql`DELETE FROM households WHERE id = ${household.id}`;
 
   for (const member of members) {
-    await createFreshHousehold(sql, member.user_id)
+    await createFreshHousehold(sql, member.user_id);
   }
 
-  return c.json({ ok: true })
-})
+  return c.json({ ok: true });
+});
