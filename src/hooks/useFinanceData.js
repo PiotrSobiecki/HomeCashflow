@@ -25,11 +25,18 @@ const createEmptyMonthData = () => ({ incomes: [], expenses: [] });
 
 const ACTIVITY_LOG_MAX = 150;
 
+// Predefiniowane kategorie budżetowe
+export const DEFAULT_BUDGET_CATEGORIES = [
+  'Żywność', 'Transport', 'Zdrowie i Higiena', 'Rozrywka',
+  'Ubrania i Obuwie', 'Edukacja', 'Inne',
+];
+
 const createInitialData = () => {
   const data = {
     months: {},
     savingsGoal: { type: 'none', monthlyAmount: 0, yearlyAmount: 0, targetMonth: 11 },
     savingsAccounts: [],
+    categoryBudgets: [],
     activityLog: [],
   };
   for (let month = 0; month < 12; month++) {
@@ -62,6 +69,7 @@ const normalizeFinanceData = (raw) => {
     months,
     savingsGoal: { ...initial.savingsGoal, ...sg },
     savingsAccounts: Array.isArray(raw.savingsAccounts) ? raw.savingsAccounts : [],
+    categoryBudgets: Array.isArray(raw.categoryBudgets) ? raw.categoryBudgets : [],
     activityLog: rawLog.slice(-ACTIVITY_LOG_MAX),
   };
 };
@@ -260,7 +268,7 @@ export const useFinanceData = () => {
   };
 
   // ============ CRUD DLA WYDATKÓW ============
-  const addExpense = (name, amount, date, isFixed = false) => {
+  const addExpense = (name, amount, date, isFixed = false, category = null) => {
     const amt = parseFloat(amount);
     updateData(prev => ({
       ...prev,
@@ -269,13 +277,13 @@ export const useFinanceData = () => {
         ...prev.months,
         [selectedMonth]: {
           ...prev.months[selectedMonth],
-          expenses: [...prev.months[selectedMonth].expenses, { id: Date.now(), name, amount: amt, date, isFixed }]
+          expenses: [...prev.months[selectedMonth].expenses, { id: Date.now(), name, amount: amt, date, isFixed, ...(category ? { category } : {}) }]
         }
       }
     }));
   };
 
-  const updateExpense = (id, name, amount, date, isFixed) => {
+  const updateExpense = (id, name, amount, date, isFixed, category = null) => {
     const amt = parseFloat(amount);
     updateData(prev => ({
       ...prev,
@@ -285,7 +293,7 @@ export const useFinanceData = () => {
         [selectedMonth]: {
           ...prev.months[selectedMonth],
           expenses: prev.months[selectedMonth].expenses.map(exp =>
-            exp.id === id ? { ...exp, name, amount: amt, date, isFixed } : exp
+            exp.id === id ? { ...exp, name, amount: amt, date, isFixed, ...(category ? { category } : { category: undefined }) } : exp
           )
         }
       }
@@ -377,6 +385,38 @@ export const useFinanceData = () => {
     });
   };
 
+  // ============ CRUD DLA BUDŻETÓW KATEGORII ============
+  const addCategoryBudget = (name, limit) => {
+    const amt = parseFloat(limit);
+    updateData(prev => ({
+      ...prev,
+      activityLog: appendActivity(prev, { action: 'add', kind: 'categoryBudget', label: name, amount: amt }),
+      categoryBudgets: [...prev.categoryBudgets, { id: Date.now(), name, limit: amt }]
+    }));
+  };
+
+  const updateCategoryBudget = (id, name, limit) => {
+    const amt = parseFloat(limit);
+    updateData(prev => ({
+      ...prev,
+      activityLog: appendActivity(prev, { action: 'update', kind: 'categoryBudget', label: name, amount: amt }),
+      categoryBudgets: prev.categoryBudgets.map(c =>
+        c.id === id ? { ...c, name, limit: amt } : c
+      )
+    }));
+  };
+
+  const deleteCategoryBudget = (id) => {
+    updateData(prev => {
+      const cat = prev.categoryBudgets.find(c => c.id === id);
+      return {
+        ...prev,
+        activityLog: appendActivity(prev, { action: 'delete', kind: 'categoryBudget', label: cat?.name, amount: cat?.limit }),
+        categoryBudgets: prev.categoryBudgets.filter(c => c.id !== id)
+      };
+    });
+  };
+
   // ============ OBLICZENIA ============
   const currentMonthData = data.months[selectedMonth] || createEmptyMonthData();
 
@@ -401,6 +441,22 @@ export const useFinanceData = () => {
   const totalSavingsAccounts = useMemo(() =>
     data.savingsAccounts.reduce((sum, acc) => sum + acc.amount, 0),
     [data.savingsAccounts]
+  );
+
+  // ============ BUDŻETY KATEGORII - OBLICZENIA ============
+  const categorySpending = useMemo(() => {
+    const variableExps = currentMonthData.expenses.filter(e => !e.isFixed);
+    const spending = {};
+    for (const exp of variableExps) {
+      const cat = exp.category || null;
+      spending[cat] = (spending[cat] || 0) + exp.amount;
+    }
+    return spending;
+  }, [currentMonthData.expenses]);
+
+  const totalCategoryLimits = useMemo(() =>
+    data.categoryBudgets.reduce((sum, c) => sum + c.limit, 0),
+    [data.categoryBudgets]
   );
 
   // ============ CEL OSZCZĘDNOŚCIOWY - OBLICZENIA ============
@@ -572,6 +628,8 @@ export const useFinanceData = () => {
     yearlySummary, monthlySummaries, addIncome, updateIncome, deleteIncome, addExpense, updateExpense, deleteExpense, clearAllData,
     financialRunway, forecastData, guiltFreeBurn, savingsGoal: data.savingsGoal, savingsGoalData, updateSavingsGoal,
     savingsAccounts: data.savingsAccounts, totalSavingsAccounts, addSavingsAccount, updateSavingsAccount, deleteSavingsAccount,
+    categoryBudgets: data.categoryBudgets, categorySpending, totalCategoryLimits,
+    addCategoryBudget, updateCategoryBudget, deleteCategoryBudget,
     activityLog,
     MONTHS, MONTHS_SHORT, CURRENT_YEAR, getCurrentMonth, loading, saving
   };

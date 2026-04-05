@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { PiggyBank, Plus, Pencil, Trash2, Check, X, Landmark, Wallet, TrendingUp } from 'lucide-react';
+import { PiggyBank, Plus, Pencil, Trash2, Check, X, Landmark, Wallet, TrendingUp, ChevronDown } from 'lucide-react';
 import { ConfirmDialog } from './ConfirmDialog';
 
 const formatCurrency = (amount) => new Intl.NumberFormat('pl-PL', { style: 'currency', currency: 'PLN', minimumFractionDigits: 2 }).format(amount);
@@ -27,6 +27,7 @@ export const SavingsAccounts = ({ accounts, totalSavings, addAccount, updateAcco
   const [editName, setEditName] = useState('');
   const [editAmount, setEditAmount] = useState('');
   const [editIcon, setEditIcon] = useState('bank');
+  const [collapsed, setCollapsed] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
 
   const handleAdd = () => {
@@ -57,26 +58,29 @@ export const SavingsAccounts = ({ accounts, totalSavings, addAccount, updateAcco
   return (
     <div className="bg-gradient-to-r from-indigo-600/15 via-blue-500/10 to-indigo-600/15 border border-indigo-500/30 rounded-2xl p-6 mb-6">
       <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-3">
+        <button onClick={() => setCollapsed(c => !c)} className="flex items-center gap-3 group cursor-pointer bg-transparent border-none p-0 text-left">
           <div className="bg-indigo-500/20 p-2.5 rounded-xl">
             <PiggyBank className="w-5 h-5 text-indigo-400" />
           </div>
           <div>
-            <h3 className="text-lg font-semibold text-white">Moje oszczędności</h3>
+            <div className="flex items-center gap-2">
+              <h3 className="text-lg font-semibold text-white">Moje oszczędności</h3>
+              <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform duration-200 ${collapsed ? '-rotate-90' : ''}`} />
+            </div>
             <p className="text-xs text-slate-400">
               {accounts.length > 0
                 ? <>Łącznie: <span className="text-indigo-400 font-medium">{formatCurrency(totalSavings)}</span> w {accounts.length} {accounts.length === 1 ? 'źródle' : 'źródłach'}</>
                 : 'Dodaj swoje konta i źródła oszczędności'}
             </p>
           </div>
-        </div>
-        <button onClick={() => setIsAdding(true)} className="flex items-center gap-2 px-4 py-2 bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-400 rounded-xl transition-all font-medium">
-          <Plus className="w-4 h-4" />Dodaj
         </button>
+        {!collapsed && <button onClick={() => setIsAdding(true)} className="flex items-center gap-2 px-4 py-2 bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-400 rounded-xl transition-all font-medium">
+          <Plus className="w-4 h-4" />Dodaj
+        </button>}
       </div>
 
       {/* Formularz dodawania */}
-      {isAdding && (
+      {!collapsed && isAdding && (
         <div className="mb-4 p-4 bg-slate-700/30 rounded-xl border border-slate-600/50">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
             <input type="text" placeholder="Nazwa (np. Konto oszczędnościowe)" value={newName} onChange={(e) => setNewName(e.target.value)} className="px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-xl text-white placeholder-slate-400 focus:outline-none focus:border-indigo-500" autoFocus />
@@ -100,7 +104,7 @@ export const SavingsAccounts = ({ accounts, totalSavings, addAccount, updateAcco
       )}
 
       {/* Lista kont */}
-      <div className="space-y-3">
+      {!collapsed && <div className="space-y-3">
         {accounts.length === 0 && !isAdding ? (
           <p className="text-slate-500 text-center py-6">Wpisz ile masz odłożone, żeby widzieć realny obraz finansów</p>
         ) : accounts.map(acc => {
@@ -152,7 +156,7 @@ export const SavingsAccounts = ({ accounts, totalSavings, addAccount, updateAcco
             </div>
           );
         })}
-      </div>
+      </div>}
 
       <ConfirmDialog
         open={deleteTarget !== null}

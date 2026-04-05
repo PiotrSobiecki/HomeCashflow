@@ -25,6 +25,7 @@ import { SavingsAccounts } from "./SavingsAccounts";
 import { HouseholdMembers } from "./HouseholdMembers";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { ActivityHistory } from "./ActivityHistory";
+import { CategoryBudgets } from "./CategoryBudgets";
 
 export const Dashboard = () => {
   const { user, signOut, isGuest } = useAuth();
@@ -61,6 +62,12 @@ export const Dashboard = () => {
     addSavingsAccount,
     updateSavingsAccount,
     deleteSavingsAccount,
+    categoryBudgets,
+    categorySpending,
+    totalCategoryLimits,
+    addCategoryBudget,
+    updateCategoryBudget,
+    deleteCategoryBudget,
     activityLog,
     MONTHS,
     CURRENT_YEAR,
@@ -274,6 +281,18 @@ export const Dashboard = () => {
           guiltFreeBurn={guiltFreeBurn}
           savingsGoalData={savingsGoalData}
         />
+        <CategoryBudgets
+          categoryBudgets={categoryBudgets}
+          categorySpending={categorySpending}
+          totalCategoryLimits={totalCategoryLimits}
+          addCategoryBudget={addCategoryBudget}
+          updateCategoryBudget={updateCategoryBudget}
+          deleteCategoryBudget={deleteCategoryBudget}
+          totalIncome={guiltFreeBurn.monthIncome}
+          fixedExpenses={guiltFreeBurn.monthFixedExpenses}
+          variableExpenses={guiltFreeBurn.monthVariableExpenses}
+          savingsGoalData={savingsGoalData}
+        />
         <FinancialRunway financialRunway={financialRunway} />
         <ForecastChart
           forecastData={forecastData}
@@ -306,6 +325,7 @@ export const Dashboard = () => {
             updateExpense={updateExpense}
             deleteExpense={deleteExpense}
             selectedMonth={selectedMonth}
+            categoryBudgets={categoryBudgets}
           />
         </div>
         <YearlySummary
