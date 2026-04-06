@@ -344,7 +344,22 @@ export const Dashboard = () => {
             HomeCashflow © {CURRENT_YEAR} •{" "}
             {isGuest
               ? "Dane zapisywane lokalnie w przeglądarce"
-              : "Dane bezpiecznie przechowywane w chmurze"}
+              : "Dane finansowe szyfrowane i bezpiecznie przechowywane w chmurze"}
+          </p>
+          <p className="text-center text-xs text-slate-500 mt-2">
+            <a
+              href="/?view=regulamin"
+              className="hover:text-slate-300 transition-colors"
+            >
+              Regulamin
+            </a>{" "}
+            •{" "}
+            <a
+              href="/?view=polityka-prywatnosci"
+              className="hover:text-slate-300 transition-colors"
+            >
+              Polityka prywatnosci
+            </a>
           </p>
         </div>
       </footer>

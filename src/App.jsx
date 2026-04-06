@@ -2,6 +2,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { Auth } from './components/Auth'
 import { Dashboard } from './components/Dashboard'
 import { InviteAccept } from './components/InviteAccept'
+import { LegalPage } from './components/LegalPage'
 import { Loader2 } from 'lucide-react'
 
 const AppContent = () => {
@@ -10,6 +11,7 @@ const AppContent = () => {
   // Check for invite token in URL
   const params = new URLSearchParams(window.location.search)
   const inviteToken = params.get('invite')
+  const view = params.get('view')
 
   if (loading) {
     return (
@@ -24,6 +26,14 @@ const AppContent = () => {
 
   if (inviteToken) {
     return user ? <InviteAccept token={inviteToken} /> : <Auth />
+  }
+
+  if (view === 'regulamin') {
+    return <LegalPage type="terms" />
+  }
+
+  if (view === 'polityka-prywatnosci') {
+    return <LegalPage type="privacy" />
   }
 
   return user ? <Dashboard /> : <Auth />
