@@ -299,7 +299,8 @@ async function authMiddleware(c, next) {
     }
     c.set("user", user);
     await next();
-  } catch {
+  } catch (err) {
+    console.error("[authMiddleware]", err);
     return c.json({ error: "Unauthorized" }, 401);
   }
 }
