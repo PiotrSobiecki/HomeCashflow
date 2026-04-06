@@ -27,7 +27,7 @@ export const SavingsAccounts = ({ accounts, totalSavings, addAccount, updateAcco
   const [editName, setEditName] = useState('');
   const [editAmount, setEditAmount] = useState('');
   const [editIcon, setEditIcon] = useState('bank');
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   const [deleteTarget, setDeleteTarget] = useState(null);
 
   const handleAdd = () => {

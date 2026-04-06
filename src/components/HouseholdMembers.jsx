@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Users, Mail, Crown, UserPlus, Loader2, X, Check, UserMinus, LogOut, Trash2 } from 'lucide-react'
+import { Users, Mail, Crown, UserPlus, Loader2, X, Check, UserMinus, LogOut, Trash2, Pencil } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { getApiUrl } from '../lib/api'
 import { ConfirmDialog } from './ConfirmDialog'
@@ -19,6 +19,8 @@ export const HouseholdMembers = () => {
   const [householdDeleteStep, setHouseholdDeleteStep] = useState(0)
   const [removeMemberTarget, setRemoveMemberTarget] = useState(null)
   const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false)
+  const [editingName, setEditingName] = useState(false)
+  const [newName, setNewName] = useState('')
 
   const apiUrl = getApiUrl()
 
@@ -113,6 +115,27 @@ export const HouseholdMembers = () => {
     }
   }
 
+  const handleRename = async () => {
+    if (!newName.trim()) return
+    try {
+      const res = await fetch(`${apiUrl}/api/household`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newName.trim() }),
+      })
+      if (res.ok) {
+        setEditingName(false)
+        fetchHousehold()
+      } else {
+        const body = await res.json()
+        setError(body.error || 'Nie udało się zmienić nazwy')
+      }
+    } catch {
+      setError('Błąd połączenia')
+    }
+  }
+
   const handleDeleteHousehold = async () => {
     setHouseholdDeleteStep(0)
     try {
@@ -137,7 +160,33 @@ export const HouseholdMembers = () => {
     <div className="bg-slate-800/50 border border-slate-700/50 rounded-2xl p-6 mb-6">
       <div className="flex items-center gap-2 mb-4">
         <Users className="w-5 h-5 text-indigo-400" />
-        <h3 className="text-lg font-semibold text-white">Gospodarstwo domowe</h3>
+        {editingName ? (
+          <div className="flex items-center gap-2 flex-1">
+            <input
+              type="text"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleRename(); if (e.key === 'Escape') setEditingName(false); }}
+              className="px-3 py-1.5 bg-slate-900/50 border border-slate-600 rounded-lg text-white text-lg font-semibold focus:outline-none focus:border-indigo-500"
+              autoFocus
+            />
+            <button onClick={handleRename} className="p-1.5 text-emerald-400 hover:bg-emerald-500/20 rounded-lg transition-all"><Check className="w-4 h-4" /></button>
+            <button onClick={() => setEditingName(false)} className="p-1.5 text-slate-400 hover:bg-slate-600 rounded-lg transition-all"><X className="w-4 h-4" /></button>
+          </div>
+        ) : (
+          <>
+            <h3 className="text-lg font-semibold text-white">{household?.name || 'Gospodarstwo domowe'}</h3>
+            {isOwner && (
+              <button
+                onClick={() => { setNewName(household?.name || ''); setEditingName(true); }}
+                className="p-1.5 text-slate-500 hover:text-indigo-400 hover:bg-indigo-500/10 rounded-lg transition-all"
+                title="Zmień nazwę"
+              >
+                <Pencil className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </>
+        )}
       </div>
 
       {/* Members list */}

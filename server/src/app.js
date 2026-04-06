@@ -436,6 +436,34 @@ app.get("/api/household", authMiddleware, async (c) => {
   });
 });
 
+app.patch("/api/household", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const { name } = await c.req.json();
+  const sql = getDb(c);
+
+  if (!name || !name.trim()) {
+    return c.json({ error: "Nazwa jest wymagana" }, 400);
+  }
+
+  const [membership] = await sql`
+    SELECT household_id FROM household_members WHERE user_id = ${user.id}
+  `;
+  if (!membership) return c.json({ error: "No household" }, 400);
+
+  const [household] = await sql`
+    SELECT owner_id FROM households WHERE id = ${membership.household_id}
+  `;
+  if (household.owner_id !== user.id) {
+    return c.json({ error: "Tylko właściciel może zmienić nazwę" }, 403);
+  }
+
+  await sql`
+    UPDATE households SET name = ${name.trim()} WHERE id = ${membership.household_id}
+  `;
+
+  return c.json({ ok: true });
+});
+
 app.post("/api/household/invite", authMiddleware, async (c) => {
   const user = c.get("user");
   const { email } = await c.req.json();

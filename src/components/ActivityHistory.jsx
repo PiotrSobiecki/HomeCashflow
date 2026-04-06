@@ -1,5 +1,6 @@
 import { useMemo, useState, useEffect } from 'react';
-import { History, ChevronDown, ChevronUp, ChevronLeft, ChevronRight } from 'lucide-react';
+import { History, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
+import { ConfirmDialog } from './ConfirmDialog';
 
 const PAGE_SIZE = 8;
 
@@ -60,54 +61,75 @@ export function describeActivity(entry, MONTHS) {
   return `${act} • ${kind}${name ? ` ${name}` : ''}`;
 }
 
-export const ActivityHistory = ({ entries, MONTHS }) => {
+export const ActivityHistory = ({ entries, MONTHS, canClear, onClear, selectedMonth }) => {
   const [open, setOpen] = useState(true);
   const [page, setPage] = useState(0);
+  const [confirmClear, setConfirmClear] = useState(false);
 
   const sorted = useMemo(() => {
     const list = Array.isArray(entries) ? [...entries] : [];
     return list.sort((a, b) => new Date(b.at) - new Date(a.at));
   }, [entries]);
 
-  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+  const filtered = useMemo(() => {
+    return sorted.filter(e => e.month === selectedMonth);
+  }, [sorted, selectedMonth]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const pageSlice = useMemo(
-    () => sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE),
-    [sorted, page]
+    () => filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE),
+    [filtered, page]
   );
 
   useEffect(() => {
-    const maxPage = Math.max(0, Math.ceil(sorted.length / PAGE_SIZE) - 1);
+    setPage(0);
+  }, [selectedMonth]);
+
+  useEffect(() => {
+    const maxPage = Math.max(0, Math.ceil(filtered.length / PAGE_SIZE) - 1);
     setPage((p) => Math.min(p, maxPage));
-  }, [sorted.length]);
+  }, [filtered.length]);
 
   return (
     <div className="bg-slate-800/50 border border-slate-700/50 rounded-2xl p-6 mb-6 mt-6">
-      <button
-        type="button"
-        onClick={() => setOpen(!open)}
-        className="w-full flex items-center justify-between gap-3 text-left"
-      >
-        <div className="flex items-center gap-3">
-          <div className="bg-slate-700/80 p-2.5 rounded-xl">
-            <History className="w-5 h-5 text-slate-300" />
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setOpen(!open)}
+          className="flex-1 flex items-center justify-between gap-3 text-left"
+        >
+          <div className="flex items-center gap-3">
+            <div className="bg-slate-700/80 p-2.5 rounded-xl">
+              <History className="w-5 h-5 text-slate-300" />
+            </div>
+            <div>
+              <h3 className="text-lg font-semibold text-white">Historia zmian</h3>
+              <p className="text-xs text-slate-400">
+                {MONTHS[selectedMonth]}
+                {filtered.length > 0 ? ` (${filtered.length})` : ' — brak wpisów'}
+              </p>
+            </div>
           </div>
-          <div>
-            <h3 className="text-lg font-semibold text-white">Historia zmian</h3>
-            <p className="text-xs text-slate-400">
-              Kto dodał, edytował lub usunął przychody, wydatki i oszczędności
-              {sorted.length > 0 ? ` (${sorted.length})` : ''}
-            </p>
-          </div>
-        </div>
-        {open ? (
-          <ChevronUp className="w-5 h-5 text-slate-400 shrink-0" />
-        ) : (
-          <ChevronDown className="w-5 h-5 text-slate-400 shrink-0" />
+          {open ? (
+            <ChevronUp className="w-5 h-5 text-slate-400 shrink-0" />
+          ) : (
+            <ChevronDown className="w-5 h-5 text-slate-400 shrink-0" />
+          )}
+        </button>
+        {open && canClear && sorted.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setConfirmClear(true)}
+            className="p-2 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-all shrink-0"
+            title="Wyczyść historię"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
         )}
-      </button>
+      </div>
 
       {open && (
-        sorted.length === 0 ? (
+        filtered.length === 0 ? (
           <p className="mt-4 text-sm text-slate-500 border-t border-slate-700/50 pt-4">
             Brak zapisanych zdarzeń. Po dodaniu lub usunięciu wpisów pojawią się tutaj wraz z imieniem osoby.
           </p>
@@ -127,7 +149,7 @@ export const ActivityHistory = ({ entries, MONTHS }) => {
                 </li>
               ))}
             </ul>
-            {sorted.length > PAGE_SIZE && (
+            {filtered.length > PAGE_SIZE && (
               <div className="flex items-center justify-between gap-3 mt-4 pt-4 border-t border-slate-700/50">
                 <button
                   type="button"
@@ -155,6 +177,17 @@ export const ActivityHistory = ({ entries, MONTHS }) => {
           </>
         )
       )}
+
+      <ConfirmDialog
+        open={confirmClear}
+        onClose={() => setConfirmClear(false)}
+        onConfirm={() => { setConfirmClear(false); onClear(); }}
+        title="Wyczyścić historię zmian?"
+        description="Wszystkie wpisy w historii zostaną trwale usunięte. Tej operacji nie można cofnąć. Dane finansowe (przychody, wydatki, oszczędności) pozostaną bez zmian."
+        confirmLabel="Tak, wyczyść historię"
+        cancelLabel="Anuluj"
+        variant="danger"
+      />
     </div>
   );
 };

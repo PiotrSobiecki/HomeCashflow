@@ -623,6 +623,10 @@ export const useFinanceData = () => {
     return log.sort((a, b) => new Date(b.at) - new Date(a.at));
   }, [data.activityLog]);
 
+  const clearActivityLog = () => {
+    updateData(prev => ({ ...prev, activityLog: [] }));
+  };
+
   return {
     data, selectedMonth, setSelectedMonth, currentMonthData, totalIncome, totalExpenses, fixedExpenses, variableExpenses, balance,
     yearlySummary, monthlySummaries, addIncome, updateIncome, deleteIncome, addExpense, updateExpense, deleteExpense, clearAllData,
@@ -630,7 +634,7 @@ export const useFinanceData = () => {
     savingsAccounts: data.savingsAccounts, totalSavingsAccounts, addSavingsAccount, updateSavingsAccount, deleteSavingsAccount,
     categoryBudgets: data.categoryBudgets, categorySpending, totalCategoryLimits,
     addCategoryBudget, updateCategoryBudget, deleteCategoryBudget,
-    activityLog,
+    activityLog, clearActivityLog,
     MONTHS, MONTHS_SHORT, CURRENT_YEAR, getCurrentMonth, loading, saving
   };
 };

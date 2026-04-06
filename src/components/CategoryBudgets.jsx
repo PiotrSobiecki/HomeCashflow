@@ -10,7 +10,7 @@ export const CategoryBudgets = ({
   addCategoryBudget, updateCategoryBudget, deleteCategoryBudget,
   totalIncome, fixedExpenses, variableExpenses, savingsGoalData,
 }) => {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [newName, setNewName] = useState('');

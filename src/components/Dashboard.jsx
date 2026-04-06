@@ -69,6 +69,7 @@ export const Dashboard = () => {
     updateCategoryBudget,
     deleteCategoryBudget,
     activityLog,
+    clearActivityLog,
     MONTHS,
     CURRENT_YEAR,
     getCurrentMonth,
@@ -270,16 +271,16 @@ export const Dashboard = () => {
           updateSavingsGoal={updateSavingsGoal}
           months={MONTHS}
         />
+        <GuiltFreeBurn
+          guiltFreeBurn={guiltFreeBurn}
+          savingsGoalData={savingsGoalData}
+        />
         <SavingsAccounts
           accounts={savingsAccounts}
           totalSavings={totalSavingsAccounts}
           addAccount={addSavingsAccount}
           updateAccount={updateSavingsAccount}
           deleteAccount={deleteSavingsAccount}
-        />
-        <GuiltFreeBurn
-          guiltFreeBurn={guiltFreeBurn}
-          savingsGoalData={savingsGoalData}
         />
         <CategoryBudgets
           categoryBudgets={categoryBudgets}
@@ -333,7 +334,7 @@ export const Dashboard = () => {
           monthlySummaries={monthlySummaries}
           year={CURRENT_YEAR}
         />
-        <ActivityHistory entries={activityLog} MONTHS={MONTHS} />
+        <ActivityHistory entries={activityLog} MONTHS={MONTHS} canClear={isGuest || isHouseholdOwner === true} onClear={clearActivityLog} selectedMonth={selectedMonth} />
       </main>
 
       {/* Footer */}
