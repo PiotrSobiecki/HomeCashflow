@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { TrendingDown, Plus, Pencil, Trash2, Check, X, CalendarDays, Lock, ShoppingBag } from 'lucide-react';
 import { ConfirmDialog } from './ConfirmDialog';
 
@@ -95,6 +95,17 @@ export const ExpenseSection = ({
   });
   const fixedExpenses = expenses.filter((e) => e.isFixed);
   const variableExpenses = expenses.filter((e) => !e.isFixed);
+
+  useEffect(() => {
+    const openAddExpense = () => {
+      setIsAdding(true);
+      setNewDate(getDefaultDate());
+      setNewCategory(getDefaultCategory());
+      setFormError('');
+    };
+    window.addEventListener('financeflow:add-expense', openAddExpense);
+    return () => window.removeEventListener('financeflow:add-expense', openAddExpense);
+  }, [categoryBudgets]);
 
   return (
     <div className="bg-slate-800/50 border border-slate-700/50 rounded-2xl p-6">

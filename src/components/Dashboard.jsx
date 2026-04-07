@@ -8,6 +8,8 @@ import {
   Cloud,
   UserX,
   AlertTriangle,
+  Plus,
+  ChevronDown,
 } from "lucide-react";
 import { useFinanceData } from "../hooks/useFinanceData";
 import { useAuth } from "../contexts/AuthContext";
@@ -231,6 +233,51 @@ export const Dashboard = () => {
           </div>
         </div>
       </header>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4">
+        <div className="sm:hidden bg-slate-800/50 border border-slate-700/50 rounded-2xl p-3">
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() =>
+                window.dispatchEvent(new Event("financeflow:add-income"))
+              }
+              className="flex items-center justify-center gap-2 px-3 py-2 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 rounded-xl border border-emerald-500/25 transition-all text-sm font-medium"
+            >
+              <Plus className="w-4 h-4" />
+              Dodaj przychod
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                window.dispatchEvent(new Event("financeflow:add-expense"))
+              }
+              className="flex items-center justify-center gap-2 px-3 py-2 bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 rounded-xl border border-rose-500/25 transition-all text-sm font-medium"
+            >
+              <Plus className="w-4 h-4" />
+              Dodaj wydatek
+            </button>
+          </div>
+        </div>
+        <div className="hidden sm:flex justify-end text-slate-400 text-sm">
+          <button
+            type="button"
+            onClick={() => {
+              const section = document.getElementById("expense-section");
+              if (!section) return;
+              const targetY =
+                section.getBoundingClientRect().top + window.scrollY - 80;
+              window.scrollTo({
+                top: Math.max(0, targetY),
+                behavior: "smooth",
+              });
+            }}
+            className="inline-flex items-center gap-1.5 hover:text-violet-300 transition-colors"
+          >
+            <ChevronDown className="w-4 h-4" />
+            Dodaj wydatek / przychód
+          </button>
+        </div>
+      </div>
 
       <ConfirmDialog
         open={clearAllStep === 1}
@@ -315,19 +362,23 @@ export const Dashboard = () => {
           balance={balance}
         />
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <IncomeSection
-            incomes={currentMonthData.incomes}
-            addIncome={addIncome}
-            updateIncome={updateIncome}
-            deleteIncome={deleteIncome}
-          />
-          <ExpenseSection
-            expenses={currentMonthData.expenses}
-            addExpense={addExpense}
-            updateExpense={updateExpense}
-            deleteExpense={deleteExpense}
-            categoryBudgets={categoryBudgets}
-          />
+          <div id="income-section">
+            <IncomeSection
+              incomes={currentMonthData.incomes}
+              addIncome={addIncome}
+              updateIncome={updateIncome}
+              deleteIncome={deleteIncome}
+            />
+          </div>
+          <div id="expense-section">
+            <ExpenseSection
+              expenses={currentMonthData.expenses}
+              addExpense={addExpense}
+              updateExpense={updateExpense}
+              deleteExpense={deleteExpense}
+              categoryBudgets={categoryBudgets}
+            />
+          </div>
         </div>
         <div className="my-6">
           <MonthlySummaryModal
@@ -342,7 +393,13 @@ export const Dashboard = () => {
           monthlySummaries={monthlySummaries}
           year={CURRENT_YEAR}
         />
-        <ActivityHistory entries={activityLog} MONTHS={MONTHS} canClear={isGuest || isHouseholdOwner === true} onClear={clearActivityLog} selectedMonth={selectedMonth} />
+        <ActivityHistory
+          entries={activityLog}
+          MONTHS={MONTHS}
+          canClear={isGuest || isHouseholdOwner === true}
+          onClear={clearActivityLog}
+          selectedMonth={selectedMonth}
+        />
       </main>
       {/* Footer */}
       <footer className="border-t border-slate-800 mt-12">

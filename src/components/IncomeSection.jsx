@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { TrendingUp, Plus, Pencil, Trash2, Check, X, Lock, Briefcase, CalendarDays } from 'lucide-react';
 import { ConfirmDialog } from './ConfirmDialog';
 
@@ -33,6 +33,15 @@ export const IncomeSection = ({ incomes, addIncome, updateIncome, deleteIncome }
   const sortedIncomes = [...incomes].sort((a, b) => { if (a.isFixed && !b.isFixed) return -1; if (!a.isFixed && b.isFixed) return 1; return new Date(b.date || 0) - new Date(a.date || 0); });
   const fixedIncomes = incomes.filter(i => i.isFixed);
   const variableIncomes = incomes.filter(i => !i.isFixed);
+
+  useEffect(() => {
+    const openAddIncome = () => {
+      setIsAdding(true);
+      setNewDate(getTodayDate());
+    };
+    window.addEventListener('financeflow:add-income', openAddIncome);
+    return () => window.removeEventListener('financeflow:add-income', openAddIncome);
+  }, []);
 
   return (
     <div className="bg-slate-800/50 border border-slate-700/50 rounded-2xl p-6">
