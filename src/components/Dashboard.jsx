@@ -26,6 +26,7 @@ import { HouseholdMembers } from "./HouseholdMembers";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { ActivityHistory } from "./ActivityHistory";
 import { CategoryBudgets } from "./CategoryBudgets";
+import { MonthlySummaryModal } from "./MonthlySummaryModal";
 
 export const Dashboard = () => {
   const { user, signOut, isGuest } = useAuth();
@@ -325,8 +326,15 @@ export const Dashboard = () => {
             addExpense={addExpense}
             updateExpense={updateExpense}
             deleteExpense={deleteExpense}
-            selectedMonth={selectedMonth}
             categoryBudgets={categoryBudgets}
+          />
+        </div>
+        <div className="my-6">
+          <MonthlySummaryModal
+            embedded
+            monthLabel={`${MONTHS[selectedMonth]} ${CURRENT_YEAR}`}
+            incomes={currentMonthData.incomes}
+            expenses={currentMonthData.expenses}
           />
         </div>
         <YearlySummary
@@ -336,7 +344,6 @@ export const Dashboard = () => {
         />
         <ActivityHistory entries={activityLog} MONTHS={MONTHS} canClear={isGuest || isHouseholdOwner === true} onClear={clearActivityLog} selectedMonth={selectedMonth} />
       </main>
-
       {/* Footer */}
       <footer className="border-t border-slate-800 mt-12">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">

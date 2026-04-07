@@ -22,6 +22,7 @@ export const getDaysRemainingInMonth = () => {
 export const getTotalDaysInMonth = (month, year) => new Date(year, month + 1, 0).getDate();
 
 const createEmptyMonthData = () => ({ incomes: [], expenses: [], deletedFixed: { incomes: [], expenses: [] } });
+const DEFAULT_EXPENSE_CATEGORY = 'Inne';
 
 const ACTIVITY_LOG_MAX = 150;
 
@@ -57,7 +58,12 @@ const normalizeFinanceData = (raw) => {
       if (src && typeof src === 'object') {
         months[m] = {
           incomes: Array.isArray(src.incomes) ? src.incomes : [],
-          expenses: Array.isArray(src.expenses) ? src.expenses : [],
+          expenses: Array.isArray(src.expenses)
+            ? src.expenses.map((exp) => ({
+                ...exp,
+                category: exp?.isFixed ? exp?.category : (exp?.category || DEFAULT_EXPENSE_CATEGORY),
+              }))
+            : [],
           deletedFixed: src.deletedFixed && typeof src.deletedFixed === 'object'
             ? {
                 incomes: Array.isArray(src.deletedFixed.incomes) ? src.deletedFixed.incomes : [],
@@ -203,7 +209,12 @@ export const useFinanceData = () => {
       .map(i => ({ ...i, id: Date.now() + Math.random() }));
     const newFixedExpenses = source.expenses
       .filter(e => e.isFixed && !existingExpenseNames.has(e.name) && !deletedFixedExpenseNames.has(e.name))
-      .map(e => ({ ...e, id: Date.now() + Math.random(), date: `${CURRENT_YEAR}-${String(selectedMonth + 1).padStart(2, '0')}-01` }));
+      .map(e => ({
+        ...e,
+        category: e.category,
+        id: Date.now() + Math.random(),
+        date: `${CURRENT_YEAR}-${String(selectedMonth + 1).padStart(2, '0')}-01`,
+      }));
 
     if (newFixedIncomes.length === 0 && newFixedExpenses.length === 0) return;
 
@@ -285,34 +296,46 @@ export const useFinanceData = () => {
   // ============ CRUD DLA WYDATKÓW ============
   const addExpense = (name, amount, date, isFixed = false, category = null) => {
     const amt = parseFloat(amount);
-    updateData(prev => ({
-      ...prev,
-      activityLog: appendActivity(prev, { action: 'add', kind: 'expense', month: selectedMonth, label: name, amount: amt }),
-      months: {
-        ...prev.months,
-        [selectedMonth]: {
-          ...prev.months[selectedMonth],
-          expenses: [...prev.months[selectedMonth].expenses, { id: Date.now(), name, amount: amt, date, isFixed, ...(category ? { category } : {}) }]
+    updateData(prev => {
+      const allowedCategories = new Set((prev.categoryBudgets || []).map(c => c.name));
+      if (!isFixed && (!category || !allowedCategories.has(category))) return prev;
+      const storedCategory = isFixed ? undefined : category;
+      return ({
+        ...prev,
+        activityLog: appendActivity(prev, { action: 'add', kind: 'expense', month: selectedMonth, label: name, amount: amt }),
+        months: {
+          ...prev.months,
+          [selectedMonth]: {
+            ...prev.months[selectedMonth],
+            expenses: [...prev.months[selectedMonth].expenses, { id: Date.now(), name, amount: amt, date, isFixed, ...(storedCategory ? { category: storedCategory } : {}) }]
+          }
         }
-      }
-    }));
+      });
+    });
   };
 
   const updateExpense = (id, name, amount, date, isFixed, category = null) => {
     const amt = parseFloat(amount);
-    updateData(prev => ({
-      ...prev,
-      activityLog: appendActivity(prev, { action: 'update', kind: 'expense', month: selectedMonth, label: name, amount: amt }),
-      months: {
-        ...prev.months,
-        [selectedMonth]: {
-          ...prev.months[selectedMonth],
-          expenses: prev.months[selectedMonth].expenses.map(exp =>
-            exp.id === id ? { ...exp, name, amount: amt, date, isFixed, ...(category ? { category } : { category: undefined }) } : exp
-          )
+    updateData(prev => {
+      const allowedCategories = new Set((prev.categoryBudgets || []).map(c => c.name));
+      if (!isFixed && (!category || !allowedCategories.has(category))) return prev;
+      const storedCategory = isFixed ? undefined : category;
+      return ({
+        ...prev,
+        activityLog: appendActivity(prev, { action: 'update', kind: 'expense', month: selectedMonth, label: name, amount: amt }),
+        months: {
+          ...prev.months,
+          [selectedMonth]: {
+            ...prev.months[selectedMonth],
+            expenses: prev.months[selectedMonth].expenses.map(exp =>
+              exp.id === id
+                ? { ...exp, name, amount: amt, date, isFixed, ...(storedCategory ? { category: storedCategory } : { category: undefined }) }
+                : exp
+            )
+          }
         }
-      }
-    }));
+      });
+    });
   };
 
   const deleteExpense = (id) => {
