@@ -21,7 +21,7 @@ export const getDaysRemainingInMonth = () => {
 };
 export const getTotalDaysInMonth = (month, year) => new Date(year, month + 1, 0).getDate();
 
-const createEmptyMonthData = () => ({ incomes: [], expenses: [] });
+const createEmptyMonthData = () => ({ incomes: [], expenses: [], deletedFixed: { incomes: [], expenses: [] } });
 
 const ACTIVITY_LOG_MAX = 150;
 
@@ -58,6 +58,12 @@ const normalizeFinanceData = (raw) => {
         months[m] = {
           incomes: Array.isArray(src.incomes) ? src.incomes : [],
           expenses: Array.isArray(src.expenses) ? src.expenses : [],
+          deletedFixed: src.deletedFixed && typeof src.deletedFixed === 'object'
+            ? {
+                incomes: Array.isArray(src.deletedFixed.incomes) ? src.deletedFixed.incomes : [],
+                expenses: Array.isArray(src.deletedFixed.expenses) ? src.deletedFixed.expenses : [],
+              }
+            : { incomes: [], expenses: [] },
         };
       }
     }
@@ -189,12 +195,14 @@ export const useFinanceData = () => {
     const source = data.months[sourceMonth];
     const existingIncomeNames = new Set(monthData.incomes.filter(i => i.isFixed).map(i => i.name));
     const existingExpenseNames = new Set(monthData.expenses.filter(e => e.isFixed).map(e => e.name));
+    const deletedFixedIncomeNames = new Set(monthData.deletedFixed?.incomes ?? []);
+    const deletedFixedExpenseNames = new Set(monthData.deletedFixed?.expenses ?? []);
 
     const newFixedIncomes = source.incomes
-      .filter(i => i.isFixed && !existingIncomeNames.has(i.name))
+      .filter(i => i.isFixed && !existingIncomeNames.has(i.name) && !deletedFixedIncomeNames.has(i.name))
       .map(i => ({ ...i, id: Date.now() + Math.random() }));
     const newFixedExpenses = source.expenses
-      .filter(e => e.isFixed && !existingExpenseNames.has(e.name))
+      .filter(e => e.isFixed && !existingExpenseNames.has(e.name) && !deletedFixedExpenseNames.has(e.name))
       .map(e => ({ ...e, id: Date.now() + Math.random(), date: `${CURRENT_YEAR}-${String(selectedMonth + 1).padStart(2, '0')}-01` }));
 
     if (newFixedIncomes.length === 0 && newFixedExpenses.length === 0) return;
@@ -204,6 +212,7 @@ export const useFinanceData = () => {
       months: {
         ...prev.months,
         [selectedMonth]: {
+          ...prev.months[selectedMonth],
           incomes: [...prev.months[selectedMonth].incomes, ...newFixedIncomes],
           expenses: [...prev.months[selectedMonth].expenses, ...newFixedExpenses],
         }
@@ -247,6 +256,11 @@ export const useFinanceData = () => {
   const deleteIncome = (id) => {
     updateData(prev => {
       const inc = prev.months[selectedMonth]?.incomes.find(i => i.id === id);
+      const monthData = prev.months[selectedMonth];
+      const prevDeleted = monthData.deletedFixed ?? { incomes: [], expenses: [] };
+      const deletedFixed = inc?.isFixed
+        ? { ...prevDeleted, incomes: [...prevDeleted.incomes, inc.name] }
+        : prevDeleted;
       return {
         ...prev,
         activityLog: appendActivity(prev, {
@@ -259,8 +273,9 @@ export const useFinanceData = () => {
         months: {
           ...prev.months,
           [selectedMonth]: {
-            ...prev.months[selectedMonth],
-            incomes: prev.months[selectedMonth].incomes.filter(i => i.id !== id)
+            ...monthData,
+            deletedFixed,
+            incomes: monthData.incomes.filter(i => i.id !== id)
           }
         }
       };
@@ -303,6 +318,11 @@ export const useFinanceData = () => {
   const deleteExpense = (id) => {
     updateData(prev => {
       const exp = prev.months[selectedMonth]?.expenses.find(e => e.id === id);
+      const monthData = prev.months[selectedMonth];
+      const prevDeleted = monthData.deletedFixed ?? { incomes: [], expenses: [] };
+      const deletedFixed = exp?.isFixed
+        ? { ...prevDeleted, expenses: [...prevDeleted.expenses, exp.name] }
+        : prevDeleted;
       return {
         ...prev,
         activityLog: appendActivity(prev, {
@@ -315,8 +335,9 @@ export const useFinanceData = () => {
         months: {
           ...prev.months,
           [selectedMonth]: {
-            ...prev.months[selectedMonth],
-            expenses: prev.months[selectedMonth].expenses.filter(e => e.id !== id)
+            ...monthData,
+            deletedFixed,
+            expenses: monthData.expenses.filter(e => e.id !== id)
           }
         }
       };
