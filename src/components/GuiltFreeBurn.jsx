@@ -60,7 +60,7 @@ function pickDailyLine(lines, seed) {
 }
 
 export const GuiltFreeBurn = ({ guiltFreeBurn, savingsGoalData }) => {
-  const { dailyLimit, guiltFreeFunds, daysRemaining, currentDay, totalDays, monthIncome, monthFixedExpenses, monthVariableExpenses, availableAfterFixed, monthlyTarget, spendingStatus, spendingDiff, monthProgress, budgetUsed, hasData, hasGoal } = guiltFreeBurn;
+  const { dailyLimit, baseDailyLimit, todaySpent, guiltFreeFunds, daysRemaining, currentDay, totalDays, monthIncome, monthFixedExpenses, monthVariableExpenses, availableAfterFixed, monthlyTarget, spendingStatus, spendingDiff, monthProgress, budgetUsed, hasData, hasGoal } = guiltFreeBurn;
 
   const dailyIdeaLine = useMemo(() => {
     const d = new Date();
@@ -105,6 +105,11 @@ export const GuiltFreeBurn = ({ guiltFreeBurn, savingsGoalData }) => {
           <div className="flex-1">
             <p className={`text-sm ${colors.text} mb-2`}>Dzisiejszy limit na przyjemności{hasGoal && <span className="text-xs opacity-70"> (z uwzględnieniem celu)</span>}:</p>
             <div className="flex items-baseline gap-3"><span className={`text-5xl lg:text-6xl font-black ${colors.accent} tracking-tight`}>{hasData ? formatCurrency(dailyLimit) : '— PLN'}</span><span className="text-slate-400 text-lg">/dzień</span></div>
+            {hasData && (
+              <p className="text-xs text-slate-400 mt-1">
+                Start dnia: <span className="text-slate-300">{formatCurrency(baseDailyLimit)}</span> • Wydane dziś: <span className="text-orange-300">{formatCurrency(todaySpent)}</span>
+              </p>
+            )}
             {hasData && <p className={`text-sm ${colors.text} mt-2 flex items-center gap-2`}>{spendingStatus === 'under' ? <><TrendingDown className="w-4 h-4 text-emerald-400" /><span>Jesteś <span className="text-emerald-400">{formatCurrencyPrecise(spendingDiff)}</span> poniżej planu!</span></> : <><TrendingUp className="w-4 h-4 text-rose-400" /><span>Przekroczyłeś budżet o <span className="text-rose-400">{formatCurrencyPrecise(spendingDiff)}</span></span></>}</p>}
             <p className={`text-xs ${colors.text} mt-1 opacity-80`}>{mood.message}</p>
           </div>

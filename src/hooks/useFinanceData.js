@@ -547,6 +547,8 @@ export const useFinanceData = () => {
     const daysRemaining = getDaysRemainingInMonth();
     const currentDay = getCurrentDay();
     const totalDays = getTotalDaysInMonth(currentMonth, CURRENT_YEAR);
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
     const monthData = data.months[currentMonth] || createEmptyMonthData();
     const monthIncome = monthData.incomes.reduce((sum, inc) => sum + inc.amount, 0);
@@ -557,7 +559,11 @@ export const useFinanceData = () => {
     const remainingAfterVariable = availableAfterFixed - monthVariableExpenses;
     const monthlyTarget = savingsGoalData.type !== 'none' ? savingsGoalData.monthlyTarget : 0;
     const guiltFreeFunds = remainingAfterVariable - monthlyTarget;
-    const dailyLimit = daysRemaining > 0 ? guiltFreeFunds / daysRemaining : 0;
+    const baseDailyLimit = daysRemaining > 0 ? guiltFreeFunds / daysRemaining : 0;
+    const todaySpent = monthData.expenses
+      .filter(e => !e.isFixed && e.date === todayStr)
+      .reduce((sum, exp) => sum + exp.amount, 0);
+    const dailyLimit = Math.max(0, baseDailyLimit - todaySpent);
 
     const idealDailyBudget = (availableAfterFixed - monthlyTarget) / totalDays;
     const idealSpentByNow = idealDailyBudget * (currentDay - 1);
@@ -569,7 +575,8 @@ export const useFinanceData = () => {
     const budgetUsed = budgetForVariable > 0 ? (monthVariableExpenses / budgetForVariable) * 100 : 0;
 
     return {
-      dailyLimit: Math.max(0, dailyLimit), guiltFreeFunds, remainingAfterVariable, daysRemaining, currentDay, totalDays,
+      dailyLimit, baseDailyLimit: Math.max(0, baseDailyLimit), todaySpent,
+      guiltFreeFunds, remainingAfterVariable, daysRemaining, currentDay, totalDays,
       monthIncome, monthFixedExpenses, monthVariableExpenses, availableAfterFixed, monthlyTarget,
       spendingStatus, spendingDiff, monthProgress, budgetUsed, budgetForVariable,
       hasData: monthIncome > 0, hasGoal: savingsGoalData.type !== 'none'
