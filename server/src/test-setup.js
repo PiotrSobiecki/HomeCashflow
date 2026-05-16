@@ -1,5 +1,11 @@
 import dotenv from 'dotenv'
-dotenv.config({ path: '../.env' })
+import { fileURLToPath } from 'url'
+import { dirname, join } from 'path'
+const here = dirname(fileURLToPath(import.meta.url))
+const root = join(here, '..', '..')
+dotenv.config({ path: join(root, '.env.local') })
+dotenv.config({ path: join(root, '.env') })
+dotenv.config({ path: join(here, '..', '.env') })
 import { neon } from '@neondatabase/serverless'
 
 // Testy wymagają stałego klucza (32 B hex); w .env możesz nadpisać FINANCE_DATA_KEY.
