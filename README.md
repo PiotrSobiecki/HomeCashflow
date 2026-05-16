@@ -84,6 +84,83 @@ cd server
 npm test
 ```
 
+## Migracje bazy danych
+
+Migracje schematu sa zarzadzane przez **Drizzle Kit**. Schemat zywie w `server/src/db/schema.js`
+i jest zrodlem prawdy. Po kazdej zmianie schematu generujesz plik SQL z diffem i aplikujesz go
+na odpowiednia baze.
+
+Sa dwa osobne configi — dev i prod — kazdy ciagnie `DATABASE_URL` z innego pliku:
+
+- dev: `.env.local` w roocie projektu
+- prod: `server/.env.production` (DATABASE_URL prod) + fallback z roota `.env.production`
+  dla pozostalych sekretow (np. `FINANCE_DATA_KEY` potrzebny do migracji danych)
+
+### Workflow zmiany schematu
+
+```bash
+cd server
+
+# 1. Edytuj src/db/schema.js (dodaj kolumne / tabele / index itp.)
+
+# 2. Wygeneruj plik migracji SQL (powstanie w drizzle/NNNN_xxx.sql)
+npm run drizzle:dev:generate
+
+# 3. Przejrzyj wygenerowany SQL i zaaplikuj na dev
+npm run drizzle:dev:migrate
+
+# 4. Zacommituj zmiany w schema.js + drizzle/
+
+# 5. Na prod (ten sam plik migracji, ma 3-sekundowy bezpiecznik)
+npm run drizzle:prod:migrate
+```
+
+### Wszystkie skroty
+
+```bash
+npm run drizzle:dev:generate    # wygeneruj migracje z diffu schema vs dev DB
+npm run drizzle:dev:migrate     # zaaplikuj pending migracje na dev
+npm run drizzle:dev:check       # sanity check spojnosci historii migracji
+npm run drizzle:dev:studio      # GUI do przegladania devowej bazy
+
+npm run drizzle:prod:generate   # zwykle niepotrzebne — generuj na devie i commituj
+npm run drizzle:prod:migrate    # aplikuj pending migracje na prod
+```
+
+### Migracja danych z legacy JSON do tabel relacyjnych
+
+Historycznie dane finansowe byly trzymane jako zaszyfrowany JSON w `finance_data.data`
+(jeden blob per gospodarstwo, prefiks `ff1:` = AES-256-GCM kluczem `FINANCE_DATA_KEY`).
+Obecnie schemat ma osobne tabele (`transactions`, `savings_accounts`, `category_budgets`,
+`savings_goals`, `activity_log`, `deleted_fixed_items`).
+
+Skrypt `scripts/run-migration-002.js` odszyfrowuje JSON i kopiuje rekordy do nowych tabel.
+Jest **idempotentny** (dla danego household kasuje swoje wiersze i wstawia od nowa).
+Stara kolumna `finance_data.data` nie jest ruszana — zostaje jako kopia bezpieczenstwa.
+
+```bash
+cd server
+
+# Podglad bez zapisu — ile czego wjedzie do nowych tabel
+node scripts/run-migration-002.js --dry-run                 # dev
+node scripts/run-migration-002.js --production --dry-run    # prod
+
+# Wlasciwa migracja danych
+npm run migrate:relational                                  # dev
+node scripts/run-migration-002.js --production              # prod
+
+# Weryfikacja: sumy z odszyfrowanego JSON-a vs sumy w nowych tabelach
+npm run migrate:relational:verify                           # dev
+node scripts/verify-migration-002.js --production           # prod
+
+# Opcjonalnie: migracja jednego konkretnego household
+node scripts/run-migration-002.js --household <uuid>
+```
+
+Pierwszy historyczny krok — przejscie kolumny `finance_data.data` z `JSONB` na `TEXT`
+(pod szyfrowanie) — `scripts/run-migration-001.js`. Juz zaaplikowane wszedzie, ma znaczenie
+tylko archiwalne.
+
 ## Dokumenty dla uzytkownikow
 
 - `docs/regulamin.md`

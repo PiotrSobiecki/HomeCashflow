@@ -108,7 +108,7 @@ export const ExpenseSection = ({
   }, [categoryBudgets]);
 
   return (
-    <div className="bg-slate-800/50 border border-slate-700/50 rounded-2xl p-6">
+    <div className="bg-slate-800/50 border border-slate-700/50 rounded-2xl p-6 h-full flex flex-col min-h-0">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
           <div className="bg-rose-500/20 p-2.5 rounded-xl">
@@ -222,14 +222,14 @@ export const ExpenseSection = ({
         </div>
       )}
 
-      <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2">
+      <div className="finance-entry-list space-y-3">
         {sortedExpenses.length === 0 ? (
           <p className="text-slate-500 text-center py-8">Brak wydatkow w tym miesiacu</p>
         ) : (
           sortedExpenses.map((expense) => (
             <div
               key={expense.id}
-              className={`flex items-center justify-between p-4 rounded-xl border transition-all ${expense.isFixed ? 'bg-rose-500/10 border-rose-500/30 hover:border-rose-400/50' : 'bg-slate-700/30 border-slate-600/30 hover:border-orange-500/30'}`}
+              className={`finance-entry-row flex items-center justify-between p-4 rounded-xl border transition-all ${expense.isFixed ? 'bg-rose-500/10 border-rose-500/30 hover:border-rose-400/50' : 'bg-slate-700/30 border-slate-600/30 hover:border-orange-500/30'}`}
             >
               {editingId === expense.id ? (
                 <div className="flex-1 flex flex-col gap-3">

@@ -28,7 +28,7 @@ describe('GET /api/finance', () => {
     expect(res.status).toBe(401)
   })
 
-  it('returns empty data for new user', async () => {
+  it('returns empty initial structure for new user', async () => {
     const { token } = await setupUserWithHousehold()
 
     const res = await app.request('/api/finance', {
@@ -37,7 +37,16 @@ describe('GET /api/finance', () => {
 
     expect(res.status).toBe(200)
     const body = await res.json()
-    expect(body.data).toEqual({})
+    // Czytamy z tabel — zwracamy pelne 12 pustych miesiecy + domyslny goal
+    expect(Object.keys(body.data.months)).toHaveLength(12)
+    for (let m = 0; m < 12; m++) {
+      expect(body.data.months[m].incomes).toEqual([])
+      expect(body.data.months[m].expenses).toEqual([])
+    }
+    expect(body.data.savingsAccounts).toEqual([])
+    expect(body.data.categoryBudgets).toEqual([])
+    expect(body.data.activityLog).toEqual([])
+    expect(body.data.savingsGoal.type).toBe('none')
   })
 })
 
@@ -130,12 +139,51 @@ describe('PUT /api/finance', () => {
     expect(body.data.months['0'].incomes[0].name).toBe('Pensja')
     expect(body.data.savingsGoal.type).toBe('monthly')
 
-    const [row] = await sql`
-      SELECT data FROM finance_data
-      JOIN household_members hm ON hm.household_id = finance_data.household_id
+    // Wrazliwe pola w tabelach sa szyfrowane (ff1:…) — w bazie nie ma plaintext "Pensja"
+    const [txn] = await sql`
+      SELECT t.name, t.amount FROM transactions t
+      JOIN household_members hm ON hm.household_id = t.household_id
       WHERE hm.user_id = ${user.id}
     `
-    expect(String(row.data)).toMatch(/^ff1:/)
-    expect(String(row.data)).not.toContain('Pensja')
+    expect(txn.name).toMatch(/^ff1:/)
+    expect(txn.name).not.toContain('Pensja')
+    expect(txn.amount).toMatch(/^ff1:/)
+    expect(txn.amount).not.toContain('5000')
+  })
+
+  it('idempotent — second PUT replaces all rows for household', async () => {
+    const { token, user } = await setupUserWithHousehold()
+
+    const first = {
+      months: { 0: { incomes: [{ id: 1, name: 'A', amount: 100 }], expenses: [] } },
+      savingsGoal: { type: 'none' },
+    }
+    const second = {
+      months: { 0: { incomes: [{ id: 2, name: 'B', amount: 200 }], expenses: [] } },
+      savingsGoal: { type: 'none' },
+    }
+
+    for (const data of [first, second]) {
+      const res = await app.request('/api/finance', {
+        method: 'PUT',
+        headers: { cookie: `token=${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data }),
+      })
+      expect(res.status).toBe(200)
+    }
+
+    const [{ cnt }] = await sql`
+      SELECT COUNT(*)::int AS cnt FROM transactions t
+      JOIN household_members hm ON hm.household_id = t.household_id
+      WHERE hm.user_id = ${user.id}
+    `
+    expect(cnt).toBe(1)
+
+    const getRes = await app.request('/api/finance', {
+      headers: { cookie: `token=${token}` },
+    })
+    const body = await getRes.json()
+    expect(body.data.months['0'].incomes[0].name).toBe('B')
+    expect(body.data.months['0'].incomes[0].amount).toBe(200)
   })
 })

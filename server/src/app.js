@@ -3,11 +3,11 @@ import { cors } from "hono/cors";
 import { HTTPException } from "hono/http-exception";
 import { jwtVerify, SignJWT } from "jose";
 import { neon } from "@neondatabase/serverless";
+import { decodeFinanceDataKey } from "./finance-crypto.js";
 import {
-  decodeFinanceDataKey,
-  encryptFinancePayload,
-  parseStoredFinanceData,
-} from "./finance-crypto.js";
+  readFinanceFromRelational,
+  writeFinanceToRelational,
+} from "./finance-relational.js";
 
 export const app = new Hono();
 
@@ -322,14 +322,23 @@ app.get("/api/finance", authMiddleware, async (c) => {
     return c.json({ data: {} });
   }
 
-  const [fd] = await sql`
-    SELECT data FROM finance_data WHERE household_id = ${membership.household_id}
-  `;
+  const rawKey = getFinanceDataKey(c);
+  if (!rawKey) {
+    return c.json(
+      { error: "Server misconfiguration: FINANCE_DATA_KEY missing" },
+      500,
+    );
+  }
+
   try {
-    const data = await parseStoredFinanceData(fd?.data, getFinanceDataKey(c));
+    const data = await readFinanceFromRelational(
+      sql,
+      membership.household_id,
+      rawKey,
+    );
     return c.json({ data });
   } catch (err) {
-    console.error("GET /api/finance decrypt/parse error:", err);
+    console.error("GET /api/finance read error:", err);
     return c.json({ error: "Failed to load finance data" }, 500);
   }
 });
@@ -363,37 +372,20 @@ app.put("/api/finance", authMiddleware, async (c) => {
   const rawKey = getFinanceDataKey(c);
   if (!rawKey) {
     return c.json(
-      {
-        error:
-          "Server misconfiguration: set FINANCE_DATA_KEY (32-byte hex or Base64)",
-      },
+      { error: "Server misconfiguration: FINANCE_DATA_KEY missing" },
       500,
     );
   }
 
-  let jsonPayload;
   try {
-    jsonPayload = JSON.stringify(body.data);
-  } catch {
-    return c.json({ error: "Data is not serializable" }, 400);
-  }
-
-  let encryptedPayload;
-  try {
-    encryptedPayload = await encryptFinancePayload(jsonPayload, rawKey);
+    await writeFinanceToRelational(
+      sql,
+      membership.household_id,
+      body.data,
+      rawKey,
+    );
   } catch (err) {
-    console.error("PUT /api/finance encrypt error:", err);
-    return c.json({ error: "Failed to encrypt finance data" }, 500);
-  }
-
-  try {
-    await sql`
-      UPDATE finance_data
-      SET data = ${encryptedPayload}, updated_at = NOW()
-      WHERE household_id = ${membership.household_id}
-    `;
-  } catch (err) {
-    console.error("PUT /api/finance DB error:", err);
+    console.error("PUT /api/finance write error:", err);
     return c.json({ error: "Failed to save finance data" }, 500);
   }
   return c.json({ ok: true });

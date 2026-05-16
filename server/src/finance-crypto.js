@@ -91,6 +91,42 @@ export async function decryptFinancePayload(stored, rawKey) {
 }
 
 /**
+ * Szyfrowanie pojedynczego pola tekstowego (lub liczbowego po stringify).
+ * NULL/undefined → NULL (nie szyfrujemy "pustek").
+ * @param {string | number | null | undefined} value
+ * @param {Uint8Array} rawKey
+ * @returns {Promise<string | null>}
+ */
+export async function encryptField(value, rawKey) {
+  if (value == null) return null
+  return encryptFinancePayload(String(value), rawKey)
+}
+
+/**
+ * Deszyfrowanie pola. NULL → NULL. Brak prefiksu ff1: → traktujemy jak plaintext legacy
+ * (na wypadek odczytu rekordów sprzed włączenia szyfrowania).
+ * @param {string | null | undefined} stored
+ * @param {Uint8Array} rawKey
+ * @returns {Promise<string | null>}
+ */
+export async function decryptField(stored, rawKey) {
+  if (stored == null || stored === '') return null
+  if (!stored.startsWith('ff1:')) return stored
+  return decryptFinancePayload(stored, rawKey)
+}
+
+/**
+ * Wariant dla liczb (zwraca number lub null).
+ * @returns {Promise<number | null>}
+ */
+export async function decryptFieldAsNumber(stored, rawKey) {
+  const plain = await decryptField(stored, rawKey)
+  if (plain == null) return null
+  const n = Number(plain)
+  return Number.isFinite(n) ? n : null
+}
+
+/**
  * @param {unknown} stored — z DB: string (TEXT / legacy JSON) lub obiekt (stary JSONB)
  * @param {Uint8Array | null} rawKey
  */
