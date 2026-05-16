@@ -97,3 +97,43 @@ export const deleteTransaction = async (id, updatedAt) => {
   }
 };
 
+// ===== Per-row endpointy: savings_accounts, category_budgets, savings_goal (Phase 3) =====
+
+const mutateWithMatch = async (url, method, ifMatch, body) => {
+  const res = await fetch(`${API_URL}${url}`, {
+    method,
+    credentials: 'include',
+    headers: {
+      ...(body !== undefined ? { 'Content-Type': 'application/json', Accept: 'application/json' } : {}),
+      ...(ifMatch ? { 'If-Match': ifMatch } : {}),
+    },
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+  });
+  if (res.status === 409) {
+    const data = await res.json().catch(() => ({}));
+    throw new ConflictError(data.current ?? null);
+  }
+  if (!res.ok && res.status !== 204) {
+    const detail = await res.json().catch(() => ({}));
+    throw new Error(detail.error || `${method} ${url}: ${res.status}`);
+  }
+  if (res.status === 204) return null;
+  return res.json();
+};
+
+export const createSavingsAccount = (body) =>
+  mutateWithMatch('/api/savings-accounts', 'POST', null, body);
+export const patchSavingsAccount = (id, updatedAt, changes) =>
+  mutateWithMatch(`/api/savings-accounts/${id}`, 'PATCH', updatedAt, changes);
+export const deleteSavingsAccount = (id, updatedAt) =>
+  mutateWithMatch(`/api/savings-accounts/${id}`, 'DELETE', updatedAt);
+
+export const createCategoryBudget = (body) =>
+  mutateWithMatch('/api/category-budgets', 'POST', null, body);
+export const patchCategoryBudget = (id, updatedAt, changes) =>
+  mutateWithMatch(`/api/category-budgets/${id}`, 'PATCH', updatedAt, changes);
+export const deleteCategoryBudget = (id, updatedAt) =>
+  mutateWithMatch(`/api/category-budgets/${id}`, 'DELETE', updatedAt);
+
+export const putSavingsGoal = (body) =>
+  mutateWithMatch('/api/savings-goal', 'PUT', null, body);
