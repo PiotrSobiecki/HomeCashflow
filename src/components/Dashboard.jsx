@@ -361,8 +361,8 @@ export const Dashboard = () => {
           variableExpenses={variableExpenses}
           balance={balance}
         />
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div id="income-section">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
+          <div id="income-section" className="h-full min-h-0">
             <IncomeSection
               incomes={currentMonthData.incomes}
               addIncome={addIncome}
@@ -370,7 +370,7 @@ export const Dashboard = () => {
               deleteIncome={deleteIncome}
             />
           </div>
-          <div id="expense-section">
+          <div id="expense-section" className="h-full min-h-0">
             <ExpenseSection
               expenses={currentMonthData.expenses}
               addExpense={addExpense}
