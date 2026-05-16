@@ -1,5 +1,12 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { fetchFinanceData, saveFinanceDataOnServer } from '../lib/api';
+import {
+  fetchFinanceData,
+  saveFinanceDataOnServer,
+  createTransaction,
+  patchTransaction,
+  deleteTransaction,
+  ConflictError,
+} from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 
 // Stałe
@@ -99,6 +106,12 @@ export const useFinanceData = () => {
   const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth());
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  // Konflikt 409 z per-row mutacji — Dashboard renderuje ConflictDialog
+  const [conflict, setConflict] = useState(null);
+  const clearConflict = useCallback(() => setConflict(null), []);
+
+  // Tryb live: user zalogowany i nie gość — używamy per-row API z backendem
+  const isLive = !!user && !isGuest;
 
   // Pobierz dane - z API (Neon) lub localStorage
   useEffect(() => {
@@ -218,153 +231,335 @@ export const useFinanceData = () => {
 
     if (newFixedIncomes.length === 0 && newFixedExpenses.length === 0) return;
 
-    updateData(prev => ({
-      ...prev,
-      months: {
-        ...prev.months,
-        [selectedMonth]: {
-          ...prev.months[selectedMonth],
-          incomes: [...prev.months[selectedMonth].incomes, ...newFixedIncomes],
-          expenses: [...prev.months[selectedMonth].expenses, ...newFixedExpenses],
+    if (!isLive) {
+      // Guest mode — stary path (localStorage przez updateData)
+      updateData(prev => ({
+        ...prev,
+        months: {
+          ...prev.months,
+          [selectedMonth]: {
+            ...prev.months[selectedMonth],
+            incomes: [...prev.months[selectedMonth].incomes, ...newFixedIncomes],
+            expenses: [...prev.months[selectedMonth].expenses, ...newFixedExpenses],
+          }
         }
-      }
-    }));
+      }));
+      return;
+    }
+
+    // Live mode — per-row POST per kopiowaną stałą (liveCreate wstawia optimistic + utrwala)
+    for (const inc of newFixedIncomes) {
+      liveCreate('income', selectedMonth, { name: inc.name, amount: inc.amount, isFixed: true, date: inc.date ?? '' });
+    }
+    for (const exp of newFixedExpenses) {
+      liveCreate('expense', selectedMonth, { name: exp.name, amount: exp.amount, isFixed: true, date: exp.date ?? '' });
+    }
   }, [selectedMonth, loading]);
 
   // ============ CRUD DLA PRZYCHODÓW ============
-  const addIncome = (name, amount, isFixed = false, date = '') => {
-    const amt = parseFloat(amount);
-    updateData(prev => ({
+  // Live mode (zalogowany, nie gość) → per-row API z optimistic+rollback+conflict.
+  // Guest mode → stary path przez updateData → localStorage.
+
+  const buildTxnDate = (date, monthIdx) =>
+    date || `${CURRENT_YEAR}-${String(monthIdx + 1).padStart(2, '0')}-01`;
+
+  const replaceItem = (collection, predicate, value) =>
+    collection.map(it => (predicate(it) ? value : it));
+
+  const upsertTxnLocal = (kind, monthIdx, predicate, nextItem) =>
+    setData(prev => ({
       ...prev,
-      activityLog: appendActivity(prev, { action: 'add', kind: 'income', month: selectedMonth, label: name, amount: amt }),
       months: {
         ...prev.months,
-        [selectedMonth]: {
-          ...prev.months[selectedMonth],
-          incomes: [...prev.months[selectedMonth].incomes, { id: Date.now(), name, amount: amt, isFixed, date }]
-        }
-      }
+        [monthIdx]: {
+          ...prev.months[monthIdx],
+          [kind === 'income' ? 'incomes' : 'expenses']: replaceItem(
+            prev.months[monthIdx][kind === 'income' ? 'incomes' : 'expenses'],
+            predicate,
+            nextItem,
+          ),
+        },
+      },
     }));
+
+  const removeTxnLocal = (kind, monthIdx, predicate) =>
+    setData(prev => ({
+      ...prev,
+      months: {
+        ...prev.months,
+        [monthIdx]: {
+          ...prev.months[monthIdx],
+          [kind === 'income' ? 'incomes' : 'expenses']: prev.months[monthIdx][
+            kind === 'income' ? 'incomes' : 'expenses'
+          ].filter(it => !predicate(it)),
+        },
+      },
+    }));
+
+  const insertTxnLocal = (kind, monthIdx, item) =>
+    setData(prev => ({
+      ...prev,
+      months: {
+        ...prev.months,
+        [monthIdx]: {
+          ...prev.months[monthIdx],
+          [kind === 'income' ? 'incomes' : 'expenses']: [
+            ...prev.months[monthIdx][kind === 'income' ? 'incomes' : 'expenses'],
+            item,
+          ],
+        },
+      },
+    }));
+
+  // === Per-row helpers ===
+  const liveCreate = async (kind, monthIdx, fields) => {
+    const tempId = `temp-${Date.now()}-${Math.random()}`;
+    const txnDate = buildTxnDate(fields.date, monthIdx);
+    const optimistic = { id: tempId, ...fields, date: txnDate, updatedAt: null };
+    insertTxnLocal(kind, monthIdx, optimistic);
+    setSaving(true);
+    try {
+      const saved = await createTransaction({
+        kind, name: fields.name, amount: fields.amount, txnDate,
+        year: CURRENT_YEAR, month: monthIdx,
+        isFixed: !!fields.isFixed,
+        ...(kind === 'expense' && !fields.isFixed && fields.category ? { category: fields.category } : {}),
+      });
+      upsertTxnLocal(kind, monthIdx, it => it.id === tempId, {
+        id: saved.id, name: saved.name, amount: saved.amount,
+        isFixed: saved.isFixed, date: saved.txnDate, updatedAt: saved.updatedAt,
+        ...(saved.category ? { category: saved.category } : {}),
+      });
+    } catch (err) {
+      console.error(`add ${kind} error:`, err);
+      removeTxnLocal(kind, monthIdx, it => it.id === tempId);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const liveUpdate = async (kind, monthIdx, id, fields) => {
+    // Snapshot poprzedniego rekordu do rollback / current.updatedAt do PATCH
+    let prevItem = null;
+    setData(prev => {
+      const list = prev.months[monthIdx][kind === 'income' ? 'incomes' : 'expenses'];
+      prevItem = list.find(it => it.id === id) ?? null;
+      const nextItem = prevItem ? { ...prevItem, ...fields, date: buildTxnDate(fields.date, monthIdx) } : null;
+      if (!nextItem) return prev;
+      return {
+        ...prev,
+        months: { ...prev.months, [monthIdx]: {
+          ...prev.months[monthIdx],
+          [kind === 'income' ? 'incomes' : 'expenses']: list.map(it => it.id === id ? nextItem : it),
+        }},
+      };
+    });
+    if (!prevItem?.updatedAt) {
+      // Brak updatedAt (POST jeszcze w locie) — pomijamy PATCH; stan lokalny zaktualizowany,
+      // serwerowa wersja zostaje z POST-a. Akceptowalna race condition.
+      return;
+    }
+    setSaving(true);
+    const changes = { name: fields.name, amount: fields.amount };
+    try {
+      const saved = await patchTransaction(id, prevItem.updatedAt, changes);
+      upsertTxnLocal(kind, monthIdx, it => it.id === id, {
+        id: saved.id, name: saved.name, amount: saved.amount,
+        isFixed: saved.isFixed, date: saved.txnDate, updatedAt: saved.updatedAt,
+        ...(saved.category ? { category: saved.category } : {}),
+      });
+    } catch (err) {
+      if (err instanceof ConflictError) {
+        setConflict({
+          resourceLabel: prevItem.name,
+          yours: { name: fields.name, amount: fields.amount },
+          theirs: { name: err.current.name, amount: err.current.amount },
+          onOverride: async () => {
+            try {
+              const saved = await patchTransaction(id, err.current.updatedAt, changes);
+              upsertTxnLocal(kind, monthIdx, it => it.id === id, {
+                id: saved.id, name: saved.name, amount: saved.amount,
+                isFixed: saved.isFixed, date: saved.txnDate, updatedAt: saved.updatedAt,
+                ...(saved.category ? { category: saved.category } : {}),
+              });
+            } catch (e) {
+              console.error('override retry error:', e);
+            } finally {
+              clearConflict();
+            }
+          },
+          onCancel: () => {
+            upsertTxnLocal(kind, monthIdx, it => it.id === id, {
+              id: err.current.id, name: err.current.name, amount: err.current.amount,
+              isFixed: err.current.isFixed, date: err.current.txnDate, updatedAt: err.current.updatedAt,
+              ...(err.current.category ? { category: err.current.category } : {}),
+            });
+            clearConflict();
+          },
+        });
+      } else {
+        console.error(`update ${kind} error:`, err);
+        if (prevItem) upsertTxnLocal(kind, monthIdx, it => it.id === id, prevItem);
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const liveDelete = async (kind, monthIdx, id) => {
+    let prevItem = null;
+    setData(prev => {
+      const list = prev.months[monthIdx][kind === 'income' ? 'incomes' : 'expenses'];
+      prevItem = list.find(it => it.id === id) ?? null;
+      const monthData = prev.months[monthIdx];
+      const prevDeleted = monthData.deletedFixed ?? { incomes: [], expenses: [] };
+      const deletedFixed = prevItem?.isFixed
+        ? { ...prevDeleted, [kind === 'income' ? 'incomes' : 'expenses']:
+            [...prevDeleted[kind === 'income' ? 'incomes' : 'expenses'], prevItem.name] }
+        : prevDeleted;
+      return {
+        ...prev,
+        months: { ...prev.months, [monthIdx]: {
+          ...monthData,
+          deletedFixed,
+          [kind === 'income' ? 'incomes' : 'expenses']: list.filter(it => it.id !== id),
+        }},
+      };
+    });
+    if (!prevItem?.updatedAt) return; // niezpersystowany jeszcze rekord
+    setSaving(true);
+    try {
+      await deleteTransaction(id, prevItem.updatedAt);
+    } catch (err) {
+      if (err instanceof ConflictError) {
+        console.warn(`Konflikt przy DELETE ${id} — ktoś inny zmienił. Odświeżam stan po prostu nic nie robiąc.`);
+        // Optymistycznie usunęliśmy lokalnie — to OK; przy najbliższym GET zobaczymy świeży stan.
+      } else {
+        console.error(`delete ${kind} error:`, err);
+        // Rollback: wstaw z powrotem
+        if (prevItem) insertTxnLocal(kind, monthIdx, prevItem);
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const addIncome = (name, amount, isFixed = false, date = '') => {
+    const amt = parseFloat(amount);
+    if (!isLive) {
+      updateData(prev => ({
+        ...prev,
+        activityLog: appendActivity(prev, { action: 'add', kind: 'income', month: selectedMonth, label: name, amount: amt }),
+        months: { ...prev.months, [selectedMonth]: {
+          ...prev.months[selectedMonth],
+          incomes: [...prev.months[selectedMonth].incomes, { id: Date.now(), name, amount: amt, isFixed, date }],
+        }},
+      }));
+      return;
+    }
+    liveCreate('income', selectedMonth, { name, amount: amt, isFixed, date });
   };
 
   const updateIncome = (id, name, amount, isFixed, date) => {
     const amt = parseFloat(amount);
-    updateData(prev => ({
-      ...prev,
-      activityLog: appendActivity(prev, { action: 'update', kind: 'income', month: selectedMonth, label: name, amount: amt }),
-      months: {
-        ...prev.months,
-        [selectedMonth]: {
+    if (!isLive || String(id).startsWith('temp-')) {
+      // Guest albo wpis jeszcze nieutrwalony — fallback do starego flow
+      updateData(prev => ({
+        ...prev,
+        activityLog: appendActivity(prev, { action: 'update', kind: 'income', month: selectedMonth, label: name, amount: amt }),
+        months: { ...prev.months, [selectedMonth]: {
           ...prev.months[selectedMonth],
           incomes: prev.months[selectedMonth].incomes.map(inc =>
             inc.id === id ? { ...inc, name, amount: amt, isFixed, date } : inc
-          )
-        }
-      }
-    }));
+          ),
+        }},
+      }));
+      return;
+    }
+    liveUpdate('income', selectedMonth, id, { name, amount: amt, isFixed, date });
   };
 
   const deleteIncome = (id) => {
-    updateData(prev => {
-      const inc = prev.months[selectedMonth]?.incomes.find(i => i.id === id);
-      const monthData = prev.months[selectedMonth];
-      const prevDeleted = monthData.deletedFixed ?? { incomes: [], expenses: [] };
-      const deletedFixed = inc?.isFixed
-        ? { ...prevDeleted, incomes: [...prevDeleted.incomes, inc.name] }
-        : prevDeleted;
-      return {
-        ...prev,
-        activityLog: appendActivity(prev, {
-          action: 'delete',
-          kind: 'income',
-          month: selectedMonth,
-          label: inc?.name,
-          amount: inc?.amount,
-        }),
-        months: {
-          ...prev.months,
-          [selectedMonth]: {
-            ...monthData,
-            deletedFixed,
-            incomes: monthData.incomes.filter(i => i.id !== id)
-          }
-        }
-      };
-    });
+    if (!isLive || String(id).startsWith('temp-')) {
+      updateData(prev => {
+        const inc = prev.months[selectedMonth]?.incomes.find(i => i.id === id);
+        const monthData = prev.months[selectedMonth];
+        const prevDeleted = monthData.deletedFixed ?? { incomes: [], expenses: [] };
+        const deletedFixed = inc?.isFixed
+          ? { ...prevDeleted, incomes: [...prevDeleted.incomes, inc.name] }
+          : prevDeleted;
+        return {
+          ...prev,
+          activityLog: appendActivity(prev, { action: 'delete', kind: 'income', month: selectedMonth, label: inc?.name, amount: inc?.amount }),
+          months: { ...prev.months, [selectedMonth]: { ...monthData, deletedFixed, incomes: monthData.incomes.filter(i => i.id !== id) } },
+        };
+      });
+      return;
+    }
+    liveDelete('income', selectedMonth, id);
   };
 
   // ============ CRUD DLA WYDATKÓW ============
   const addExpense = (name, amount, date, isFixed = false, category = null) => {
     const amt = parseFloat(amount);
-    updateData(prev => {
-      const allowedCategories = new Set((prev.categoryBudgets || []).map(c => c.name));
-      if (!isFixed && (!category || !allowedCategories.has(category))) return prev;
-      const storedCategory = isFixed ? undefined : category;
-      return ({
+    const allowedCategories = new Set((data.categoryBudgets || []).map(c => c.name));
+    if (!isFixed && (!category || !allowedCategories.has(category))) return;
+    const storedCategory = isFixed ? null : category;
+    if (!isLive) {
+      updateData(prev => ({
         ...prev,
         activityLog: appendActivity(prev, { action: 'add', kind: 'expense', month: selectedMonth, label: name, amount: amt }),
-        months: {
-          ...prev.months,
-          [selectedMonth]: {
-            ...prev.months[selectedMonth],
-            expenses: [...prev.months[selectedMonth].expenses, { id: Date.now(), name, amount: amt, date, isFixed, ...(storedCategory ? { category: storedCategory } : {}) }]
-          }
-        }
-      });
-    });
+        months: { ...prev.months, [selectedMonth]: {
+          ...prev.months[selectedMonth],
+          expenses: [...prev.months[selectedMonth].expenses, { id: Date.now(), name, amount: amt, date, isFixed, ...(storedCategory ? { category: storedCategory } : {}) }],
+        }},
+      }));
+      return;
+    }
+    liveCreate('expense', selectedMonth, { name, amount: amt, isFixed, date, category: storedCategory });
   };
 
   const updateExpense = (id, name, amount, date, isFixed, category = null) => {
     const amt = parseFloat(amount);
-    updateData(prev => {
-      const allowedCategories = new Set((prev.categoryBudgets || []).map(c => c.name));
-      if (!isFixed && (!category || !allowedCategories.has(category))) return prev;
-      const storedCategory = isFixed ? undefined : category;
-      return ({
+    const allowedCategories = new Set((data.categoryBudgets || []).map(c => c.name));
+    if (!isFixed && (!category || !allowedCategories.has(category))) return;
+    const storedCategory = isFixed ? null : category;
+    if (!isLive || String(id).startsWith('temp-')) {
+      updateData(prev => ({
         ...prev,
         activityLog: appendActivity(prev, { action: 'update', kind: 'expense', month: selectedMonth, label: name, amount: amt }),
-        months: {
-          ...prev.months,
-          [selectedMonth]: {
-            ...prev.months[selectedMonth],
-            expenses: prev.months[selectedMonth].expenses.map(exp =>
-              exp.id === id
-                ? { ...exp, name, amount: amt, date, isFixed, ...(storedCategory ? { category: storedCategory } : { category: undefined }) }
-                : exp
-            )
-          }
-        }
-      });
-    });
+        months: { ...prev.months, [selectedMonth]: {
+          ...prev.months[selectedMonth],
+          expenses: prev.months[selectedMonth].expenses.map(exp =>
+            exp.id === id
+              ? { ...exp, name, amount: amt, date, isFixed, ...(storedCategory ? { category: storedCategory } : { category: undefined }) }
+              : exp
+          ),
+        }},
+      }));
+      return;
+    }
+    liveUpdate('expense', selectedMonth, id, { name, amount: amt, isFixed, date, category: storedCategory });
   };
 
   const deleteExpense = (id) => {
-    updateData(prev => {
-      const exp = prev.months[selectedMonth]?.expenses.find(e => e.id === id);
-      const monthData = prev.months[selectedMonth];
-      const prevDeleted = monthData.deletedFixed ?? { incomes: [], expenses: [] };
-      const deletedFixed = exp?.isFixed
-        ? { ...prevDeleted, expenses: [...prevDeleted.expenses, exp.name] }
-        : prevDeleted;
-      return {
-        ...prev,
-        activityLog: appendActivity(prev, {
-          action: 'delete',
-          kind: 'expense',
-          month: selectedMonth,
-          label: exp?.name,
-          amount: exp?.amount,
-        }),
-        months: {
-          ...prev.months,
-          [selectedMonth]: {
-            ...monthData,
-            deletedFixed,
-            expenses: monthData.expenses.filter(e => e.id !== id)
-          }
-        }
-      };
-    });
+    if (!isLive || String(id).startsWith('temp-')) {
+      updateData(prev => {
+        const exp = prev.months[selectedMonth]?.expenses.find(e => e.id === id);
+        const monthData = prev.months[selectedMonth];
+        const prevDeleted = monthData.deletedFixed ?? { incomes: [], expenses: [] };
+        const deletedFixed = exp?.isFixed
+          ? { ...prevDeleted, expenses: [...prevDeleted.expenses, exp.name] }
+          : prevDeleted;
+        return {
+          ...prev,
+          activityLog: appendActivity(prev, { action: 'delete', kind: 'expense', month: selectedMonth, label: exp?.name, amount: exp?.amount }),
+          months: { ...prev.months, [selectedMonth]: { ...monthData, deletedFixed, expenses: monthData.expenses.filter(e => e.id !== id) } },
+        };
+      });
+      return;
+    }
+    liveDelete('expense', selectedMonth, id);
   };
 
   // ============ CEL OSZCZĘDNOŚCIOWY ============
@@ -686,6 +881,7 @@ export const useFinanceData = () => {
     categoryBudgets: data.categoryBudgets, categorySpending, totalCategoryLimits,
     addCategoryBudget, updateCategoryBudget, deleteCategoryBudget,
     activityLog, clearActivityLog,
-    MONTHS, MONTHS_SHORT, CURRENT_YEAR, getCurrentMonth, loading, saving
+    MONTHS, MONTHS_SHORT, CURRENT_YEAR, getCurrentMonth, loading, saving,
+    conflict, clearConflict,
   };
 };
