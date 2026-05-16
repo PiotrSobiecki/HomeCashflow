@@ -32,8 +32,8 @@ export async function readFinanceFromRelational(sql, householdId, rawKey) {
         FROM transactions WHERE household_id = ${householdId}
         ORDER BY year, month, txn_date`,
     sql`SELECT year, month, kind, name FROM deleted_fixed_items WHERE household_id = ${householdId}`,
-    sql`SELECT id, name, amount, icon FROM savings_accounts WHERE household_id = ${householdId} ORDER BY created_at`,
-    sql`SELECT id, name, monthly_limit FROM category_budgets WHERE household_id = ${householdId} ORDER BY created_at`,
+    sql`SELECT id, name, amount, icon, updated_at FROM savings_accounts WHERE household_id = ${householdId} ORDER BY created_at`,
+    sql`SELECT id, name, monthly_limit, updated_at FROM category_budgets WHERE household_id = ${householdId} ORDER BY created_at`,
     sql`SELECT type, monthly_amount, yearly_amount, target_month FROM savings_goals WHERE household_id = ${householdId}`,
     sql`SELECT id, user_id, user_name, at, action, kind, label, amount, month
         FROM activity_log WHERE household_id = ${householdId}
@@ -78,6 +78,7 @@ export async function readFinanceFromRelational(sql, householdId, rawKey) {
       name: name ?? '',
       amount: amountStr == null ? 0 : Number(amountStr) || 0,
       icon: s.icon ?? 'bank',
+      updatedAt: s.updated_at instanceof Date ? s.updated_at.toISOString() : String(s.updated_at),
     })
   }
 
@@ -89,6 +90,7 @@ export async function readFinanceFromRelational(sql, householdId, rawKey) {
       id: c.id,
       name: name ?? '',
       limit: limitStr == null ? 0 : Number(limitStr) || 0,
+      updatedAt: c.updated_at instanceof Date ? c.updated_at.toISOString() : String(c.updated_at),
     })
   }
 
@@ -133,13 +135,18 @@ export async function readFinanceFromRelational(sql, householdId, rawKey) {
  * Atomowo w jednej transakcji.
  *
  * Opcje:
- *   skipTransactions — nie rusza tabel `transactions` i `deleted_fixed_items`.
- *     Używane przez stary PUT /api/finance po Phase 1: transakcje są zarządzane
- *     przez per-row endpointy, więc PUT (który ratuje oszczędności/kategorie/goal/
- *     activity_log) musi je zostawić w spokoju.
+ *   onlyActivity — tylko activity_log jest replace'owany. Wszystkie inne tabele
+ *     (transactions, savings_accounts, category_budgets, savings_goals,
+ *     deleted_fixed_items) zarządzane przez per-row endpointy, więc stary
+ *     PUT /api/finance używa tej flagi po Phase 3 żeby ich nie nadpisać.
+ *   skipTransactions — legacy flaga z Phase 1. Po Phase 3 użyj onlyActivity.
  */
 export async function writeFinanceToRelational(sql, householdId, data, rawKey, options = {}) {
-  const skipTransactions = options.skipTransactions === true
+  const onlyActivity = options.onlyActivity === true
+  const skipTransactions = onlyActivity || options.skipTransactions === true
+  const skipSavings = onlyActivity
+  const skipCategories = onlyActivity
+  const skipGoal = onlyActivity
   const months = data?.months ?? {}
   const savingsAccounts = Array.isArray(data?.savingsAccounts) ? data.savingsAccounts : []
   const categoryBudgets = Array.isArray(data?.categoryBudgets) ? data.categoryBudgets : []
@@ -233,13 +240,19 @@ export async function writeFinanceToRelational(sql, householdId, data, rawKey, o
     }
   }
 
-  // Buduj liste queries do transakcji.
-  const queries = [
-    sql`DELETE FROM savings_accounts WHERE household_id = ${householdId}`,
-    sql`DELETE FROM category_budgets WHERE household_id = ${householdId}`,
-    sql`DELETE FROM savings_goals WHERE household_id = ${householdId}`,
-    sql`DELETE FROM activity_log WHERE household_id = ${householdId}`,
-  ]
+  // Buduj liste queries do transakcji. Każda flaga skip* opuszcza
+  // odpowiednie DELETE+INSERT-y, żeby per-row endpointy mogły być source of truth.
+  const queries = [sql`DELETE FROM activity_log WHERE household_id = ${householdId}`]
+
+  if (!skipSavings) {
+    queries.push(sql`DELETE FROM savings_accounts WHERE household_id = ${householdId}`)
+  }
+  if (!skipCategories) {
+    queries.push(sql`DELETE FROM category_budgets WHERE household_id = ${householdId}`)
+  }
+  if (!skipGoal) {
+    queries.push(sql`DELETE FROM savings_goals WHERE household_id = ${householdId}`)
+  }
 
   if (!skipTransactions) {
     queries.unshift(
@@ -263,19 +276,23 @@ export async function writeFinanceToRelational(sql, householdId, data, rawKey, o
       `)
     }
   }
-  for (const s of savingsInserts) {
-    queries.push(sql`
-      INSERT INTO savings_accounts (household_id, name, amount, icon, legacy_id)
-      VALUES (${householdId}, ${s.nameEnc}, ${s.amountEnc}, ${s.icon}, ${s.legacy_id})
-    `)
+  if (!skipSavings) {
+    for (const s of savingsInserts) {
+      queries.push(sql`
+        INSERT INTO savings_accounts (household_id, name, amount, icon, legacy_id)
+        VALUES (${householdId}, ${s.nameEnc}, ${s.amountEnc}, ${s.icon}, ${s.legacy_id})
+      `)
+    }
   }
-  for (const c of categoryInserts) {
-    queries.push(sql`
-      INSERT INTO category_budgets (household_id, name, monthly_limit, legacy_id)
-      VALUES (${householdId}, ${c.nameEnc}, ${c.limitEnc}, ${c.legacy_id})
-    `)
+  if (!skipCategories) {
+    for (const c of categoryInserts) {
+      queries.push(sql`
+        INSERT INTO category_budgets (household_id, name, monthly_limit, legacy_id)
+        VALUES (${householdId}, ${c.nameEnc}, ${c.limitEnc}, ${c.legacy_id})
+      `)
+    }
   }
-  if (goalInsert) {
+  if (!skipGoal && goalInsert) {
     queries.push(sql`
       INSERT INTO savings_goals (household_id, type, monthly_amount, yearly_amount, target_month)
       VALUES (${householdId}, ${goalInsert.type}, ${goalInsert.monthlyEnc},

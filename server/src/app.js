@@ -378,14 +378,14 @@ app.put("/api/finance", authMiddleware, async (c) => {
   }
 
   try {
-    // Po Phase 1 transakcje zarządzane przez per-row endpointy — PUT
-    // ich nie rusza, żeby nie nadpisać świeżych POST/PATCH/DELETE z innej karty.
+    // Po Phase 3 wszystkie zasoby zarządzane per-row — PUT zostaje
+    // tylko do replacowania activity_log (do czasu Phase 4 → action_log).
     await writeFinanceToRelational(
       sql,
       membership.household_id,
       body.data,
       rawKey,
-      { skipTransactions: true },
+      { onlyActivity: true },
     );
   } catch (err) {
     console.error("PUT /api/finance write error:", err);
@@ -578,6 +578,296 @@ app.delete("/api/transactions/:id", authMiddleware, async (c) => {
 
   await sql`DELETE FROM transactions WHERE id = ${id}`;
   return c.body(null, 204);
+});
+
+// ============ SAVINGS ACCOUNTS (per-row) ============
+
+function validateSavingsAccountInput(body) {
+  if (!body || typeof body !== "object") return "Body must be a JSON object";
+  if (typeof body.name !== "string" || !body.name.trim()) return "name is required";
+  if (typeof body.amount !== "number" || !Number.isFinite(body.amount)) return "amount must be a finite number";
+  return null;
+}
+
+async function loadSavingsAccountForMutation(sql, userId, id, ifMatch, rawKey) {
+  const [row] = await sql`
+    SELECT s.* FROM savings_accounts s
+    JOIN household_members hm ON hm.household_id = s.household_id
+    WHERE s.id = ${id} AND hm.user_id = ${userId}
+  `;
+  if (!row) {
+    const [exists] = await sql`SELECT 1 FROM savings_accounts WHERE id = ${id}`;
+    return { error: { status: exists ? 403 : 404, body: { error: exists ? "forbidden" : "not found" } } };
+  }
+  const updatedAtIso = row.updated_at instanceof Date ? row.updated_at.toISOString() : String(row.updated_at);
+  if (updatedAtIso !== ifMatch) {
+    return {
+      error: {
+        status: 409,
+        body: {
+          error: "conflict",
+          current: {
+            id: row.id,
+            name: await decryptField(row.name, rawKey),
+            amount: Number(await decryptField(row.amount, rawKey)),
+            icon: row.icon,
+            updatedAt: updatedAtIso,
+          },
+        },
+      },
+    };
+  }
+  return { ok: true, row, updatedAtIso };
+}
+
+app.post("/api/savings-accounts", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+
+  let body;
+  try { body = await c.req.json(); } catch { return c.json({ error: "Invalid JSON body" }, 400); }
+  const validationError = validateSavingsAccountInput(body);
+  if (validationError) return c.json({ error: validationError }, 400);
+
+  const [membership] = await sql`
+    SELECT household_id FROM household_members WHERE user_id = ${user.id}
+  `;
+  if (!membership) return c.json({ error: "No household" }, 400);
+
+  const rawKey = getFinanceDataKey(c);
+  const nameEnc = await encryptField(body.name, rawKey);
+  const amountEnc = await encryptField(body.amount, rawKey);
+
+  const [row] = await sql`
+    INSERT INTO savings_accounts (household_id, name, amount, icon)
+    VALUES (${membership.household_id}, ${nameEnc}, ${amountEnc}, ${body.icon ?? null})
+    RETURNING id, updated_at
+  `;
+
+  return c.json({
+    id: row.id,
+    name: body.name,
+    amount: body.amount,
+    icon: body.icon ?? null,
+    updatedAt: row.updated_at,
+  }, 201);
+});
+
+app.patch("/api/savings-accounts/:id", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+  const id = c.req.param("id");
+  const ifMatch = c.req.header("if-match");
+  if (!ifMatch) return c.json({ error: "If-Match header is required" }, 400);
+  const body = await c.req.json();
+  const rawKey = getFinanceDataKey(c);
+
+  const result = await loadSavingsAccountForMutation(sql, user.id, id, ifMatch, rawKey);
+  if (result.error) return c.json(result.error.body, result.error.status);
+  const { row } = result;
+
+  const nextName = body.name !== undefined ? body.name : null;
+  const nextAmount = body.amount !== undefined ? body.amount : null;
+  const nextIcon = body.icon !== undefined ? body.icon : row.icon;
+  const nameEnc = nextName !== null ? await encryptField(nextName, rawKey) : row.name;
+  const amountEnc = nextAmount !== null ? await encryptField(nextAmount, rawKey) : row.amount;
+
+  const [updated] = await sql`
+    UPDATE savings_accounts
+    SET name = ${nameEnc}, amount = ${amountEnc}, icon = ${nextIcon}, updated_at = NOW()
+    WHERE id = ${id}
+    RETURNING id, icon, updated_at
+  `;
+
+  return c.json({
+    id: updated.id,
+    name: nextName ?? (await decryptField(row.name, rawKey)),
+    amount: nextAmount ?? Number(await decryptField(row.amount, rawKey)),
+    icon: updated.icon,
+    updatedAt: updated.updated_at,
+  });
+});
+
+app.delete("/api/savings-accounts/:id", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+  const id = c.req.param("id");
+  const ifMatch = c.req.header("if-match");
+  if (!ifMatch) return c.json({ error: "If-Match header is required" }, 400);
+  const rawKey = getFinanceDataKey(c);
+
+  const result = await loadSavingsAccountForMutation(sql, user.id, id, ifMatch, rawKey);
+  if (result.error) return c.json(result.error.body, result.error.status);
+
+  await sql`DELETE FROM savings_accounts WHERE id = ${id}`;
+  return c.body(null, 204);
+});
+
+// ============ CATEGORY BUDGETS (per-row) ============
+
+function validateCategoryBudgetInput(body) {
+  if (!body || typeof body !== "object") return "Body must be a JSON object";
+  if (typeof body.name !== "string" || !body.name.trim()) return "name is required";
+  if (typeof body.limit !== "number" || !Number.isFinite(body.limit)) return "limit must be a finite number";
+  return null;
+}
+
+async function loadCategoryBudgetForMutation(sql, userId, id, ifMatch, rawKey) {
+  const [row] = await sql`
+    SELECT c.* FROM category_budgets c
+    JOIN household_members hm ON hm.household_id = c.household_id
+    WHERE c.id = ${id} AND hm.user_id = ${userId}
+  `;
+  if (!row) {
+    const [exists] = await sql`SELECT 1 FROM category_budgets WHERE id = ${id}`;
+    return { error: { status: exists ? 403 : 404, body: { error: exists ? "forbidden" : "not found" } } };
+  }
+  const updatedAtIso = row.updated_at instanceof Date ? row.updated_at.toISOString() : String(row.updated_at);
+  if (updatedAtIso !== ifMatch) {
+    return {
+      error: {
+        status: 409,
+        body: {
+          error: "conflict",
+          current: {
+            id: row.id,
+            name: await decryptField(row.name, rawKey),
+            limit: Number(await decryptField(row.monthly_limit, rawKey)),
+            updatedAt: updatedAtIso,
+          },
+        },
+      },
+    };
+  }
+  return { ok: true, row, updatedAtIso };
+}
+
+app.post("/api/category-budgets", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+
+  let body;
+  try { body = await c.req.json(); } catch { return c.json({ error: "Invalid JSON body" }, 400); }
+  const validationError = validateCategoryBudgetInput(body);
+  if (validationError) return c.json({ error: validationError }, 400);
+
+  const [membership] = await sql`
+    SELECT household_id FROM household_members WHERE user_id = ${user.id}
+  `;
+  if (!membership) return c.json({ error: "No household" }, 400);
+
+  const rawKey = getFinanceDataKey(c);
+  const nameEnc = await encryptField(body.name, rawKey);
+  const limitEnc = await encryptField(body.limit, rawKey);
+
+  const [row] = await sql`
+    INSERT INTO category_budgets (household_id, name, monthly_limit)
+    VALUES (${membership.household_id}, ${nameEnc}, ${limitEnc})
+    RETURNING id, updated_at
+  `;
+
+  return c.json({
+    id: row.id,
+    name: body.name,
+    limit: body.limit,
+    updatedAt: row.updated_at,
+  }, 201);
+});
+
+app.patch("/api/category-budgets/:id", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+  const id = c.req.param("id");
+  const ifMatch = c.req.header("if-match");
+  if (!ifMatch) return c.json({ error: "If-Match header is required" }, 400);
+  const body = await c.req.json();
+  const rawKey = getFinanceDataKey(c);
+
+  const result = await loadCategoryBudgetForMutation(sql, user.id, id, ifMatch, rawKey);
+  if (result.error) return c.json(result.error.body, result.error.status);
+  const { row } = result;
+
+  const nextName = body.name !== undefined ? body.name : null;
+  const nextLimit = body.limit !== undefined ? body.limit : null;
+  const nameEnc = nextName !== null ? await encryptField(nextName, rawKey) : row.name;
+  const limitEnc = nextLimit !== null ? await encryptField(nextLimit, rawKey) : row.monthly_limit;
+
+  const [updated] = await sql`
+    UPDATE category_budgets
+    SET name = ${nameEnc}, monthly_limit = ${limitEnc}, updated_at = NOW()
+    WHERE id = ${id}
+    RETURNING id, updated_at
+  `;
+
+  return c.json({
+    id: updated.id,
+    name: nextName ?? (await decryptField(row.name, rawKey)),
+    limit: nextLimit ?? Number(await decryptField(row.monthly_limit, rawKey)),
+    updatedAt: updated.updated_at,
+  });
+});
+
+app.delete("/api/category-budgets/:id", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+  const id = c.req.param("id");
+  const ifMatch = c.req.header("if-match");
+  if (!ifMatch) return c.json({ error: "If-Match header is required" }, 400);
+  const rawKey = getFinanceDataKey(c);
+
+  const result = await loadCategoryBudgetForMutation(sql, user.id, id, ifMatch, rawKey);
+  if (result.error) return c.json(result.error.body, result.error.status);
+
+  await sql`DELETE FROM category_budgets WHERE id = ${id}`;
+  return c.body(null, 204);
+});
+
+// ============ SAVINGS GOAL (singleton per household) ============
+
+function validateSavingsGoalInput(body) {
+  if (!body || typeof body !== "object") return "Body must be a JSON object";
+  if (body.type !== "none" && body.type !== "monthly" && body.type !== "yearly") {
+    return "type must be 'none' | 'monthly' | 'yearly'";
+  }
+  return null;
+}
+
+app.put("/api/savings-goal", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+
+  let body;
+  try { body = await c.req.json(); } catch { return c.json({ error: "Invalid JSON body" }, 400); }
+  const validationError = validateSavingsGoalInput(body);
+  if (validationError) return c.json({ error: validationError }, 400);
+
+  const [membership] = await sql`
+    SELECT household_id FROM household_members WHERE user_id = ${user.id}
+  `;
+  if (!membership) return c.json({ error: "No household" }, 400);
+
+  const rawKey = getFinanceDataKey(c);
+  const monthlyEnc = await encryptField(body.monthlyAmount ?? 0, rawKey);
+  const yearlyEnc = await encryptField(body.yearlyAmount ?? 0, rawKey);
+  const targetMonth = Number.isInteger(body.targetMonth) ? body.targetMonth : 11;
+
+  await sql`
+    INSERT INTO savings_goals (household_id, type, monthly_amount, yearly_amount, target_month, updated_at)
+    VALUES (${membership.household_id}, ${body.type}, ${monthlyEnc}, ${yearlyEnc}, ${targetMonth}, NOW())
+    ON CONFLICT (household_id) DO UPDATE SET
+      type = EXCLUDED.type,
+      monthly_amount = EXCLUDED.monthly_amount,
+      yearly_amount = EXCLUDED.yearly_amount,
+      target_month = EXCLUDED.target_month,
+      updated_at = NOW()
+  `;
+
+  return c.json({
+    type: body.type,
+    monthlyAmount: Number(body.monthlyAmount ?? 0),
+    yearlyAmount: Number(body.yearlyAmount ?? 0),
+    targetMonth,
+  });
 });
 
 // ============ HOUSEHOLD ENDPOINTS ============
