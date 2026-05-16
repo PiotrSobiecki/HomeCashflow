@@ -108,6 +108,7 @@ export const categoryBudgets = pgTable('category_budgets', {
   name: text('name').notNull(), // ciphertext — UNIQUE niemozliwy na zaszyfrowanej kolumnie (random IV)
   monthlyLimit: text('monthly_limit').notNull(), // ciphertext stringa liczby
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
   legacyId: text('legacy_id'),
 })
 

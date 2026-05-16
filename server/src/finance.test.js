@@ -55,30 +55,9 @@ describe('Guest data migration via PUT /api/finance', () => {
     await cleanDb()
   })
 
-  // Po Phase 1 transactions managed per-row; PUT migruje tylko savings/categories/goal/activity.
-  // TODO Phase 3: guest transactions migration przez per-row POST z frontu albo dedicated endpoint.
-  it('fresh user can save guest savingsGoal and retrieve it', async () => {
-    const { token } = await setupUserWithHousehold()
-
-    const guestData = {
-      months: {},
-      savingsGoal: { type: 'yearly', yearlyAmount: 10000, monthlyAmount: 0, targetMonth: 11 },
-    }
-
-    const putRes = await app.request('/api/finance', {
-      method: 'PUT',
-      headers: { cookie: `token=${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ data: guestData }),
-    })
-    expect(putRes.status).toBe(200)
-
-    const getRes = await app.request('/api/finance', {
-      headers: { cookie: `token=${token}` },
-    })
-    const body = await getRes.json()
-    expect(body.data.savingsGoal.type).toBe('yearly')
-    expect(body.data.savingsGoal.yearlyAmount).toBe(10000)
-  })
+  // Po Phase 3 wszystkie zasoby zarządzane per-row; PUT migruje tylko activity_log.
+  // Guest data migration musi się stać per-row na froncie (Phase 5 / cleanup) — skip tutaj.
+  it.skip('guest data migration via PUT — TODO move to per-row POST after Phase 5', () => {})
 })
 
 describe('PUT /api/finance', () => {
@@ -95,71 +74,29 @@ describe('PUT /api/finance', () => {
     expect(res.status).toBe(401)
   })
 
-  // Po Phase 1 PUT nie zarządza transakcjami (skipTransactions=true).
-  // Pokrycie transakcji: src/transactions.test.js. Tutaj sprawdzamy savings_accounts.
-  it('saves and retrieves savings accounts', async () => {
+  // Po Phase 3 PUT z onlyActivity=true — wszystkie inne zasoby NIE są tknięte przez PUT.
+  // Sprawdzamy że to jest faktycznie zachowanie. Pełne pokrycie:
+  //   transactions       → src/transactions.test.js
+  //   savings_accounts   → src/savings-accounts.test.js
+  //   category_budgets   → src/category-budgets.test.js
+  //   savings_goal       → src/savings-goal.test.js
+  it('PUT does NOT touch savings_accounts (managed per-row)', async () => {
     const { token, user } = await setupUserWithHousehold()
-
-    const financeData = {
-      months: {},
-      savingsAccounts: [{ id: 1, name: 'Wakacje', amount: 5000, icon: 'plane' }],
-      savingsGoal: { type: 'monthly', monthlyAmount: 500 },
-    }
 
     const putRes = await app.request('/api/finance', {
       method: 'PUT',
       headers: { cookie: `token=${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ data: financeData }),
+      body: JSON.stringify({
+        data: { months: {}, savingsAccounts: [{ id: 1, name: 'X', amount: 999 }] },
+      }),
     })
     expect(putRes.status).toBe(200)
-
-    const getRes = await app.request('/api/finance', {
-      headers: { cookie: `token=${token}` },
-    })
-    expect(getRes.status).toBe(200)
-    const body = await getRes.json()
-    expect(body.data.savingsAccounts[0].name).toBe('Wakacje')
-    expect(body.data.savingsAccounts[0].amount).toBe(5000)
-    expect(body.data.savingsGoal.type).toBe('monthly')
-
-    // Sensytywne pola szyfrowane w bazie
-    const [sa] = await sql`
-      SELECT s.name, s.amount FROM savings_accounts s
-      JOIN household_members hm ON hm.household_id = s.household_id
-      WHERE hm.user_id = ${user.id}
-    `
-    expect(sa.name).toMatch(/^ff1:/)
-    expect(sa.name).not.toContain('Wakacje')
-    expect(sa.amount).toMatch(/^ff1:/)
-  })
-
-  it('idempotent — second PUT replaces savings rows', async () => {
-    const { token, user } = await setupUserWithHousehold()
-
-    const first = { months: {}, savingsAccounts: [{ id: 1, name: 'A', amount: 100 }], savingsGoal: { type: 'none' } }
-    const second = { months: {}, savingsAccounts: [{ id: 2, name: 'B', amount: 200 }], savingsGoal: { type: 'none' } }
-
-    for (const data of [first, second]) {
-      const res = await app.request('/api/finance', {
-        method: 'PUT',
-        headers: { cookie: `token=${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data }),
-      })
-      expect(res.status).toBe(200)
-    }
 
     const [{ cnt }] = await sql`
       SELECT COUNT(*)::int AS cnt FROM savings_accounts s
       JOIN household_members hm ON hm.household_id = s.household_id
       WHERE hm.user_id = ${user.id}
     `
-    expect(cnt).toBe(1)
-
-    const getRes = await app.request('/api/finance', {
-      headers: { cookie: `token=${token}` },
-    })
-    const body = await getRes.json()
-    expect(body.data.savingsAccounts[0].name).toBe('B')
-    expect(body.data.savingsAccounts[0].amount).toBe(200)
+    expect(cnt).toBe(0)
   })
 })

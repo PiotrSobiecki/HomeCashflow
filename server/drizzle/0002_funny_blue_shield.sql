@@ -1,0 +1,1 @@
+ALTER TABLE "category_budgets" ADD COLUMN "updated_at" timestamp with time zone DEFAULT now();

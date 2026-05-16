@@ -5,6 +5,13 @@ import {
   createTransaction,
   patchTransaction,
   deleteTransaction,
+  createSavingsAccount,
+  patchSavingsAccount,
+  deleteSavingsAccount as apiDeleteSavingsAccount,
+  createCategoryBudget,
+  patchCategoryBudget,
+  deleteCategoryBudget as apiDeleteCategoryBudget,
+  putSavingsGoal,
   ConflictError,
 } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
@@ -594,11 +601,26 @@ export const useFinanceData = () => {
 
   // ============ CEL OSZCZĘDNOŚCIOWY ============
   const updateSavingsGoal = (goalData) => {
-    updateData(prev => ({
-      ...prev,
-      activityLog: appendActivity(prev, { action: 'update', kind: 'savingsGoal', label: 'Cel oszczędnościowy' }),
-      savingsGoal: { ...prev.savingsGoal, ...goalData }
-    }));
+    if (!isLive) {
+      updateData(prev => ({
+        ...prev,
+        activityLog: appendActivity(prev, { action: 'update', kind: 'savingsGoal', label: 'Cel oszczędnościowy' }),
+        savingsGoal: { ...prev.savingsGoal, ...goalData }
+      }));
+      return;
+    }
+    const merged = { ...data.savingsGoal, ...goalData };
+    setData(prev => ({ ...prev, savingsGoal: merged }));
+    setSaving(true);
+    putSavingsGoal({
+      type: merged.type,
+      monthlyAmount: merged.monthlyAmount ?? 0,
+      yearlyAmount: merged.yearlyAmount ?? 0,
+      targetMonth: merged.targetMonth ?? 11,
+    })
+      .then(saved => setData(prev => ({ ...prev, savingsGoal: { ...prev.savingsGoal, ...saved } })))
+      .catch(err => console.error('updateSavingsGoal error:', err))
+      .finally(() => setSaving(false));
   };
 
   const clearAllData = () => {
@@ -617,73 +639,171 @@ export const useFinanceData = () => {
     saveData(initialData);
   };
 
+  // ============ GENERIC HELPERY DLA LIST PER-ROW (savings, categories) ============
+  // Per-row CRUD z optimistic insert/update/delete + rollback przy błędzie + conflict dialog przy 409.
+
+  const liveListAdd = async (listKey, apiCreate, body, optimisticItem) => {
+    const tempId = `temp-${Date.now()}-${Math.random()}`;
+    const optimistic = { id: tempId, ...optimisticItem, updatedAt: null };
+    setData(prev => ({ ...prev, [listKey]: [...prev[listKey], optimistic] }));
+    setSaving(true);
+    try {
+      const saved = await apiCreate(body);
+      setData(prev => ({
+        ...prev,
+        [listKey]: prev[listKey].map(it => it.id === tempId ? { ...saved } : it),
+      }));
+    } catch (err) {
+      console.error(`add ${listKey} error:`, err);
+      setData(prev => ({ ...prev, [listKey]: prev[listKey].filter(it => it.id !== tempId) }));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const liveListUpdate = async (listKey, apiPatch, id, changes, optimisticChanges, conflictLabel) => {
+    let prevItem = null;
+    setData(prev => {
+      prevItem = prev[listKey].find(it => it.id === id) ?? null;
+      if (!prevItem) return prev;
+      return { ...prev, [listKey]: prev[listKey].map(it => it.id === id ? { ...it, ...optimisticChanges } : it) };
+    });
+    if (!prevItem?.updatedAt) return;
+    setSaving(true);
+    try {
+      const saved = await apiPatch(id, prevItem.updatedAt, changes);
+      setData(prev => ({ ...prev, [listKey]: prev[listKey].map(it => it.id === id ? { ...it, ...saved } : it) }));
+    } catch (err) {
+      if (err instanceof ConflictError) {
+        setConflict({
+          resourceLabel: conflictLabel ?? prevItem.name,
+          yours: { name: optimisticChanges.name ?? prevItem.name, amount: optimisticChanges.amount ?? optimisticChanges.limit ?? prevItem.amount ?? prevItem.limit },
+          theirs: { name: err.current.name, amount: err.current.amount ?? err.current.limit },
+          onOverride: async () => {
+            try {
+              const saved = await apiPatch(id, err.current.updatedAt, changes);
+              setData(prev => ({ ...prev, [listKey]: prev[listKey].map(it => it.id === id ? { ...it, ...saved } : it) }));
+            } catch (e) { console.error('override retry error:', e); }
+            finally { clearConflict(); }
+          },
+          onCancel: () => {
+            setData(prev => ({ ...prev, [listKey]: prev[listKey].map(it => it.id === id ? { ...err.current } : it) }));
+            clearConflict();
+          },
+        });
+      } else {
+        console.error(`update ${listKey} error:`, err);
+        if (prevItem) setData(prev => ({ ...prev, [listKey]: prev[listKey].map(it => it.id === id ? prevItem : it) }));
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const liveListDelete = async (listKey, apiDelete, id) => {
+    let prevItem = null;
+    setData(prev => {
+      prevItem = prev[listKey].find(it => it.id === id) ?? null;
+      return { ...prev, [listKey]: prev[listKey].filter(it => it.id !== id) };
+    });
+    if (!prevItem?.updatedAt) return;
+    setSaving(true);
+    try {
+      await apiDelete(id, prevItem.updatedAt);
+    } catch (err) {
+      if (err instanceof ConflictError) {
+        console.warn(`Konflikt przy DELETE ${listKey}/${id} — ktoś zmienił równolegle.`);
+      } else {
+        console.error(`delete ${listKey} error:`, err);
+        if (prevItem) setData(prev => ({ ...prev, [listKey]: [...prev[listKey], prevItem] }));
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
   // ============ CRUD DLA OSZCZĘDNOŚCI ============
   const addSavingsAccount = (name, amount, icon = 'bank') => {
     const amt = parseFloat(amount);
-    updateData(prev => ({
-      ...prev,
-      activityLog: appendActivity(prev, { action: 'add', kind: 'savings', label: name, amount: amt }),
-      savingsAccounts: [...prev.savingsAccounts, { id: Date.now(), name, amount: amt, icon }]
-    }));
+    if (!isLive) {
+      updateData(prev => ({
+        ...prev,
+        activityLog: appendActivity(prev, { action: 'add', kind: 'savings', label: name, amount: amt }),
+        savingsAccounts: [...prev.savingsAccounts, { id: Date.now(), name, amount: amt, icon }],
+      }));
+      return;
+    }
+    liveListAdd('savingsAccounts', createSavingsAccount, { name, amount: amt, icon }, { name, amount: amt, icon });
   };
 
   const updateSavingsAccount = (id, name, amount, icon) => {
     const amt = parseFloat(amount);
-    updateData(prev => ({
-      ...prev,
-      activityLog: appendActivity(prev, { action: 'update', kind: 'savings', label: name, amount: amt }),
-      savingsAccounts: prev.savingsAccounts.map(acc =>
-        acc.id === id ? { ...acc, name, amount: amt, icon } : acc
-      )
-    }));
+    if (!isLive || String(id).startsWith('temp-')) {
+      updateData(prev => ({
+        ...prev,
+        activityLog: appendActivity(prev, { action: 'update', kind: 'savings', label: name, amount: amt }),
+        savingsAccounts: prev.savingsAccounts.map(acc => acc.id === id ? { ...acc, name, amount: amt, icon } : acc),
+      }));
+      return;
+    }
+    liveListUpdate('savingsAccounts', patchSavingsAccount, id, { name, amount: amt, icon }, { name, amount: amt, icon });
   };
 
   const deleteSavingsAccount = (id) => {
-    updateData(prev => {
-      const acc = prev.savingsAccounts.find(a => a.id === id);
-      return {
-        ...prev,
-        activityLog: appendActivity(prev, {
-          action: 'delete',
-          kind: 'savings',
-          label: acc?.name,
-          amount: acc?.amount,
-        }),
-        savingsAccounts: prev.savingsAccounts.filter(a => a.id !== id)
-      };
-    });
+    if (!isLive || String(id).startsWith('temp-')) {
+      updateData(prev => {
+        const acc = prev.savingsAccounts.find(a => a.id === id);
+        return {
+          ...prev,
+          activityLog: appendActivity(prev, { action: 'delete', kind: 'savings', label: acc?.name, amount: acc?.amount }),
+          savingsAccounts: prev.savingsAccounts.filter(a => a.id !== id),
+        };
+      });
+      return;
+    }
+    liveListDelete('savingsAccounts', apiDeleteSavingsAccount, id);
   };
 
   // ============ CRUD DLA BUDŻETÓW KATEGORII ============
   const addCategoryBudget = (name, limit) => {
     const amt = parseFloat(limit);
-    updateData(prev => ({
-      ...prev,
-      activityLog: appendActivity(prev, { action: 'add', kind: 'categoryBudget', label: name, amount: amt }),
-      categoryBudgets: [...prev.categoryBudgets, { id: Date.now(), name, limit: amt }]
-    }));
+    if (!isLive) {
+      updateData(prev => ({
+        ...prev,
+        activityLog: appendActivity(prev, { action: 'add', kind: 'categoryBudget', label: name, amount: amt }),
+        categoryBudgets: [...prev.categoryBudgets, { id: Date.now(), name, limit: amt }],
+      }));
+      return;
+    }
+    liveListAdd('categoryBudgets', createCategoryBudget, { name, limit: amt }, { name, limit: amt });
   };
 
   const updateCategoryBudget = (id, name, limit) => {
     const amt = parseFloat(limit);
-    updateData(prev => ({
-      ...prev,
-      activityLog: appendActivity(prev, { action: 'update', kind: 'categoryBudget', label: name, amount: amt }),
-      categoryBudgets: prev.categoryBudgets.map(c =>
-        c.id === id ? { ...c, name, limit: amt } : c
-      )
-    }));
+    if (!isLive || String(id).startsWith('temp-')) {
+      updateData(prev => ({
+        ...prev,
+        activityLog: appendActivity(prev, { action: 'update', kind: 'categoryBudget', label: name, amount: amt }),
+        categoryBudgets: prev.categoryBudgets.map(c => c.id === id ? { ...c, name, limit: amt } : c),
+      }));
+      return;
+    }
+    liveListUpdate('categoryBudgets', patchCategoryBudget, id, { name, limit: amt }, { name, limit: amt });
   };
 
   const deleteCategoryBudget = (id) => {
-    updateData(prev => {
-      const cat = prev.categoryBudgets.find(c => c.id === id);
-      return {
-        ...prev,
-        activityLog: appendActivity(prev, { action: 'delete', kind: 'categoryBudget', label: cat?.name, amount: cat?.limit }),
-        categoryBudgets: prev.categoryBudgets.filter(c => c.id !== id)
-      };
-    });
+    if (!isLive || String(id).startsWith('temp-')) {
+      updateData(prev => {
+        const cat = prev.categoryBudgets.find(c => c.id === id);
+        return {
+          ...prev,
+          activityLog: appendActivity(prev, { action: 'delete', kind: 'categoryBudget', label: cat?.name, amount: cat?.limit }),
+          categoryBudgets: prev.categoryBudgets.filter(c => c.id !== id),
+        };
+      });
+      return;
+    }
+    liveListDelete('categoryBudgets', apiDeleteCategoryBudget, id);
   };
 
   // ============ OBLICZENIA ============
