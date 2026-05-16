@@ -28,7 +28,7 @@ function pickDate(item, year, month) {
  */
 export async function readFinanceFromRelational(sql, householdId, rawKey) {
   const [txns, deleted, savings, categories, goalRows, activity] = await Promise.all([
-    sql`SELECT id, kind, name, amount, txn_date, year, month, is_fixed, category
+    sql`SELECT id, kind, name, amount, txn_date, year, month, is_fixed, category, updated_at
         FROM transactions WHERE household_id = ${householdId}
         ORDER BY year, month, txn_date`,
     sql`SELECT year, month, kind, name FROM deleted_fixed_items WHERE household_id = ${householdId}`,
@@ -53,6 +53,7 @@ export async function readFinanceFromRelational(sql, householdId, rawKey) {
       amount: Number.isFinite(amount) ? amount : 0,
       isFixed: t.is_fixed,
       date: t.txn_date,
+      updatedAt: t.updated_at instanceof Date ? t.updated_at.toISOString() : String(t.updated_at),
     }
     if (t.kind === 'expense' && !t.is_fixed && t.category) {
       item.category = t.category
@@ -130,8 +131,15 @@ export async function readFinanceFromRelational(sql, householdId, rawKey) {
 /**
  * Rozkladamy obiekt finance i nadpisujemy stan tabel dla danego household.
  * Atomowo w jednej transakcji.
+ *
+ * Opcje:
+ *   skipTransactions — nie rusza tabel `transactions` i `deleted_fixed_items`.
+ *     Używane przez stary PUT /api/finance po Phase 1: transakcje są zarządzane
+ *     przez per-row endpointy, więc PUT (który ratuje oszczędności/kategorie/goal/
+ *     activity_log) musi je zostawić w spokoju.
  */
-export async function writeFinanceToRelational(sql, householdId, data, rawKey) {
+export async function writeFinanceToRelational(sql, householdId, data, rawKey, options = {}) {
+  const skipTransactions = options.skipTransactions === true
   const months = data?.months ?? {}
   const savingsAccounts = Array.isArray(data?.savingsAccounts) ? data.savingsAccounts : []
   const categoryBudgets = Array.isArray(data?.categoryBudgets) ? data.categoryBudgets : []
@@ -227,29 +235,33 @@ export async function writeFinanceToRelational(sql, householdId, data, rawKey) {
 
   // Buduj liste queries do transakcji.
   const queries = [
-    sql`DELETE FROM transactions WHERE household_id = ${householdId}`,
-    sql`DELETE FROM deleted_fixed_items WHERE household_id = ${householdId}`,
     sql`DELETE FROM savings_accounts WHERE household_id = ${householdId}`,
     sql`DELETE FROM category_budgets WHERE household_id = ${householdId}`,
     sql`DELETE FROM savings_goals WHERE household_id = ${householdId}`,
     sql`DELETE FROM activity_log WHERE household_id = ${householdId}`,
   ]
 
-  for (const t of txnInserts) {
-    queries.push(sql`
-      INSERT INTO transactions
-        (household_id, kind, name, amount, txn_date, year, month, is_fixed, category, legacy_id)
-      VALUES
-        (${householdId}, ${t.kind}, ${t.nameEnc}, ${t.amountEnc}, ${t.txn_date},
-         ${t.year}, ${t.month}, ${t.is_fixed}, ${t.category}, ${t.legacy_id})
-    `)
-  }
-  for (const d of deletedFixedInserts) {
-    queries.push(sql`
-      INSERT INTO deleted_fixed_items (household_id, year, month, kind, name)
-      VALUES (${householdId}, ${d.year}, ${d.month}, ${d.kind}, ${d.name})
-      ON CONFLICT DO NOTHING
-    `)
+  if (!skipTransactions) {
+    queries.unshift(
+      sql`DELETE FROM transactions WHERE household_id = ${householdId}`,
+      sql`DELETE FROM deleted_fixed_items WHERE household_id = ${householdId}`,
+    )
+    for (const t of txnInserts) {
+      queries.push(sql`
+        INSERT INTO transactions
+          (household_id, kind, name, amount, txn_date, year, month, is_fixed, category, legacy_id)
+        VALUES
+          (${householdId}, ${t.kind}, ${t.nameEnc}, ${t.amountEnc}, ${t.txn_date},
+           ${t.year}, ${t.month}, ${t.is_fixed}, ${t.category}, ${t.legacy_id})
+      `)
+    }
+    for (const d of deletedFixedInserts) {
+      queries.push(sql`
+        INSERT INTO deleted_fixed_items (household_id, year, month, kind, name)
+        VALUES (${householdId}, ${d.year}, ${d.month}, ${d.kind}, ${d.name})
+        ON CONFLICT DO NOTHING
+      `)
+    }
   }
   for (const s of savingsInserts) {
     queries.push(sql`

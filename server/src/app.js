@@ -3,7 +3,7 @@ import { cors } from "hono/cors";
 import { HTTPException } from "hono/http-exception";
 import { jwtVerify, SignJWT } from "jose";
 import { neon } from "@neondatabase/serverless";
-import { decodeFinanceDataKey } from "./finance-crypto.js";
+import { decodeFinanceDataKey, encryptField, decryptField } from "./finance-crypto.js";
 import {
   readFinanceFromRelational,
   writeFinanceToRelational,
@@ -378,17 +378,206 @@ app.put("/api/finance", authMiddleware, async (c) => {
   }
 
   try {
+    // Po Phase 1 transakcje zarządzane przez per-row endpointy — PUT
+    // ich nie rusza, żeby nie nadpisać świeżych POST/PATCH/DELETE z innej karty.
     await writeFinanceToRelational(
       sql,
       membership.household_id,
       body.data,
       rawKey,
+      { skipTransactions: true },
     );
   } catch (err) {
     console.error("PUT /api/finance write error:", err);
     return c.json({ error: "Failed to save finance data" }, 500);
   }
   return c.json({ ok: true });
+});
+
+// ============ TRANSACTIONS (per-row) ============
+
+/**
+ * Ładuje transakcję jeśli user ma do niej dostęp, zwraca błąd-response gdy:
+ * - rekord nie istnieje (404)
+ * - rekord w innym household (403)
+ * - If-Match nie matchuje aktualnego updated_at (409)
+ * Returns { ok: true, row, updatedAtIso } albo { error: { status, body } }.
+ */
+async function loadTransactionForMutation(sql, userId, id, ifMatch, rawKey) {
+  const [row] = await sql`
+    SELECT t.* FROM transactions t
+    JOIN household_members hm ON hm.household_id = t.household_id
+    WHERE t.id = ${id} AND hm.user_id = ${userId}
+  `;
+  if (!row) {
+    const [exists] = await sql`SELECT 1 FROM transactions WHERE id = ${id}`;
+    return {
+      error: {
+        status: exists ? 403 : 404,
+        body: { error: exists ? "forbidden" : "not found" },
+      },
+    };
+  }
+
+  const updatedAtIso = row.updated_at instanceof Date
+    ? row.updated_at.toISOString()
+    : String(row.updated_at);
+
+  if (updatedAtIso !== ifMatch) {
+    return {
+      error: {
+        status: 409,
+        body: {
+          error: "conflict",
+          current: {
+            id: row.id,
+            kind: row.kind,
+            name: await decryptField(row.name, rawKey),
+            amount: Number(await decryptField(row.amount, rawKey)),
+            txnDate: row.txn_date,
+            year: row.year,
+            month: row.month,
+            isFixed: row.is_fixed,
+            category: row.category,
+            updatedAt: updatedAtIso,
+          },
+        },
+      },
+    };
+  }
+
+  return { ok: true, row, updatedAtIso };
+}
+
+function validateTransactionInput(body) {
+  if (!body || typeof body !== "object") return "Body must be a JSON object";
+  if (body.kind !== "income" && body.kind !== "expense")
+    return "kind must be 'income' or 'expense'";
+  if (typeof body.name !== "string" || !body.name.trim())
+    return "name is required";
+  if (typeof body.amount !== "number" || !Number.isFinite(body.amount))
+    return "amount must be a finite number";
+  if (
+    typeof body.txnDate !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(body.txnDate)
+  )
+    return "txnDate must be YYYY-MM-DD";
+  if (!Number.isInteger(body.year)) return "year must be an integer";
+  if (!Number.isInteger(body.month) || body.month < 0 || body.month > 11)
+    return "month must be 0-11";
+  if (typeof body.isFixed !== "boolean") return "isFixed must be a boolean";
+  return null;
+}
+
+app.post("/api/transactions", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+
+  let body;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+  const validationError = validateTransactionInput(body);
+  if (validationError) return c.json({ error: validationError }, 400);
+
+  const [membership] = await sql`
+    SELECT household_id FROM household_members WHERE user_id = ${user.id}
+  `;
+  if (!membership) return c.json({ error: "No household" }, 400);
+
+  const rawKey = getFinanceDataKey(c);
+  const nameEnc = await encryptField(body.name, rawKey);
+  const amountEnc = await encryptField(body.amount, rawKey);
+
+  const [row] = await sql`
+    INSERT INTO transactions
+      (household_id, kind, name, amount, txn_date, year, month, is_fixed, category, created_by)
+    VALUES
+      (${membership.household_id}, ${body.kind}, ${nameEnc}, ${amountEnc},
+       ${body.txnDate}, ${body.year}, ${body.month}, ${body.isFixed},
+       ${body.category ?? null}, ${user.id})
+    RETURNING id, updated_at
+  `;
+
+  return c.json(
+    {
+      id: row.id,
+      kind: body.kind,
+      name: body.name,
+      amount: body.amount,
+      txnDate: body.txnDate,
+      year: body.year,
+      month: body.month,
+      isFixed: body.isFixed,
+      category: body.category ?? null,
+      updatedAt: row.updated_at,
+    },
+    201,
+  );
+});
+
+app.patch("/api/transactions/:id", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+  const id = c.req.param("id");
+  const ifMatch = c.req.header("if-match");
+  if (!ifMatch) {
+    return c.json({ error: "If-Match header is required" }, 400);
+  }
+  const body = await c.req.json();
+  const rawKey = getFinanceDataKey(c);
+
+  const result = await loadTransactionForMutation(sql, user.id, id, ifMatch, rawKey);
+  if (result.error) return c.json(result.error.body, result.error.status);
+  const { row } = result;
+
+  const nextName = body.name !== undefined ? body.name : null;
+  const nextAmount = body.amount !== undefined ? body.amount : null;
+  const nameEnc =
+    nextName !== null ? await encryptField(nextName, rawKey) : row.name;
+  const amountEnc =
+    nextAmount !== null ? await encryptField(nextAmount, rawKey) : row.amount;
+
+  const [updated] = await sql`
+    UPDATE transactions
+    SET name = ${nameEnc},
+        amount = ${amountEnc},
+        updated_at = NOW()
+    WHERE id = ${id}
+    RETURNING id, kind, txn_date, year, month, is_fixed, category, updated_at
+  `;
+
+  return c.json({
+    id: updated.id,
+    kind: updated.kind,
+    name: nextName ?? (await decryptField(row.name, rawKey)),
+    amount: nextAmount ?? Number(await decryptField(row.amount, rawKey)),
+    txnDate: updated.txn_date,
+    year: updated.year,
+    month: updated.month,
+    isFixed: updated.is_fixed,
+    category: updated.category,
+    updatedAt: updated.updated_at,
+  });
+});
+
+app.delete("/api/transactions/:id", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+  const id = c.req.param("id");
+  const ifMatch = c.req.header("if-match");
+  if (!ifMatch) {
+    return c.json({ error: "If-Match header is required" }, 400);
+  }
+  const rawKey = getFinanceDataKey(c);
+
+  const result = await loadTransactionForMutation(sql, user.id, id, ifMatch, rawKey);
+  if (result.error) return c.json(result.error.body, result.error.status);
+
+  await sql`DELETE FROM transactions WHERE id = ${id}`;
+  return c.body(null, 204);
 });
 
 // ============ HOUSEHOLD ENDPOINTS ============
