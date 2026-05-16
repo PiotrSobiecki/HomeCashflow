@@ -22,6 +22,13 @@
       "when": 1778941290415,
       "tag": "0002_funny_blue_shield",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1778964957097,
+      "tag": "0003_special_eternals",
+      "breakpoints": true
     }
   ]
 }

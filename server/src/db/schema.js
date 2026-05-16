@@ -3,7 +3,7 @@
  * Źródło prawdy dla migracji generowanych przez `drizzle-kit generate`.
  */
 import {
-  pgTable, uuid, text, timestamp, boolean, integer,
+  pgTable, uuid, text, timestamp, boolean, integer, jsonb,
   primaryKey, index, check,
 } from 'drizzle-orm/pg-core'
 import { sql } from 'drizzle-orm'
@@ -138,6 +138,34 @@ export const activityLog = pgTable('activity_log', {
   legacyId: text('legacy_id'),
 }, (t) => ({
   byHouseholdAt: index('idx_activity_household_at').on(t.householdId, t.at),
+}))
+
+// ====== action_log (migracja 003 — undo end-to-end, Phase 4) ======
+//
+// Każda mutacja per-row (create/update/delete na transactions, savings_accounts,
+// category_budgets, savings_goals) wstawia tu wpis z `before`/`after` snapshotem.
+// Snapshoty zawierają sensytywne pola w postaci ciphertext (ten sam format ff1:…
+// co kolumny docelowe), żeby undo mogło je z powrotem zapisać bez deszyfrowania
+// w warstwie aplikacji.
+// Rotacja: trigger trzyma tylko 20 najnowszych wpisów per household_id.
+export const actionLog = pgTable('action_log', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  householdId: uuid('household_id').notNull().references(() => households.id, { onDelete: 'cascade' }),
+  actorId: uuid('actor_id').references(() => users.id, { onDelete: 'set null' }),
+  at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+  operation: text('operation').notNull(), // CREATE | UPDATE | DELETE | UNDO
+  resourceType: text('resource_type').notNull(), // transaction | savings_account | category_budget | savings_goal
+  resourceId: text('resource_id'), // uuid lub identyfikator singletonu ('goal'); text bo savings_goal nie ma UUID
+  before: jsonb('before'),
+  after: jsonb('after'),
+  undoneAt: timestamp('undone_at', { withTimezone: true }),
+  undoneBy: uuid('undone_by').references(() => users.id, { onDelete: 'set null' }),
+  // Gdy ta akcja jest typu UNDO — wskazuje wpis który cofa (do wyświetlenia "X cofnął Y").
+  undoesEntryId: uuid('undoes_entry_id'),
+}, (t) => ({
+  operationCheck: check('action_log_operation_check', sql`${t.operation} IN ('CREATE', 'UPDATE', 'DELETE', 'UNDO')`),
+  resourceTypeCheck: check('action_log_resource_type_check', sql`${t.resourceType} IN ('transaction', 'savings_account', 'category_budget', 'savings_goal')`),
+  byHouseholdAt: index('idx_action_log_household_at').on(t.householdId, t.at),
 }))
 
 export const financeDataMigration = pgTable('finance_data_migration', {
