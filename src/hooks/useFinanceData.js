@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   fetchFinanceData,
   saveFinanceDataOnServer,
@@ -8,6 +8,9 @@ import {
   ConflictError,
 } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
+import { usePolling } from './usePolling';
+
+const POLLING_INTERVAL_MS = 30_000;
 
 // Stałe
 const GUEST_STORAGE_KEY = 'homecashflow-guest-data';
@@ -113,6 +116,18 @@ export const useFinanceData = () => {
   // Tryb live: user zalogowany i nie gość — używamy per-row API z backendem
   const isLive = !!user && !isGuest;
 
+  // savingRef: usePolling musi mieć stabilne ref do flagi (nie odpalać tick gdy mutacja w toku)
+  const savingRef = useRef(false);
+  useEffect(() => { savingRef.current = saving; }, [saving]);
+
+  // Wspólne pobranie z API (reuse w initial load + polling)
+  const refetchFromApi = useCallback(async () => {
+    const response = await fetchFinanceData();
+    const payload = response?.data;
+    const normalized = normalizeFinanceData(payload && typeof payload === 'object' ? payload : null);
+    setData(normalized);
+  }, []);
+
   // Pobierz dane - z API (Neon) lub localStorage
   useEffect(() => {
     if (!user) return;
@@ -134,12 +149,7 @@ export const useFinanceData = () => {
           }
         } else {
           // Zalogowany użytkownik - użyj backendu opartego o Neon
-          const response = await fetchFinanceData();
-          const payload = response?.data;
-          const normalized = normalizeFinanceData(
-            payload && typeof payload === 'object' ? payload : null
-          );
-          setData(normalized);
+          await refetchFromApi();
         }
       } catch (err) {
         console.error('Error:', err);
@@ -150,6 +160,26 @@ export const useFinanceData = () => {
 
     fetchData();
   }, [user, isGuest]);
+
+  // Polling: co 30s odśwież stan z API. Skip gdy tab schowany albo mutacja w toku.
+  // Powrót do tabu → natychmiastowy refetch (Page Visibility API).
+  const pollingTick = useCallback(async () => {
+    if (!isLive) return;
+    try {
+      await refetchFromApi();
+    } catch (err) {
+      console.error('polling error:', err);
+    }
+  }, [isLive, refetchFromApi]);
+
+  const pollingBlocked = useCallback(() => savingRef.current, []);
+
+  usePolling({
+    intervalMs: POLLING_INTERVAL_MS,
+    enabled: isLive,
+    onTick: pollingTick,
+    isBlocked: pollingBlocked,
+  });
 
   // Zapisz dane - do API (Neon) lub localStorage
   const saveData = useCallback(async (newData) => {
