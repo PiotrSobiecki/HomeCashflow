@@ -18,6 +18,7 @@
     "drizzle:dev:studio": "drizzle-kit studio --config=drizzle.dev.config.js",
     "drizzle:prod:generate": "drizzle-kit generate --config=drizzle.prod.config.js",
     "drizzle:prod:migrate": "node src/db/migrate.js prod",
+    "drizzle:test:migrate": "node src/db/migrate.js test",
     "test": "vitest run",
     "test:watch": "vitest"
   },

@@ -36,3 +36,64 @@ export const saveFinanceDataOnServer = async (data) => {
   return response.json();
 };
 
+// ===== Per-row endpointy: transactions (Phase 1) =====
+
+export class ConflictError extends Error {
+  constructor(current) {
+    super('Conflict');
+    this.name = 'ConflictError';
+    this.current = current;
+  }
+}
+
+export const createTransaction = async (body) => {
+  const res = await fetch(`${API_URL}/api/transactions`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    throw new Error(detail.error || `POST /api/transactions: ${res.status}`);
+  }
+  return res.json();
+};
+
+export const patchTransaction = async (id, updatedAt, changes) => {
+  const res = await fetch(`${API_URL}/api/transactions/${id}`, {
+    method: 'PATCH',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      'If-Match': updatedAt,
+    },
+    body: JSON.stringify(changes),
+  });
+  if (res.status === 409) {
+    const body = await res.json();
+    throw new ConflictError(body.current);
+  }
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    throw new Error(detail.error || `PATCH /api/transactions/${id}: ${res.status}`);
+  }
+  return res.json();
+};
+
+export const deleteTransaction = async (id, updatedAt) => {
+  const res = await fetch(`${API_URL}/api/transactions/${id}`, {
+    method: 'DELETE',
+    credentials: 'include',
+    headers: { 'If-Match': updatedAt },
+  });
+  if (res.status === 409) {
+    throw new ConflictError(null);
+  }
+  if (!res.ok && res.status !== 204) {
+    const detail = await res.json().catch(() => ({}));
+    throw new Error(detail.error || `DELETE /api/transactions/${id}: ${res.status}`);
+  }
+};
+

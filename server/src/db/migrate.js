@@ -15,8 +15,8 @@ const serverDir = join(here, '..', '..')
 const repoRoot = join(serverDir, '..')
 
 const env = (process.argv[2] || '').toLowerCase()
-if (env !== 'dev' && env !== 'prod') {
-  console.error('Użycie: node src/db/migrate.js <dev|prod>')
+if (env !== 'dev' && env !== 'prod' && env !== 'test') {
+  console.error('Użycie: node src/db/migrate.js <dev|prod|test>')
   process.exit(1)
 }
 
@@ -30,7 +30,8 @@ if (loaded.error) {
   process.exit(1)
 }
 
-const url = process.env.DATABASE_URL?.trim()
+// W trybie test używamy DATABASE_URL_TEST z .env.local (osobny Neon branch)
+const url = (env === 'test' ? process.env.DATABASE_URL_TEST : process.env.DATABASE_URL)?.trim()
 if (!/^postgres(ql)?:\/\//i.test(url || '')) {
   console.error('DATABASE_URL niepoprawny lub brak.')
   process.exit(1)
@@ -40,9 +41,13 @@ const dbHost = new URL(url).host
 console.log(`Drizzle migrate [${env.toUpperCase()}] → ${dbHost}`)
 
 if (env === 'prod') {
-  // Drobny bezpiecznik
   console.log('⚠  PRODUKCJA. Migracja zacznie się za 3 sekundy. Ctrl+C aby przerwać.')
   await new Promise(r => setTimeout(r, 3000))
+}
+
+if (env === 'test' && !process.env.ALLOW_VITEST_DB_WIPE) {
+  console.error('Tryb test wymaga ALLOW_VITEST_DB_WIPE=yes w .env.local (asercja że to test branch).')
+  process.exit(1)
 }
 
 const sql = neon(url)

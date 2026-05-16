@@ -55,29 +55,16 @@ describe('Guest data migration via PUT /api/finance', () => {
     await cleanDb()
   })
 
-  it('fresh user can save guest data and retrieve it', async () => {
+  // Po Phase 1 transactions managed per-row; PUT migruje tylko savings/categories/goal/activity.
+  // TODO Phase 3: guest transactions migration przez per-row POST z frontu albo dedicated endpoint.
+  it('fresh user can save guest savingsGoal and retrieve it', async () => {
     const { token } = await setupUserWithHousehold()
 
-    // Simulate guest data structure (same as localStorage format)
     const guestData = {
-      months: {
-        0: { incomes: [{ id: 1, name: 'Freelance', amount: 3000 }], expenses: [{ id: 2, name: 'Czynsz', amount: 1500, isFixed: true, date: '2026-01-05' }] },
-        1: { incomes: [], expenses: [] },
-        2: { incomes: [], expenses: [] },
-        3: { incomes: [], expenses: [] },
-        4: { incomes: [], expenses: [] },
-        5: { incomes: [], expenses: [] },
-        6: { incomes: [], expenses: [] },
-        7: { incomes: [], expenses: [] },
-        8: { incomes: [], expenses: [] },
-        9: { incomes: [], expenses: [] },
-        10: { incomes: [], expenses: [] },
-        11: { incomes: [], expenses: [] },
-      },
+      months: {},
       savingsGoal: { type: 'yearly', yearlyAmount: 10000, monthlyAmount: 0, targetMonth: 11 },
     }
 
-    // PUT guest data (migration)
     const putRes = await app.request('/api/finance', {
       method: 'PUT',
       headers: { cookie: `token=${token}`, 'Content-Type': 'application/json' },
@@ -85,13 +72,10 @@ describe('Guest data migration via PUT /api/finance', () => {
     })
     expect(putRes.status).toBe(200)
 
-    // GET — should return the migrated data
     const getRes = await app.request('/api/finance', {
       headers: { cookie: `token=${token}` },
     })
     const body = await getRes.json()
-    expect(body.data.months['0'].incomes[0].name).toBe('Freelance')
-    expect(body.data.months['0'].expenses[0].name).toBe('Czynsz')
     expect(body.data.savingsGoal.type).toBe('yearly')
     expect(body.data.savingsGoal.yearlyAmount).toBe(10000)
   })
@@ -111,57 +95,49 @@ describe('PUT /api/finance', () => {
     expect(res.status).toBe(401)
   })
 
-  it('saves and retrieves finance data', async () => {
+  // Po Phase 1 PUT nie zarządza transakcjami (skipTransactions=true).
+  // Pokrycie transakcji: src/transactions.test.js. Tutaj sprawdzamy savings_accounts.
+  it('saves and retrieves savings accounts', async () => {
     const { token, user } = await setupUserWithHousehold()
 
     const financeData = {
-      months: { 0: { incomes: [{ id: 1, name: 'Pensja', amount: 5000 }], expenses: [] } },
+      months: {},
+      savingsAccounts: [{ id: 1, name: 'Wakacje', amount: 5000, icon: 'plane' }],
       savingsGoal: { type: 'monthly', monthlyAmount: 500 },
     }
 
-    // Save
     const putRes = await app.request('/api/finance', {
       method: 'PUT',
-      headers: {
-        cookie: `token=${token}`,
-        'Content-Type': 'application/json',
-      },
+      headers: { cookie: `token=${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ data: financeData }),
     })
     expect(putRes.status).toBe(200)
 
-    // Retrieve
     const getRes = await app.request('/api/finance', {
       headers: { cookie: `token=${token}` },
     })
     expect(getRes.status).toBe(200)
     const body = await getRes.json()
-    expect(body.data.months['0'].incomes[0].name).toBe('Pensja')
+    expect(body.data.savingsAccounts[0].name).toBe('Wakacje')
+    expect(body.data.savingsAccounts[0].amount).toBe(5000)
     expect(body.data.savingsGoal.type).toBe('monthly')
 
-    // Wrazliwe pola w tabelach sa szyfrowane (ff1:…) — w bazie nie ma plaintext "Pensja"
-    const [txn] = await sql`
-      SELECT t.name, t.amount FROM transactions t
-      JOIN household_members hm ON hm.household_id = t.household_id
+    // Sensytywne pola szyfrowane w bazie
+    const [sa] = await sql`
+      SELECT s.name, s.amount FROM savings_accounts s
+      JOIN household_members hm ON hm.household_id = s.household_id
       WHERE hm.user_id = ${user.id}
     `
-    expect(txn.name).toMatch(/^ff1:/)
-    expect(txn.name).not.toContain('Pensja')
-    expect(txn.amount).toMatch(/^ff1:/)
-    expect(txn.amount).not.toContain('5000')
+    expect(sa.name).toMatch(/^ff1:/)
+    expect(sa.name).not.toContain('Wakacje')
+    expect(sa.amount).toMatch(/^ff1:/)
   })
 
-  it('idempotent — second PUT replaces all rows for household', async () => {
+  it('idempotent — second PUT replaces savings rows', async () => {
     const { token, user } = await setupUserWithHousehold()
 
-    const first = {
-      months: { 0: { incomes: [{ id: 1, name: 'A', amount: 100 }], expenses: [] } },
-      savingsGoal: { type: 'none' },
-    }
-    const second = {
-      months: { 0: { incomes: [{ id: 2, name: 'B', amount: 200 }], expenses: [] } },
-      savingsGoal: { type: 'none' },
-    }
+    const first = { months: {}, savingsAccounts: [{ id: 1, name: 'A', amount: 100 }], savingsGoal: { type: 'none' } }
+    const second = { months: {}, savingsAccounts: [{ id: 2, name: 'B', amount: 200 }], savingsGoal: { type: 'none' } }
 
     for (const data of [first, second]) {
       const res = await app.request('/api/finance', {
@@ -173,8 +149,8 @@ describe('PUT /api/finance', () => {
     }
 
     const [{ cnt }] = await sql`
-      SELECT COUNT(*)::int AS cnt FROM transactions t
-      JOIN household_members hm ON hm.household_id = t.household_id
+      SELECT COUNT(*)::int AS cnt FROM savings_accounts s
+      JOIN household_members hm ON hm.household_id = s.household_id
       WHERE hm.user_id = ${user.id}
     `
     expect(cnt).toBe(1)
@@ -183,7 +159,7 @@ describe('PUT /api/finance', () => {
       headers: { cookie: `token=${token}` },
     })
     const body = await getRes.json()
-    expect(body.data.months['0'].incomes[0].name).toBe('B')
-    expect(body.data.months['0'].incomes[0].amount).toBe(200)
+    expect(body.data.savingsAccounts[0].name).toBe('B')
+    expect(body.data.savingsAccounts[0].amount).toBe(200)
   })
 })

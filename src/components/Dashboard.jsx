@@ -26,6 +26,7 @@ import { SavingsGoal } from "./SavingsGoal";
 import { SavingsAccounts } from "./SavingsAccounts";
 import { HouseholdMembers } from "./HouseholdMembers";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { ConflictDialog } from "./ConflictDialog";
 import { ActivityHistory } from "./ActivityHistory";
 import { CategoryBudgets } from "./CategoryBudgets";
 import { MonthlySummaryModal } from "./MonthlySummaryModal";
@@ -78,6 +79,8 @@ export const Dashboard = () => {
     getCurrentMonth,
     loading,
     saving,
+    conflict,
+    clearConflict,
   } = useFinanceData();
 
   useEffect(() => {
@@ -278,6 +281,15 @@ export const Dashboard = () => {
           </button>
         </div>
       </div>
+
+      <ConflictDialog
+        open={!!conflict}
+        onOverride={conflict?.onOverride ?? clearConflict}
+        onCancel={conflict?.onCancel ?? clearConflict}
+        resourceLabel={conflict?.resourceLabel}
+        yours={conflict?.yours}
+        theirs={conflict?.theirs}
+      />
 
       <ConfirmDialog
         open={clearAllStep === 1}

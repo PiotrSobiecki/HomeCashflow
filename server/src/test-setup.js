@@ -6,6 +6,17 @@ const root = join(here, '..', '..')
 dotenv.config({ path: join(root, '.env.local') })
 dotenv.config({ path: join(root, '.env') })
 dotenv.config({ path: join(here, '..', '.env') })
+
+// Testy zawsze pukają w DATABASE_URL_TEST (osobny Neon branch, izolowany od deva).
+// Jeśli nie ustawione — fail-fast zamiast pomyłkowego wipe dev DB.
+if (process.env.DATABASE_URL_TEST) {
+  process.env.DATABASE_URL = process.env.DATABASE_URL_TEST
+} else {
+  throw new Error(
+    '[vitest] DATABASE_URL_TEST nie ustawione w .env.local. ' +
+      'Ustaw connection string do osobnego Neon brancha — bez tego testy wipeują dev DB.',
+  )
+}
 import { neon } from '@neondatabase/serverless'
 
 // Testy wymagają stałego klucza (32 B hex); w .env możesz nadpisać FINANCE_DATA_KEY.
