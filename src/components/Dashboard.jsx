@@ -28,6 +28,7 @@ import { HouseholdMembers } from "./HouseholdMembers";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { ConflictDialog } from "./ConflictDialog";
 import { ActivityHistory } from "./ActivityHistory";
+import { ActionLog } from "./ActionLog";
 import { CategoryBudgets } from "./CategoryBudgets";
 import { MonthlySummaryModal } from "./MonthlySummaryModal";
 
@@ -81,6 +82,7 @@ export const Dashboard = () => {
     saving,
     conflict,
     clearConflict,
+    refetchFromApi,
   } = useFinanceData();
 
   useEffect(() => {
@@ -405,6 +407,13 @@ export const Dashboard = () => {
           monthlySummaries={monthlySummaries}
           year={CURRENT_YEAR}
         />
+        {!isGuest && user && (
+          <ActionLog
+            currentUserId={user.id}
+            isOwner={isHouseholdOwner === true}
+            onAfterUndo={refetchFromApi}
+          />
+        )}
         <ActivityHistory
           entries={activityLog}
           MONTHS={MONTHS}

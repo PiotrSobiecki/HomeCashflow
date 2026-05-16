@@ -1033,5 +1033,6 @@ export const useFinanceData = () => {
     activityLog, clearActivityLog,
     MONTHS, MONTHS_SHORT, CURRENT_YEAR, getCurrentMonth, loading, saving,
     conflict, clearConflict,
+    refetchFromApi,
   };
 };
