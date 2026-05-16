@@ -8,6 +8,60 @@ import {
   readFinanceFromRelational,
   writeFinanceToRelational,
 } from "./finance-relational.js";
+import { logAction } from "./action-log.js";
+
+// Snapshoty kolumn dla action_log — zachowujemy ciphertext bez deszyfrowania.
+// Pozwala undo zapisać te same bajty z powrotem do tabel docelowych.
+function snapshotTransaction(row) {
+  return {
+    id: row.id,
+    kind: row.kind,
+    name: row.name,
+    amount: row.amount,
+    txn_date: row.txn_date,
+    year: row.year,
+    month: row.month,
+    is_fixed: row.is_fixed,
+    category: row.category,
+    created_by: row.created_by ?? null,
+  };
+}
+
+function snapshotSavingsAccount(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    amount: row.amount,
+    icon: row.icon ?? null,
+  };
+}
+
+function snapshotCategoryBudget(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    monthly_limit: row.monthly_limit,
+  };
+}
+
+function snapshotSavingsGoal(row) {
+  return {
+    type: row.type,
+    monthly_amount: row.monthly_amount,
+    yearly_amount: row.yearly_amount,
+    target_month: row.target_month,
+  };
+}
+
+// Wrapper: log + nie przerywaj endpointu gdyby coś wybuchło w logu.
+// (action_log to audit/undo, nie source of truth — błąd nie powinien zwalić mutacji)
+async function safeLogAction(sql, payload) {
+  try {
+    await logAction(sql, payload);
+  } catch (err) {
+    console.error("[action-log] insert failed", err);
+  }
+}
 
 export const app = new Hono();
 
@@ -501,6 +555,27 @@ app.post("/api/transactions", authMiddleware, async (c) => {
     RETURNING id, updated_at
   `;
 
+  await safeLogAction(sql, {
+    householdId: membership.household_id,
+    actorId: user.id,
+    operation: "CREATE",
+    resourceType: "transaction",
+    resourceId: row.id,
+    before: null,
+    after: snapshotTransaction({
+      id: row.id,
+      kind: body.kind,
+      name: nameEnc,
+      amount: amountEnc,
+      txn_date: body.txnDate,
+      year: body.year,
+      month: body.month,
+      is_fixed: body.isFixed,
+      category: body.category ?? null,
+      created_by: user.id,
+    }),
+  });
+
   return c.json(
     {
       id: row.id,
@@ -549,6 +624,16 @@ app.patch("/api/transactions/:id", authMiddleware, async (c) => {
     RETURNING id, kind, txn_date, year, month, is_fixed, category, updated_at
   `;
 
+  await safeLogAction(sql, {
+    householdId: row.household_id,
+    actorId: user.id,
+    operation: "UPDATE",
+    resourceType: "transaction",
+    resourceId: id,
+    before: snapshotTransaction(row),
+    after: snapshotTransaction({ ...row, name: nameEnc, amount: amountEnc }),
+  });
+
   return c.json({
     id: updated.id,
     kind: updated.kind,
@@ -577,6 +662,17 @@ app.delete("/api/transactions/:id", authMiddleware, async (c) => {
   if (result.error) return c.json(result.error.body, result.error.status);
 
   await sql`DELETE FROM transactions WHERE id = ${id}`;
+
+  await safeLogAction(sql, {
+    householdId: result.row.household_id,
+    actorId: user.id,
+    operation: "DELETE",
+    resourceType: "transaction",
+    resourceId: id,
+    before: snapshotTransaction(result.row),
+    after: null,
+  });
+
   return c.body(null, 204);
 });
 
@@ -644,6 +740,16 @@ app.post("/api/savings-accounts", authMiddleware, async (c) => {
     RETURNING id, updated_at
   `;
 
+  await safeLogAction(sql, {
+    householdId: membership.household_id,
+    actorId: user.id,
+    operation: "CREATE",
+    resourceType: "savings_account",
+    resourceId: row.id,
+    before: null,
+    after: snapshotSavingsAccount({ id: row.id, name: nameEnc, amount: amountEnc, icon: body.icon ?? null }),
+  });
+
   return c.json({
     id: row.id,
     name: body.name,
@@ -679,6 +785,16 @@ app.patch("/api/savings-accounts/:id", authMiddleware, async (c) => {
     RETURNING id, icon, updated_at
   `;
 
+  await safeLogAction(sql, {
+    householdId: row.household_id,
+    actorId: user.id,
+    operation: "UPDATE",
+    resourceType: "savings_account",
+    resourceId: id,
+    before: snapshotSavingsAccount(row),
+    after: snapshotSavingsAccount({ id, name: nameEnc, amount: amountEnc, icon: nextIcon }),
+  });
+
   return c.json({
     id: updated.id,
     name: nextName ?? (await decryptField(row.name, rawKey)),
@@ -700,6 +816,17 @@ app.delete("/api/savings-accounts/:id", authMiddleware, async (c) => {
   if (result.error) return c.json(result.error.body, result.error.status);
 
   await sql`DELETE FROM savings_accounts WHERE id = ${id}`;
+
+  await safeLogAction(sql, {
+    householdId: result.row.household_id,
+    actorId: user.id,
+    operation: "DELETE",
+    resourceType: "savings_account",
+    resourceId: id,
+    before: snapshotSavingsAccount(result.row),
+    after: null,
+  });
+
   return c.body(null, 204);
 });
 
@@ -766,6 +893,16 @@ app.post("/api/category-budgets", authMiddleware, async (c) => {
     RETURNING id, updated_at
   `;
 
+  await safeLogAction(sql, {
+    householdId: membership.household_id,
+    actorId: user.id,
+    operation: "CREATE",
+    resourceType: "category_budget",
+    resourceId: row.id,
+    before: null,
+    after: snapshotCategoryBudget({ id: row.id, name: nameEnc, monthly_limit: limitEnc }),
+  });
+
   return c.json({
     id: row.id,
     name: body.name,
@@ -799,6 +936,16 @@ app.patch("/api/category-budgets/:id", authMiddleware, async (c) => {
     RETURNING id, updated_at
   `;
 
+  await safeLogAction(sql, {
+    householdId: row.household_id,
+    actorId: user.id,
+    operation: "UPDATE",
+    resourceType: "category_budget",
+    resourceId: id,
+    before: snapshotCategoryBudget(row),
+    after: snapshotCategoryBudget({ id, name: nameEnc, monthly_limit: limitEnc }),
+  });
+
   return c.json({
     id: updated.id,
     name: nextName ?? (await decryptField(row.name, rawKey)),
@@ -819,6 +966,17 @@ app.delete("/api/category-budgets/:id", authMiddleware, async (c) => {
   if (result.error) return c.json(result.error.body, result.error.status);
 
   await sql`DELETE FROM category_budgets WHERE id = ${id}`;
+
+  await safeLogAction(sql, {
+    householdId: result.row.household_id,
+    actorId: user.id,
+    operation: "DELETE",
+    resourceType: "category_budget",
+    resourceId: id,
+    before: snapshotCategoryBudget(result.row),
+    after: null,
+  });
+
   return c.body(null, 204);
 });
 
@@ -851,6 +1009,12 @@ app.put("/api/savings-goal", authMiddleware, async (c) => {
   const yearlyEnc = await encryptField(body.yearlyAmount ?? 0, rawKey);
   const targetMonth = Number.isInteger(body.targetMonth) ? body.targetMonth : 11;
 
+  // Pobierz `before` przed upsertem — singleton, więc resource_id = household_id.
+  const [existing] = await sql`
+    SELECT type, monthly_amount, yearly_amount, target_month
+    FROM savings_goals WHERE household_id = ${membership.household_id}
+  `;
+
   await sql`
     INSERT INTO savings_goals (household_id, type, monthly_amount, yearly_amount, target_month, updated_at)
     VALUES (${membership.household_id}, ${body.type}, ${monthlyEnc}, ${yearlyEnc}, ${targetMonth}, NOW())
@@ -862,6 +1026,21 @@ app.put("/api/savings-goal", authMiddleware, async (c) => {
       updated_at = NOW()
   `;
 
+  await safeLogAction(sql, {
+    householdId: membership.household_id,
+    actorId: user.id,
+    operation: existing ? "UPDATE" : "CREATE",
+    resourceType: "savings_goal",
+    resourceId: membership.household_id,
+    before: existing ? snapshotSavingsGoal(existing) : null,
+    after: snapshotSavingsGoal({
+      type: body.type,
+      monthly_amount: monthlyEnc,
+      yearly_amount: yearlyEnc,
+      target_month: targetMonth,
+    }),
+  });
+
   return c.json({
     type: body.type,
     monthlyAmount: Number(body.monthlyAmount ?? 0),
@@ -869,6 +1048,282 @@ app.put("/api/savings-goal", authMiddleware, async (c) => {
     targetMonth,
   });
 });
+
+// ============ ACTION LOG (undo Phase 4) ============
+
+app.get("/api/action-log", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+
+  const [membership] = await sql`
+    SELECT household_id FROM household_members WHERE user_id = ${user.id}
+  `;
+  if (!membership) return c.json({ entries: [] });
+
+  const rawKey = getFinanceDataKey(c);
+  const rows = await sql`
+    SELECT al.id, al.actor_id, al.at, al.operation, al.resource_type, al.resource_id,
+           al.before, al.after, al.undone_at, al.undone_by, al.undoes_entry_id,
+           u.name AS actor_name, u.email AS actor_email,
+           u2.name AS undone_by_name
+    FROM action_log al
+    LEFT JOIN users u ON u.id = al.actor_id
+    LEFT JOIN users u2 ON u2.id = al.undone_by
+    WHERE al.household_id = ${membership.household_id}
+    ORDER BY al.at DESC, al.id DESC
+    LIMIT 20
+  `;
+
+  const entries = [];
+  for (const r of rows) {
+    // Z `after`/`before` wyciągamy "label" — name/type — odszyfrowany żeby UI mógł go pokazać.
+    const snapshotForLabel = r.after ?? r.before ?? {};
+    let label = null;
+    if (snapshotForLabel.name) {
+      try { label = await decryptField(snapshotForLabel.name, rawKey); }
+      catch { label = null; }
+    }
+    let amount = null;
+    if (snapshotForLabel.amount) {
+      try { amount = Number(await decryptField(snapshotForLabel.amount, rawKey)); }
+      catch { amount = null; }
+    }
+    entries.push({
+      id: r.id,
+      at: r.at instanceof Date ? r.at.toISOString() : String(r.at),
+      operation: r.operation,
+      resourceType: r.resource_type,
+      resourceId: r.resource_id,
+      actorId: r.actor_id,
+      actorName: r.actor_name ?? r.actor_email ?? null,
+      undoneAt: r.undone_at == null
+        ? null
+        : (r.undone_at instanceof Date ? r.undone_at.toISOString() : String(r.undone_at)),
+      undoneBy: r.undone_by ?? null,
+      undoneByName: r.undone_by_name ?? null,
+      undoesEntryId: r.undoes_entry_id ?? null,
+      label,
+      amount,
+    });
+  }
+
+  return c.json({ entries });
+});
+
+/**
+ * POST /api/action-log/:id/undo — odwrotna operacja do wpisu z action_log.
+ *
+ * Reverse:
+ *   CREATE  → DELETE z tabeli docelowej (jeśli istnieje)
+ *   UPDATE  → UPDATE wartościami z `before`
+ *   DELETE  → INSERT z `before` (z tym samym id jeśli nie ma konfliktu)
+ *
+ * Idempotencja:
+ *   - jeśli wpis już cofnięty (undone_at != null) → 200 { alreadyUndone: true }
+ *   - jeśli zasób nie istnieje a operacja to CREATE/UPDATE → 200 z notyfikacją
+ *
+ * Permissions: każdy member household widzi wpisy; cofać może
+ *   - wpisy własne (actor_id == user.id)
+ *   - dowolne, jeśli jest ownerem household
+ */
+app.post("/api/action-log/:id/undo", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+  const id = c.req.param("id");
+
+  const [entry] = await sql`
+    SELECT al.*, h.owner_id
+    FROM action_log al
+    JOIN households h ON h.id = al.household_id
+    WHERE al.id = ${id}
+  `;
+  if (!entry) return c.json({ error: "not found" }, 404);
+
+  // Membership w household tego wpisu
+  const [membership] = await sql`
+    SELECT 1 FROM household_members WHERE household_id = ${entry.household_id} AND user_id = ${user.id}
+  `;
+  if (!membership) return c.json({ error: "forbidden" }, 403);
+
+  // Permissions: owner może cofać cudze; member tylko swoje
+  const isOwner = entry.owner_id === user.id;
+  const isOwnEntry = entry.actor_id === user.id;
+  if (!isOwner && !isOwnEntry) {
+    return c.json({ error: "forbidden" }, 403);
+  }
+
+  // Idempotencja: już cofnięte
+  if (entry.undone_at != null) {
+    return c.json({ ok: true, alreadyUndone: true, notice: "Akcja była już cofnięta" });
+  }
+  // Nie cofamy wpisów typu UNDO
+  if (entry.operation === "UNDO") {
+    return c.json({ error: "Cannot undo an undo entry" }, 400);
+  }
+
+  const before = entry.before; // jsonb deserializowany przez Neon
+  const after = entry.after;
+  const rt = entry.resource_type;
+  const op = entry.operation;
+  const resourceId = entry.resource_id;
+  let notice = null;
+
+  try {
+    if (op === "CREATE") {
+      const deleted = await applyCreateRevert(sql, rt, entry.household_id, resourceId);
+      if (!deleted) notice = "Zasób już nie istniał — wpis oznaczony jako cofnięty.";
+    } else if (op === "UPDATE") {
+      if (!before) return c.json({ error: "Cannot undo UPDATE without 'before' snapshot" }, 500);
+      await applyUpdateRevert(sql, rt, entry.household_id, resourceId, before);
+    } else if (op === "DELETE") {
+      if (!before) return c.json({ error: "Cannot undo DELETE without 'before' snapshot" }, 500);
+      await applyDeleteRevert(sql, rt, entry.household_id, before);
+    } else {
+      return c.json({ error: `Unsupported operation: ${op}` }, 400);
+    }
+  } catch (err) {
+    console.error("[undo] reverse op failed", err);
+    return c.json({ error: "Undo failed", detail: err.message }, 500);
+  }
+
+  // Mark original + insert UNDO entry
+  await sql`
+    UPDATE action_log SET undone_at = NOW(), undone_by = ${user.id} WHERE id = ${id}
+  `;
+  await safeLogAction(sql, {
+    householdId: entry.household_id,
+    actorId: user.id,
+    operation: "UNDO",
+    resourceType: rt,
+    resourceId,
+    before: after,
+    after: before,
+    undoesEntryId: id,
+  });
+
+  return c.json({ ok: true, ...(notice ? { notice } : {}) });
+});
+
+// Helpery do undo — wybierane statycznie, bo Neon SQL nie pozwala bindować nazwy tabeli.
+
+async function applyCreateRevert(sql, rt, householdId, resourceId) {
+  if (rt === "savings_goal") {
+    await sql`DELETE FROM savings_goals WHERE household_id = ${householdId}`;
+    return true;
+  }
+  if (rt === "transaction") {
+    const [exists] = await sql`SELECT 1 FROM transactions WHERE id = ${resourceId}`;
+    if (!exists) return false;
+    await sql`DELETE FROM transactions WHERE id = ${resourceId}`;
+    return true;
+  }
+  if (rt === "savings_account") {
+    const [exists] = await sql`SELECT 1 FROM savings_accounts WHERE id = ${resourceId}`;
+    if (!exists) return false;
+    await sql`DELETE FROM savings_accounts WHERE id = ${resourceId}`;
+    return true;
+  }
+  if (rt === "category_budget") {
+    const [exists] = await sql`SELECT 1 FROM category_budgets WHERE id = ${resourceId}`;
+    if (!exists) return false;
+    await sql`DELETE FROM category_budgets WHERE id = ${resourceId}`;
+    return true;
+  }
+  throw new Error(`CREATE revert not implemented for ${rt}`);
+}
+
+async function applyUpdateRevert(sql, rt, householdId, resourceId, before) {
+  if (rt === "transaction") {
+    const [exists] = await sql`SELECT 1 FROM transactions WHERE id = ${resourceId}`;
+    if (!exists) return; // no-op
+    await sql`
+      UPDATE transactions
+      SET kind = ${before.kind},
+          name = ${before.name},
+          amount = ${before.amount},
+          txn_date = ${before.txn_date},
+          year = ${before.year},
+          month = ${before.month},
+          is_fixed = ${before.is_fixed},
+          category = ${before.category ?? null},
+          updated_at = NOW()
+      WHERE id = ${resourceId}
+    `;
+  } else if (rt === "savings_account") {
+    const [exists] = await sql`SELECT 1 FROM savings_accounts WHERE id = ${resourceId}`;
+    if (!exists) return;
+    await sql`
+      UPDATE savings_accounts
+      SET name = ${before.name}, amount = ${before.amount}, icon = ${before.icon ?? null}, updated_at = NOW()
+      WHERE id = ${resourceId}
+    `;
+  } else if (rt === "category_budget") {
+    const [exists] = await sql`SELECT 1 FROM category_budgets WHERE id = ${resourceId}`;
+    if (!exists) return;
+    await sql`
+      UPDATE category_budgets
+      SET name = ${before.name}, monthly_limit = ${before.monthly_limit}, updated_at = NOW()
+      WHERE id = ${resourceId}
+    `;
+  } else if (rt === "savings_goal") {
+    // singleton upsert wstecz
+    await sql`
+      INSERT INTO savings_goals (household_id, type, monthly_amount, yearly_amount, target_month, updated_at)
+      VALUES (${householdId}, ${before.type}, ${before.monthly_amount}, ${before.yearly_amount}, ${before.target_month}, NOW())
+      ON CONFLICT (household_id) DO UPDATE SET
+        type = EXCLUDED.type, monthly_amount = EXCLUDED.monthly_amount,
+        yearly_amount = EXCLUDED.yearly_amount, target_month = EXCLUDED.target_month,
+        updated_at = NOW()
+    `;
+  } else {
+    throw new Error(`UPDATE revert not implemented for ${rt}`);
+  }
+}
+
+async function applyDeleteRevert(sql, rt, householdId, before) {
+  // Spróbuj z tym samym id; jeśli już zajęte przez inny rekord → insert bez id (auto-gen).
+  if (rt === "transaction") {
+    const [exists] = await sql`SELECT 1 FROM transactions WHERE id = ${before.id}`;
+    if (!exists) {
+      await sql`
+        INSERT INTO transactions (id, household_id, kind, name, amount, txn_date, year, month, is_fixed, category, created_by)
+        VALUES (${before.id}, ${householdId}, ${before.kind}, ${before.name}, ${before.amount}, ${before.txn_date},
+                ${before.year}, ${before.month}, ${before.is_fixed}, ${before.category ?? null}, ${before.created_by ?? null})
+      `;
+    } else {
+      await sql`
+        INSERT INTO transactions (household_id, kind, name, amount, txn_date, year, month, is_fixed, category, created_by)
+        VALUES (${householdId}, ${before.kind}, ${before.name}, ${before.amount}, ${before.txn_date},
+                ${before.year}, ${before.month}, ${before.is_fixed}, ${before.category ?? null}, ${before.created_by ?? null})
+      `;
+    }
+  } else if (rt === "savings_account") {
+    const [exists] = await sql`SELECT 1 FROM savings_accounts WHERE id = ${before.id}`;
+    if (!exists) {
+      await sql`INSERT INTO savings_accounts (id, household_id, name, amount, icon) VALUES (${before.id}, ${householdId}, ${before.name}, ${before.amount}, ${before.icon ?? null})`;
+    } else {
+      await sql`INSERT INTO savings_accounts (household_id, name, amount, icon) VALUES (${householdId}, ${before.name}, ${before.amount}, ${before.icon ?? null})`;
+    }
+  } else if (rt === "category_budget") {
+    const [exists] = await sql`SELECT 1 FROM category_budgets WHERE id = ${before.id}`;
+    if (!exists) {
+      await sql`INSERT INTO category_budgets (id, household_id, name, monthly_limit) VALUES (${before.id}, ${householdId}, ${before.name}, ${before.monthly_limit})`;
+    } else {
+      await sql`INSERT INTO category_budgets (household_id, name, monthly_limit) VALUES (${householdId}, ${before.name}, ${before.monthly_limit})`;
+    }
+  } else if (rt === "savings_goal") {
+    // singleton — nie ma DELETE w UI, ale na wszelki wypadek
+    await sql`
+      INSERT INTO savings_goals (household_id, type, monthly_amount, yearly_amount, target_month)
+      VALUES (${householdId}, ${before.type}, ${before.monthly_amount}, ${before.yearly_amount}, ${before.target_month})
+      ON CONFLICT (household_id) DO UPDATE SET
+        type = EXCLUDED.type, monthly_amount = EXCLUDED.monthly_amount,
+        yearly_amount = EXCLUDED.yearly_amount, target_month = EXCLUDED.target_month, updated_at = NOW()
+    `;
+  } else {
+    throw new Error(`DELETE revert not implemented for ${rt}`);
+  }
+}
 
 // ============ HOUSEHOLD ENDPOINTS ============
 
