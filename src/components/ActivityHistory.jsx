@@ -1,6 +1,7 @@
-import { useMemo, useState, useEffect } from 'react';
-import { History, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
+import { useMemo, useState, useEffect, useCallback, useRef } from 'react';
+import { History, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Trash2, Undo2 } from 'lucide-react';
 import { ConfirmDialog } from './ConfirmDialog';
+import { fetchActionLog, undoActionLogEntry } from '../lib/api';
 
 const PAGE_SIZE = 8;
 
@@ -27,6 +28,10 @@ const formatWhen = (iso) => {
 
 /** Czytelny opis jednego wpisu historii (PL). */
 export function describeActivity(entry, MONTHS) {
+  if (entry.operation === 'UNDO' || entry.action === 'undo') {
+    return 'cofnął(a) poprzednią akcję';
+  }
+
   const name = entry.label ? `„${entry.label}”` : '';
   const amt = entry.amount != null && !Number.isNaN(entry.amount) ? formatCurrency(entry.amount) : '';
   const monthName = entry.month != null && MONTHS[entry.month] ? MONTHS[entry.month] : null;
@@ -54,6 +59,11 @@ export function describeActivity(entry, MONTHS) {
     if (act === 'update') return `zmienił(a) wpis oszczędności ${name}${amt ? ` ${amt}` : ''}`;
     if (act === 'delete') return `usunął(a) wpis oszczędności ${name}${amt ? ` ${amt}` : ''}`;
   }
+  if (kind === 'categoryBudget') {
+    if (act === 'add') return `dodał(a) budżet kategorii ${name}${amt ? ` ${amt}` : ''}`;
+    if (act === 'update') return `zmienił(a) budżet kategorii ${name}${amt ? ` ${amt}` : ''}`;
+    if (act === 'delete') return `usunął(a) budżet kategorii ${name}${amt ? ` ${amt}` : ''}`;
+  }
   if (kind === 'savingsGoal' && act === 'update') {
     return `zmienił(a) cel oszczędnościowy`;
   }
@@ -61,25 +71,163 @@ export function describeActivity(entry, MONTHS) {
   return `${act} • ${kind}${name ? ` ${name}` : ''}`;
 }
 
-export const ActivityHistory = ({ entries, MONTHS, canClear, onClear, selectedMonth }) => {
+function mapServerEntry(raw) {
+  let kind = null;
+  if (raw.resourceType === 'transaction') {
+    kind = raw.txnKind === 'income' ? 'income' : 'expense';
+  } else if (raw.resourceType === 'savings_account') {
+    kind = 'savings';
+  } else if (raw.resourceType === 'category_budget') {
+    kind = 'categoryBudget';
+  } else if (raw.resourceType === 'savings_goal') {
+    kind = 'savingsGoal';
+  }
+
+  const opMap = { CREATE: 'add', UPDATE: 'update', DELETE: 'delete', UNDO: 'undo' };
+
+  return {
+    id: raw.id,
+    at: raw.at,
+    userName: raw.actorName,
+    actorId: raw.actorId,
+    month: raw.month,
+    kind,
+    action: opMap[raw.operation] || String(raw.operation || '').toLowerCase(),
+    label: raw.label,
+    amount: raw.amount,
+    operation: raw.operation,
+    undoneAt: raw.undoneAt,
+    undoneByName: raw.undoneByName,
+    source: 'server',
+  };
+}
+
+function matchesMonth(entry, selectedMonth) {
+  if (entry.month == null) return true;
+  return entry.month === selectedMonth;
+}
+
+export const ActivityHistory = ({
+  entries: guestEntries,
+  MONTHS,
+  canClear,
+  onClear,
+  selectedMonth,
+  isGuest,
+  currentUserId,
+  isOwner,
+  onAfterUndo,
+}) => {
   const [open, setOpen] = useState(true);
   const [page, setPage] = useState(0);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [serverEntries, setServerEntries] = useState([]);
+  const [pendingUndoId, setPendingUndoId] = useState(null);
+  const [error, setError] = useState(null);
+  const [notice, setNotice] = useState(null);
+
+  const refreshServer = useCallback(async () => {
+    if (isGuest) return;
+    try {
+      const list = await fetchActionLog();
+      setServerEntries(list.map(mapServerEntry));
+      setError(null);
+    } catch (err) {
+      setError(err.message || 'Nie udało się pobrać historii');
+    }
+  }, [isGuest]);
+
+  useEffect(() => {
+    refreshServer();
+  }, [refreshServer]);
+
+  useEffect(() => {
+    if (isGuest) return;
+    const id = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      refreshServer();
+    }, 30000);
+    return () => clearInterval(id);
+  }, [isGuest, refreshServer]);
 
   const sorted = useMemo(() => {
-    const list = Array.isArray(entries) ? [...entries] : [];
+    const list = isGuest
+      ? (Array.isArray(guestEntries) ? [...guestEntries] : [])
+      : [...serverEntries];
     return list.sort((a, b) => new Date(b.at) - new Date(a.at));
-  }, [entries]);
+  }, [isGuest, guestEntries, serverEntries]);
 
-  const filtered = useMemo(() => {
-    return sorted.filter(e => e.month === selectedMonth);
-  }, [sorted, selectedMonth]);
+  const filtered = useMemo(
+    () => sorted.filter((e) => matchesMonth(e, selectedMonth)),
+    [sorted, selectedMonth],
+  );
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const pageSlice = useMemo(
     () => filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE),
-    [filtered, page]
+    [filtered, page],
   );
+
+  const myLatestUndoable = useMemo(() => {
+    if (isGuest) return null;
+    return (
+      serverEntries.find(
+        (e) =>
+          e.actorId === currentUserId &&
+          e.operation !== 'UNDO' &&
+          !e.undoneAt &&
+          matchesMonth(e, selectedMonth),
+      ) || null
+    );
+  }, [isGuest, serverEntries, currentUserId, selectedMonth]);
+
+  const latestRef = useRef(myLatestUndoable);
+  useEffect(() => {
+    latestRef.current = myLatestUndoable;
+  }, [myLatestUndoable]);
+
+  const doUndo = useCallback(
+    async (entry) => {
+      if (!entry || entry.undoneAt || entry.operation === 'UNDO') return;
+      if (!isOwner && entry.actorId !== currentUserId) {
+        setError('Możesz cofnąć tylko własne akcje');
+        return;
+      }
+      setPendingUndoId(entry.id);
+      setError(null);
+      setNotice(null);
+      try {
+        const res = await undoActionLogEntry(entry.id);
+        if (res.alreadyUndone) setNotice('Ta akcja była już cofnięta.');
+        else if (res.notice) setNotice(res.notice);
+        await refreshServer();
+        if (typeof onAfterUndo === 'function') await onAfterUndo();
+      } catch (err) {
+        setError(err.message || 'Nie udało się cofnąć');
+      } finally {
+        setPendingUndoId(null);
+      }
+    },
+    [currentUserId, isOwner, refreshServer, onAfterUndo],
+  );
+
+  useEffect(() => {
+    if (isGuest) return;
+    const onKey = (e) => {
+      const isCtrlZ =
+        (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey;
+      if (!isCtrlZ) return;
+      const t = e.target;
+      const tag = t?.tagName?.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || t?.isContentEditable) return;
+      const candidate = latestRef.current;
+      if (!candidate) return;
+      e.preventDefault();
+      doUndo(candidate);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isGuest, doUndo]);
 
   useEffect(() => {
     setPage(0);
@@ -107,6 +255,7 @@ export const ActivityHistory = ({ entries, MONTHS, canClear, onClear, selectedMo
               <p className="text-xs text-slate-400">
                 {MONTHS[selectedMonth]}
                 {filtered.length > 0 ? ` (${filtered.length})` : ' — brak wpisów'}
+                {!isGuest && myLatestUndoable && ' · Ctrl+Z cofa Twoją ostatnią akcję'}
               </p>
             </div>
           </div>
@@ -129,59 +278,107 @@ export const ActivityHistory = ({ entries, MONTHS, canClear, onClear, selectedMo
       </div>
 
       {open && (
-        filtered.length === 0 ? (
-          <p className="mt-4 text-sm text-slate-500 border-t border-slate-700/50 pt-4">
-            Brak zapisanych zdarzeń. Po dodaniu lub usunięciu wpisów pojawią się tutaj wraz z imieniem osoby.
-          </p>
-        ) : (
-          <>
-            <ul className="mt-4 space-y-2 border-t border-slate-700/50 pt-4">
-              {pageSlice.map((entry) => (
-                <li
-                  key={entry.id}
-                  className="text-sm text-slate-300 py-2 px-3 rounded-xl bg-slate-900/40 border border-slate-700/30"
-                >
-                  <span className="text-indigo-300 font-medium">{entry.userName || 'Nieznany'}</span>
-                  <span className="text-slate-500"> · </span>
-                  <span className="text-slate-500 text-xs whitespace-nowrap">{formatWhen(entry.at)}</span>
-                  <span className="text-slate-600"> — </span>
-                  <span>{describeActivity(entry, MONTHS)}</span>
-                </li>
-              ))}
-            </ul>
-            {filtered.length > PAGE_SIZE && (
-              <div className="flex items-center justify-between gap-3 mt-4 pt-4 border-t border-slate-700/50">
-                <button
-                  type="button"
-                  disabled={page <= 0}
-                  onClick={() => setPage((p) => Math.max(0, p - 1))}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium text-slate-300 bg-slate-700/50 hover:bg-slate-700 disabled:opacity-40 disabled:pointer-events-none transition-colors"
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                  Poprzednia
-                </button>
-                <span className="text-xs text-slate-400 tabular-nums">
-                  Strona {page + 1} z {totalPages}
-                </span>
-                <button
-                  type="button"
-                  disabled={page >= totalPages - 1}
-                  onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium text-slate-300 bg-slate-700/50 hover:bg-slate-700 disabled:opacity-40 disabled:pointer-events-none transition-colors"
-                >
-                  Następna
-                  <ChevronRight className="w-4 h-4" />
-                </button>
-              </div>
-            )}
-          </>
-        )
+        <>
+          {error && (
+            <div className="mt-4 text-sm text-rose-400 border border-rose-500/30 bg-rose-500/10 rounded-xl px-3 py-2">
+              {error}
+            </div>
+          )}
+          {notice && (
+            <div className="mt-4 text-sm text-amber-300 border border-amber-500/30 bg-amber-500/10 rounded-xl px-3 py-2">
+              {notice}
+            </div>
+          )}
+          {filtered.length === 0 ? (
+            <p className="mt-4 text-sm text-slate-500 border-t border-slate-700/50 pt-4">
+              Brak zapisanych zdarzeń. Po dodaniu lub usunięciu wpisów pojawią się tutaj wraz z
+              imieniem osoby.
+            </p>
+          ) : (
+            <>
+              <ul className="mt-4 space-y-2 border-t border-slate-700/50 pt-4">
+                {pageSlice.map((entry) => {
+                  const isOwn = entry.actorId === currentUserId;
+                  const canUndo =
+                    !isGuest &&
+                    !entry.undoneAt &&
+                    entry.operation !== 'UNDO' &&
+                    (isOwner || isOwn);
+                  return (
+                    <li
+                      key={entry.id}
+                      className="text-sm text-slate-300 py-2 px-3 rounded-xl bg-slate-900/40 border border-slate-700/30 flex items-center gap-3"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <span className="text-indigo-300 font-medium">
+                          {entry.userName || 'Nieznany'}
+                        </span>
+                        <span className="text-slate-500"> · </span>
+                        <span className="text-slate-500 text-xs whitespace-nowrap">
+                          {formatWhen(entry.at)}
+                        </span>
+                        <span className="text-slate-600"> — </span>
+                        <span>{describeActivity(entry, MONTHS)}</span>
+                        {entry.undoneAt && (
+                          <span className="ml-2 text-xs text-amber-400">
+                            (cofnięte
+                            {entry.undoneByName ? ` przez ${entry.undoneByName}` : ''})
+                          </span>
+                        )}
+                      </div>
+                      {canUndo ? (
+                        <button
+                          type="button"
+                          onClick={() => doUndo(entry)}
+                          disabled={pendingUndoId === entry.id}
+                          className="shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-200 bg-slate-700/60 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                          title="Cofnij tę akcję"
+                        >
+                          <Undo2 className="w-3.5 h-3.5" />
+                          {pendingUndoId === entry.id ? 'Cofam…' : 'Cofnij'}
+                        </button>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+              {filtered.length > PAGE_SIZE && (
+                <div className="flex items-center justify-between gap-3 mt-4 pt-4 border-t border-slate-700/50">
+                  <button
+                    type="button"
+                    disabled={page <= 0}
+                    onClick={() => setPage((p) => Math.max(0, p - 1))}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium text-slate-300 bg-slate-700/50 hover:bg-slate-700 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                    Poprzednia
+                  </button>
+                  <span className="text-xs text-slate-400 tabular-nums">
+                    Strona {page + 1} z {totalPages}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={page >= totalPages - 1}
+                    onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium text-slate-300 bg-slate-700/50 hover:bg-slate-700 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+                  >
+                    Następna
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </>
       )}
 
       <ConfirmDialog
         open={confirmClear}
         onClose={() => setConfirmClear(false)}
-        onConfirm={() => { setConfirmClear(false); onClear(); }}
+        onConfirm={() => {
+          setConfirmClear(false);
+          onClear();
+        }}
         title="Wyczyścić historię zmian?"
         description="Wszystkie wpisy w historii zostaną trwale usunięte. Tej operacji nie można cofnąć. Dane finansowe (przychody, wydatki, oszczędności) pozostaną bez zmian."
         confirmLabel="Tak, wyczyść historię"

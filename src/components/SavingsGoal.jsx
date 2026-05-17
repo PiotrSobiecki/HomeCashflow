@@ -3,7 +3,9 @@ import { Target, Calendar, Check, X, Settings, Trophy, Flag } from 'lucide-react
 
 const formatCurrency = (amount) => new Intl.NumberFormat('pl-PL', { style: 'currency', currency: 'PLN', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(amount);
 
-export const SavingsGoal = ({ savingsGoal, savingsGoalData, updateSavingsGoal, months }) => {
+// Cel oszczędnościowy to singleton bez `created_by` — backend pozwala mutować tylko ownerowi.
+// `canEdit` ze strony Dashboard ukrywa przyciski, jeśli user nie jest ownerem (gość ma true).
+export const SavingsGoal = ({ savingsGoal, savingsGoalData, updateSavingsGoal, months, canEdit = true }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editType, setEditType] = useState(savingsGoal.type);
   const [editMonthlyAmount, setEditMonthlyAmount] = useState(savingsGoal.monthlyAmount.toString());
@@ -29,7 +31,7 @@ export const SavingsGoal = ({ savingsGoal, savingsGoalData, updateSavingsGoal, m
             <div className="bg-slate-600/30 p-4 rounded-2xl"><Target className="w-8 h-8 text-slate-400" /></div>
             <div><h3 className="text-lg font-bold text-white">Cel Oszczędnościowy</h3><p className="text-slate-400 text-sm">Ustaw cel, żeby wiedzieć ile możesz wydać bez wyrzutów sumienia</p></div>
           </div>
-          <button onClick={() => setIsEditing(true)} className="flex items-center gap-2 px-4 py-2 bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-400 rounded-xl transition-all font-medium"><Target className="w-4 h-4" />Ustaw cel</button>
+          {canEdit && <button onClick={() => setIsEditing(true)} className="flex items-center gap-2 px-4 py-2 bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-400 rounded-xl transition-all font-medium"><Target className="w-4 h-4" />Ustaw cel</button>}
         </div>
       </div>
     );
@@ -65,7 +67,7 @@ export const SavingsGoal = ({ savingsGoal, savingsGoalData, updateSavingsGoal, m
           <div className="text-center lg:text-right"><p className="text-slate-500 text-xs uppercase tracking-wide mb-1">{isMonthly ? 'Ten miesiąc' : 'Zebrano'}</p><p className={`text-xl font-bold ${colors.text}`}>{formatCurrency(savingsGoalData.currentSavings)}</p></div>
           <div className="text-center lg:text-right"><p className="text-slate-500 text-xs uppercase tracking-wide mb-1">Zostało</p><p className="text-xl font-bold text-white">{formatCurrency(savingsGoalData.remaining)}</p></div>
           {!isMonthly && <div className="text-center lg:text-right"><p className="text-slate-500 text-xs uppercase tracking-wide mb-1">Mies. cel</p><p className="text-xl font-bold text-white">{formatCurrency(savingsGoalData.monthlyTarget)}</p></div>}
-          <button onClick={() => setIsEditing(true)} className="p-2 text-slate-400 hover:text-white hover:bg-slate-700/50 rounded-lg transition-all self-center" title="Edytuj cel"><Settings className="w-5 h-5" /></button>
+          {canEdit && <button onClick={() => setIsEditing(true)} className="p-2 text-slate-400 hover:text-white hover:bg-slate-700/50 rounded-lg transition-all self-center" title="Edytuj cel"><Settings className="w-5 h-5" /></button>}
         </div>
       </div>
       <div className="mt-4"><div className="flex justify-between text-xs text-slate-400 mb-1"><span>{savingsGoalData.progress.toFixed(0)}% celu</span><span>{formatCurrency(savingsGoalData.currentSavings)} / {formatCurrency(savingsGoalData.targetAmount)}</span></div><div className="h-3 bg-slate-700/50 rounded-full overflow-hidden"><div className={`h-full rounded-full bg-gradient-to-r ${colors.bar} transition-all duration-500`} style={{ width: `${Math.min(100, savingsGoalData.progress)}%` }} /></div></div>

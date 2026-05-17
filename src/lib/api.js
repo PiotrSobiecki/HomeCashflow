@@ -137,3 +137,29 @@ export const deleteCategoryBudget = (id, updatedAt) =>
 
 export const putSavingsGoal = (body) =>
   mutateWithMatch('/api/savings-goal', 'PUT', null, body);
+
+// ===== Action log + undo (Phase 4) =====
+
+export const fetchActionLog = async () => {
+  const res = await fetch(`${API_URL}/api/action-log`, {
+    method: 'GET',
+    credentials: 'include',
+    headers: { Accept: 'application/json' },
+  });
+  if (!res.ok) throw new Error(`GET /api/action-log: ${res.status}`);
+  const body = await res.json();
+  return Array.isArray(body.entries) ? body.entries : [];
+};
+
+export const undoActionLogEntry = async (id) => {
+  const res = await fetch(`${API_URL}/api/action-log/${id}/undo`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { Accept: 'application/json' },
+  });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    throw new Error(detail.error || `POST /api/action-log/${id}/undo: ${res.status}`);
+  }
+  return res.json();
+};

@@ -18,7 +18,10 @@ const ICON_OPTIONS = [
   { key: 'piggy', label: 'Skarbonka' },
 ];
 
-export const SavingsAccounts = ({ accounts, totalSavings, addAccount, updateAccount, deleteAccount }) => {
+const canMutateEntry = (item, currentUserId, isOwner) =>
+  isOwner || item?.createdBy == null || item.createdBy === currentUserId;
+
+export const SavingsAccounts = ({ accounts, totalSavings, addAccount, updateAccount, deleteAccount, currentUserId = null, isOwner = false }) => {
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [newName, setNewName] = useState('');
@@ -146,10 +149,14 @@ export const SavingsAccounts = ({ accounts, totalSavings, addAccount, updateAcco
                   </div>
                   <div className="flex items-center gap-4">
                     <span className="text-indigo-400 font-semibold">{formatCurrency(acc.amount)}</span>
-                    <div className="flex gap-1">
-                      <button onClick={() => handleEdit(acc)} className="p-2 text-slate-400 hover:text-white hover:bg-slate-600 rounded-lg transition-all"><Pencil className="w-4 h-4" /></button>
-                      <button type="button" onClick={() => setDeleteTarget({ id: acc.id, name: acc.name, amountLabel: formatCurrency(acc.amount) })} className="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-500/20 rounded-lg transition-all"><Trash2 className="w-4 h-4" /></button>
-                    </div>
+                    {canMutateEntry(acc, currentUserId, isOwner) ? (
+                      <div className="flex gap-1">
+                        <button onClick={() => handleEdit(acc)} className="p-2 text-slate-400 hover:text-white hover:bg-slate-600 rounded-lg transition-all"><Pencil className="w-4 h-4" /></button>
+                        <button type="button" onClick={() => setDeleteTarget({ id: acc.id, name: acc.name, amountLabel: formatCurrency(acc.amount) })} className="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-500/20 rounded-lg transition-all"><Trash2 className="w-4 h-4" /></button>
+                      </div>
+                    ) : (
+                      <span className="text-xs text-slate-600 italic px-2" title="Tylko właściciel lub autor wpisu">cudzy</span>
+                    )}
                   </div>
                 </>
               )}

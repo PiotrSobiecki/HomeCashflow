@@ -5,10 +5,14 @@ import { ConfirmDialog } from './ConfirmDialog';
 
 const formatCurrency = (amount) => new Intl.NumberFormat('pl-PL', { style: 'currency', currency: 'PLN', minimumFractionDigits: 2 }).format(amount);
 
+const canMutateEntry = (item, currentUserId, isOwner) =>
+  isOwner || item?.createdBy == null || item.createdBy === currentUserId;
+
 export const CategoryBudgets = ({
   categoryBudgets, categorySpending, totalCategoryLimits,
   addCategoryBudget, updateCategoryBudget, deleteCategoryBudget,
   totalIncome, fixedExpenses, variableExpenses, savingsGoalData,
+  currentUserId = null, isOwner = false,
 }) => {
   const [collapsed, setCollapsed] = useState(true);
   const [isAdding, setIsAdding] = useState(false);
@@ -176,10 +180,14 @@ export const CategoryBudgets = ({
                       <span className={`text-sm font-medium ${getTextColor(spent, cat.limit)}`}>
                         {remaining >= 0 ? `Zostało ${formatCurrency(remaining)}` : `Przekroczono o ${formatCurrency(Math.abs(remaining))}`}
                       </span>
-                      <div className="flex gap-1">
-                        <button onClick={() => handleEdit(cat)} className="p-2 text-slate-400 hover:text-white hover:bg-slate-600 rounded-lg transition-all"><Pencil className="w-4 h-4" /></button>
-                        <button type="button" onClick={() => setDeleteTarget({ id: cat.id, name: cat.name })} className="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-500/20 rounded-lg transition-all"><Trash2 className="w-4 h-4" /></button>
-                      </div>
+                      {canMutateEntry(cat, currentUserId, isOwner) ? (
+                        <div className="flex gap-1">
+                          <button onClick={() => handleEdit(cat)} className="p-2 text-slate-400 hover:text-white hover:bg-slate-600 rounded-lg transition-all"><Pencil className="w-4 h-4" /></button>
+                          <button type="button" onClick={() => setDeleteTarget({ id: cat.id, name: cat.name })} className="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-500/20 rounded-lg transition-all"><Trash2 className="w-4 h-4" /></button>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-slate-600 italic px-2" title="Tylko właściciel lub autor wpisu">cudzy</span>
+                      )}
                     </div>
                   </div>
                   {/* Progress bar */}

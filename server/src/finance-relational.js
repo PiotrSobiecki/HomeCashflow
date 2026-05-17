@@ -28,12 +28,12 @@ function pickDate(item, year, month) {
  */
 export async function readFinanceFromRelational(sql, householdId, rawKey) {
   const [txns, deleted, savings, categories, goalRows, activity] = await Promise.all([
-    sql`SELECT id, kind, name, amount, txn_date, year, month, is_fixed, category, updated_at
+    sql`SELECT id, kind, name, amount, txn_date, year, month, is_fixed, category, created_by, updated_at
         FROM transactions WHERE household_id = ${householdId}
         ORDER BY year, month, txn_date`,
     sql`SELECT year, month, kind, name FROM deleted_fixed_items WHERE household_id = ${householdId}`,
-    sql`SELECT id, name, amount, icon, updated_at FROM savings_accounts WHERE household_id = ${householdId} ORDER BY created_at`,
-    sql`SELECT id, name, monthly_limit, updated_at FROM category_budgets WHERE household_id = ${householdId} ORDER BY created_at`,
+    sql`SELECT id, name, amount, icon, created_by, updated_at FROM savings_accounts WHERE household_id = ${householdId} ORDER BY created_at`,
+    sql`SELECT id, name, monthly_limit, created_by, updated_at FROM category_budgets WHERE household_id = ${householdId} ORDER BY created_at`,
     sql`SELECT type, monthly_amount, yearly_amount, target_month FROM savings_goals WHERE household_id = ${householdId}`,
     sql`SELECT id, user_id, user_name, at, action, kind, label, amount, month
         FROM activity_log WHERE household_id = ${householdId}
@@ -53,6 +53,7 @@ export async function readFinanceFromRelational(sql, householdId, rawKey) {
       amount: Number.isFinite(amount) ? amount : 0,
       isFixed: t.is_fixed,
       date: t.txn_date,
+      createdBy: t.created_by ?? null,
       updatedAt: t.updated_at instanceof Date ? t.updated_at.toISOString() : String(t.updated_at),
     }
     if (t.kind === 'expense' && !t.is_fixed && t.category) {
@@ -78,6 +79,7 @@ export async function readFinanceFromRelational(sql, householdId, rawKey) {
       name: name ?? '',
       amount: amountStr == null ? 0 : Number(amountStr) || 0,
       icon: s.icon ?? 'bank',
+      createdBy: s.created_by ?? null,
       updatedAt: s.updated_at instanceof Date ? s.updated_at.toISOString() : String(s.updated_at),
     })
   }
@@ -90,6 +92,7 @@ export async function readFinanceFromRelational(sql, householdId, rawKey) {
       id: c.id,
       name: name ?? '',
       limit: limitStr == null ? 0 : Number(limitStr) || 0,
+      createdBy: c.created_by ?? null,
       updatedAt: c.updated_at instanceof Date ? c.updated_at.toISOString() : String(c.updated_at),
     })
   }

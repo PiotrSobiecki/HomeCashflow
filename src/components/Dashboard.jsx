@@ -81,6 +81,7 @@ export const Dashboard = () => {
     saving,
     conflict,
     clearConflict,
+    refetchFromApi,
   } = useFinanceData();
 
   useEffect(() => {
@@ -330,6 +331,7 @@ export const Dashboard = () => {
           savingsGoalData={savingsGoalData}
           updateSavingsGoal={updateSavingsGoal}
           months={MONTHS}
+          canEdit={isGuest || isHouseholdOwner === true}
         />
         <GuiltFreeBurn
           guiltFreeBurn={guiltFreeBurn}
@@ -341,6 +343,8 @@ export const Dashboard = () => {
           addAccount={addSavingsAccount}
           updateAccount={updateSavingsAccount}
           deleteAccount={deleteSavingsAccount}
+          currentUserId={user?.id ?? null}
+          isOwner={isHouseholdOwner === true}
         />
         <CategoryBudgets
           categoryBudgets={categoryBudgets}
@@ -353,6 +357,8 @@ export const Dashboard = () => {
           fixedExpenses={guiltFreeBurn.monthFixedExpenses}
           variableExpenses={guiltFreeBurn.monthVariableExpenses}
           savingsGoalData={savingsGoalData}
+          currentUserId={user?.id ?? null}
+          isOwner={isHouseholdOwner === true}
         />
         <FinancialRunway financialRunway={financialRunway} />
         <ForecastChart
@@ -380,6 +386,8 @@ export const Dashboard = () => {
               addIncome={addIncome}
               updateIncome={updateIncome}
               deleteIncome={deleteIncome}
+              currentUserId={user?.id ?? null}
+              isOwner={isHouseholdOwner === true}
             />
           </div>
           <div id="expense-section" className="h-full min-h-0">
@@ -389,6 +397,8 @@ export const Dashboard = () => {
               updateExpense={updateExpense}
               deleteExpense={deleteExpense}
               categoryBudgets={categoryBudgets}
+              currentUserId={user?.id ?? null}
+              isOwner={isHouseholdOwner === true}
             />
           </div>
         </div>
@@ -408,9 +418,13 @@ export const Dashboard = () => {
         <ActivityHistory
           entries={activityLog}
           MONTHS={MONTHS}
-          canClear={isGuest || isHouseholdOwner === true}
-          onClear={clearActivityLog}
           selectedMonth={selectedMonth}
+          isGuest={isGuest}
+          canClear={isGuest}
+          onClear={clearActivityLog}
+          currentUserId={user?.id}
+          isOwner={isHouseholdOwner === true}
+          onAfterUndo={refetchFromApi}
         />
       </main>
       {/* Footer */}

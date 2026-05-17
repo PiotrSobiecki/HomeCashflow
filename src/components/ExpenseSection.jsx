@@ -12,12 +12,18 @@ const formatCurrency = (amount) =>
 const formatDate = (dateStr) =>
   dateStr ? new Date(dateStr).toLocaleDateString('pl-PL', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '';
 
+// Patrz IncomeSection: ta sama reguła (owner OR autor OR createdBy=NULL legacy).
+const canMutateEntry = (item, currentUserId, isOwner) =>
+  isOwner || item?.createdBy == null || item.createdBy === currentUserId;
+
 export const ExpenseSection = ({
   expenses,
   addExpense,
   updateExpense,
   deleteExpense,
   categoryBudgets = [],
+  currentUserId = null,
+  isOwner = false,
 }) => {
   const getDefaultCategory = () => {
     const hasInne = categoryBudgets.some((c) => c.name === 'Inne');
@@ -323,27 +329,31 @@ export const ExpenseSection = ({
                   </div>
                   <div className="flex items-center gap-4">
                     <span className={`font-semibold ${expense.isFixed ? 'text-rose-400' : 'text-orange-400'}`}>{formatCurrency(expense.amount)}</span>
-                    <div className="flex gap-1">
-                      <button
-                        onClick={() => handleEdit(expense)}
-                        className="p-2 text-slate-400 hover:text-white hover:bg-slate-600 rounded-lg transition-all"
-                      >
-                        <Pencil className="w-4 h-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setDeleteTarget({
-                            id: expense.id,
-                            name: expense.name,
-                            amountLabel: formatCurrency(expense.amount),
-                          })
-                        }
-                        className="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-500/20 rounded-lg transition-all"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
+                    {canMutateEntry(expense, currentUserId, isOwner) ? (
+                      <div className="flex gap-1">
+                        <button
+                          onClick={() => handleEdit(expense)}
+                          className="p-2 text-slate-400 hover:text-white hover:bg-slate-600 rounded-lg transition-all"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setDeleteTarget({
+                              id: expense.id,
+                              name: expense.name,
+                              amountLabel: formatCurrency(expense.amount),
+                            })
+                          }
+                          className="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-500/20 rounded-lg transition-all"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="text-xs text-slate-600 italic px-2" title="Tylko właściciel gospodarstwa lub autor wpisu mogą zmieniać">cudzy</span>
+                    )}
                   </div>
                 </>
               )}
