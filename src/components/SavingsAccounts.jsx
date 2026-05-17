@@ -115,9 +115,9 @@ export const SavingsAccounts = ({ accounts, totalSavings, addAccount, updateAcco
           const color = iconColors[acc.icon] || iconColors.bank;
 
           return (
-            <div key={acc.id} className="flex items-center justify-between p-4 bg-slate-700/30 rounded-xl border border-slate-600/30 hover:border-indigo-500/30 transition-all">
+            <div key={acc.id} className="flex min-w-0 items-center gap-3 p-4 bg-slate-700/30 rounded-xl border border-slate-600/30 hover:border-indigo-500/30 transition-all">
               {editingId === acc.id ? (
-                <div className="flex-1 flex flex-col gap-3">
+                <div className="min-w-0 flex-1 flex flex-col gap-3">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} className="px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-indigo-500" />
                     <input type="number" value={editAmount} onChange={(e) => setEditAmount(e.target.value)} className="px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-indigo-500" step="0.01" />
@@ -141,21 +141,53 @@ export const SavingsAccounts = ({ accounts, totalSavings, addAccount, updateAcco
                 </div>
               ) : (
                 <>
-                  <div className="flex items-center gap-3">
-                    <div className={`p-2 rounded-lg bg-slate-800/50`}>
+                  <div className="flex min-w-0 flex-1 items-center gap-3">
+                    <div className={`shrink-0 rounded-lg bg-slate-800/50 p-2`}>
                       <Icon className={`w-4 h-4 ${color}`} />
                     </div>
-                    <p className="font-medium text-white">{acc.name}</p>
+                    <p
+                      className="min-w-0 flex-1 font-medium text-white break-words [overflow-wrap:anywhere]"
+                      title={acc.name}
+                    >
+                      {acc.name}
+                    </p>
                   </div>
-                  <div className="flex items-center gap-4">
-                    <span className="text-indigo-400 font-semibold">{formatCurrency(acc.amount)}</span>
+                  <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+                    <span className="whitespace-nowrap text-right text-sm font-semibold text-indigo-400 sm:text-base">
+                      {formatCurrency(acc.amount)}
+                    </span>
                     {canMutateEntry(acc, currentUserId, isOwner) ? (
-                      <div className="flex gap-1">
-                        <button onClick={() => handleEdit(acc)} className="p-2 text-slate-400 hover:text-white hover:bg-slate-600 rounded-lg transition-all"><Pencil className="w-4 h-4" /></button>
-                        <button type="button" onClick={() => setDeleteTarget({ id: acc.id, name: acc.name, amountLabel: formatCurrency(acc.amount) })} className="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-500/20 rounded-lg transition-all"><Trash2 className="w-4 h-4" /></button>
+                      <div className="flex shrink-0 gap-0.5">
+                        <button
+                          type="button"
+                          onClick={() => handleEdit(acc)}
+                          className="shrink-0 p-2 text-slate-400 transition-all hover:bg-slate-600 hover:text-white rounded-lg"
+                          aria-label="Edytuj"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setDeleteTarget({
+                              id: acc.id,
+                              name: acc.name,
+                              amountLabel: formatCurrency(acc.amount),
+                            })
+                          }
+                          className="shrink-0 p-2 text-slate-400 transition-all hover:bg-rose-500/20 hover:text-rose-400 rounded-lg"
+                          aria-label="Usuń"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
                       </div>
                     ) : (
-                      <span className="text-xs text-slate-600 italic px-2" title="Tylko właściciel lub autor wpisu">cudzy</span>
+                      <span
+                        className="shrink-0 px-2 text-xs italic text-slate-600"
+                        title="Tylko właściciel lub autor wpisu"
+                      >
+                        cudzy
+                      </span>
                     )}
                   </div>
                 </>

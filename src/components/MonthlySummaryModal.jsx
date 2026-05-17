@@ -1,11 +1,4 @@
-import {
-  PieChart,
-  Pie,
-  Cell,
-  Tooltip,
-  ResponsiveContainer,
-  Legend,
-} from "recharts";
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
 import { X } from "lucide-react";
 
 const INCOME_COLORS = [
@@ -112,6 +105,24 @@ const EmptyChart = ({ label }) => (
   </div>
 );
 
+const ChartLegend = ({ items, colorAt }) => (
+  <ul className="mt-3 flex flex-wrap justify-center gap-x-3 gap-y-2 px-0.5 pb-1 text-left">
+    {items.map((entry, index) => (
+      <li
+        key={`${entry.name}-${index}`}
+        className="flex max-w-[calc(100%-0.5rem)] items-start gap-1.5 text-[11px] leading-snug text-slate-300 sm:text-xs"
+      >
+        <span
+          className="mt-1 h-2.5 w-2.5 shrink-0 rounded-sm"
+          style={{ backgroundColor: colorAt(entry, index) }}
+          aria-hidden
+        />
+        <span className="min-w-0 break-words [overflow-wrap:anywhere]">{entry.name}</span>
+      </li>
+    ))}
+  </ul>
+);
+
 export const MonthlySummaryModal = ({
   open = false,
   onClose,
@@ -127,7 +138,7 @@ export const MonthlySummaryModal = ({
 
   const content = (
     <div
-      className={`w-full ${embedded ? "max-w-none" : "max-w-6xl max-h-[90vh] overflow-y-auto"} overflow-hidden bg-slate-800/50 border border-slate-700/50 rounded-2xl shadow-2xl`}
+      className={`w-full ${embedded ? "max-w-none" : "max-w-6xl max-h-[90vh] overflow-y-auto"} overflow-x-hidden bg-slate-800/50 border border-slate-700/50 rounded-2xl shadow-2xl`}
     >
       <div
         className={`${embedded ? "" : "sticky top-0 z-10"} flex items-center justify-between px-6 py-4 border-b border-slate-700/50 bg-slate-800/50 backdrop-blur`}
@@ -157,29 +168,28 @@ export const MonthlySummaryModal = ({
           {incomeData.length === 0 ? (
             <EmptyChart label="Brak przychodow w wybranym miesiacu." />
           ) : (
-            <div className="h-[320px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={incomeData}
-                    dataKey="value"
-                    nameKey="name"
-                    cx="50%"
-                    cy="50%"
-                    outerRadius={95}
-                    innerRadius={35}
-                  >
-                    {incomeData.map((entry, index) => (
-                      <Cell
-                        key={entry.name}
-                        fill={getIncomeColor(index)}
-                      />
-                    ))}
-                  </Pie>
-                  <Tooltip content={renderTooltip} />
-                  <Legend verticalAlign="bottom" height={36} />
-                </PieChart>
-              </ResponsiveContainer>
+            <div>
+              <div className="h-[220px] sm:h-[260px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart margin={{ top: 4, right: 4, left: 4, bottom: 4 }}>
+                    <Pie
+                      data={incomeData}
+                      dataKey="value"
+                      nameKey="name"
+                      cx="50%"
+                      cy="50%"
+                      outerRadius={88}
+                      innerRadius={32}
+                    >
+                      {incomeData.map((entry, index) => (
+                        <Cell key={entry.name} fill={getIncomeColor(index)} />
+                      ))}
+                    </Pie>
+                    <Tooltip content={renderTooltip} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              <ChartLegend items={incomeData} colorAt={(e, i) => getIncomeColor(i)} />
             </div>
           )}
         </section>
@@ -191,29 +201,28 @@ export const MonthlySummaryModal = ({
           {expenseData.length === 0 ? (
             <EmptyChart label="Brak wydatków w wybranym miesiącu." />
           ) : (
-            <div className="h-[320px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={expenseData}
-                    dataKey="value"
-                    nameKey="name"
-                    cx="50%"
-                    cy="50%"
-                    outerRadius={95}
-                    innerRadius={35}
-                  >
-                    {expenseData.map((entry, index) => (
-                      <Cell
-                        key={entry.name}
-                        fill={getExpenseColor(entry, index)}
-                      />
-                    ))}
-                  </Pie>
-                  <Tooltip content={renderTooltip} />
-                  <Legend verticalAlign="bottom" height={36} />
-                </PieChart>
-              </ResponsiveContainer>
+            <div>
+              <div className="h-[220px] sm:h-[260px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart margin={{ top: 4, right: 4, left: 4, bottom: 4 }}>
+                    <Pie
+                      data={expenseData}
+                      dataKey="value"
+                      nameKey="name"
+                      cx="50%"
+                      cy="50%"
+                      outerRadius={88}
+                      innerRadius={32}
+                    >
+                      {expenseData.map((entry, index) => (
+                        <Cell key={entry.name} fill={getExpenseColor(entry, index)} />
+                      ))}
+                    </Pie>
+                    <Tooltip content={renderTooltip} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              <ChartLegend items={expenseData} colorAt={(e, i) => getExpenseColor(e, i)} />
             </div>
           )}
         </section>

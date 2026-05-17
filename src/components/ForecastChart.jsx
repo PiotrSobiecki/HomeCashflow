@@ -58,10 +58,22 @@ export const ForecastChart = ({ forecastData, year }) => {
           </ComposedChart>
         </ResponsiveContainer>
       </div>
-      <div className="grid grid-cols-3 gap-4 mt-6 pt-4 border-t border-slate-700/50">
-        <div className="text-center"><div className="flex items-center justify-center gap-2 mb-1"><TrendingUp className="w-4 h-4 text-emerald-400" /><p className="text-xs text-slate-500 uppercase">Śr. przychody</p></div><p className="text-lg font-semibold text-emerald-400">{formatCurrencyShort(avgIncome)}</p></div>
-        <div className="text-center"><div className="flex items-center justify-center gap-2 mb-1"><Eye className="w-4 h-4 text-rose-400" /><p className="text-xs text-slate-500 uppercase">Śr. wydatki</p></div><p className="text-lg font-semibold text-rose-400">{formatCurrencyShort(avgExpenses)}</p></div>
-        <div className="text-center"><div className="flex items-center justify-center gap-2 mb-1"><Target className="w-4 h-4 text-indigo-400" /><p className="text-xs text-slate-500 uppercase">Śr. bilans</p></div><p className={`text-lg font-semibold ${avgBalance >= 0 ? 'text-indigo-400' : 'text-orange-400'}`}>{formatCurrencyShort(avgBalance)}</p></div>
+      <div className="grid grid-cols-3 gap-2 sm:gap-4 mt-6 pt-4 border-t border-slate-700/50">
+        <div className="flex flex-col items-center justify-center gap-1.5 min-w-0 text-center px-0.5">
+          <TrendingUp className="w-4 h-4 shrink-0 text-emerald-400" />
+          <span className="text-[10px] sm:text-xs text-slate-500 uppercase tracking-wide leading-tight whitespace-nowrap">Śr. przychody</span>
+          <p className="text-base sm:text-lg font-semibold text-emerald-400 leading-none tabular-nums">{formatCurrencyShort(avgIncome)}</p>
+        </div>
+        <div className="flex flex-col items-center justify-center gap-1.5 min-w-0 text-center px-0.5">
+          <Eye className="w-4 h-4 shrink-0 text-rose-400" />
+          <span className="text-[10px] sm:text-xs text-slate-500 uppercase tracking-wide leading-tight whitespace-nowrap">Śr. wydatki</span>
+          <p className="text-base sm:text-lg font-semibold text-rose-400 leading-none tabular-nums">{formatCurrencyShort(avgExpenses)}</p>
+        </div>
+        <div className="flex flex-col items-center justify-center gap-1.5 min-w-0 text-center px-0.5">
+          <Target className="w-4 h-4 shrink-0 text-indigo-400" />
+          <span className="text-[10px] sm:text-xs text-slate-500 uppercase tracking-wide leading-tight whitespace-nowrap">Śr. bilans</span>
+          <p className={`text-base sm:text-lg font-semibold leading-none tabular-nums ${avgBalance >= 0 ? 'text-indigo-400' : 'text-orange-400'}`}>{formatCurrencyShort(avgBalance)}</p>
+        </div>
       </div>
     </div>
   );
