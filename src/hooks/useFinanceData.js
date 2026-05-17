@@ -365,6 +365,7 @@ export const useFinanceData = () => {
       upsertTxnLocal(kind, monthIdx, it => it.id === tempId, {
         id: saved.id, name: saved.name, amount: saved.amount,
         isFixed: saved.isFixed, date: saved.txnDate, updatedAt: saved.updatedAt,
+        createdBy: saved.createdBy ?? null,
         ...(saved.category ? { category: saved.category } : {}),
       });
     } catch (err) {
@@ -403,6 +404,7 @@ export const useFinanceData = () => {
       upsertTxnLocal(kind, monthIdx, it => it.id === id, {
         id: saved.id, name: saved.name, amount: saved.amount,
         isFixed: saved.isFixed, date: saved.txnDate, updatedAt: saved.updatedAt,
+        createdBy: saved.createdBy ?? null,
         ...(saved.category ? { category: saved.category } : {}),
       });
     } catch (err) {

@@ -97,6 +97,7 @@ export const savingsAccounts = pgTable('savings_accounts', {
   name: text('name').notNull(), // ciphertext
   amount: text('amount').notNull(), // ciphertext stringa liczby
   icon: text('icon'),
+  createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
   legacyId: text('legacy_id'),
@@ -107,6 +108,7 @@ export const categoryBudgets = pgTable('category_budgets', {
   householdId: uuid('household_id').notNull().references(() => households.id, { onDelete: 'cascade' }),
   name: text('name').notNull(), // ciphertext — UNIQUE niemozliwy na zaszyfrowanej kolumnie (random IV)
   monthlyLimit: text('monthly_limit').notNull(), // ciphertext stringa liczby
+  createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
   legacyId: text('legacy_id'),

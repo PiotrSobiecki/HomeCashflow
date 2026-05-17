@@ -33,6 +33,7 @@ function snapshotSavingsAccount(row) {
     name: row.name,
     amount: row.amount,
     icon: row.icon ?? null,
+    created_by: row.created_by ?? null,
   };
 }
 
@@ -41,7 +42,20 @@ function snapshotCategoryBudget(row) {
     id: row.id,
     name: row.name,
     monthly_limit: row.monthly_limit,
+    created_by: row.created_by ?? null,
   };
+}
+
+// Reguła uprawnień do mutacji per-row (PATCH/DELETE):
+//   - owner gospodarstwa → wszystko
+//   - autor wpisu → swoje
+//   - created_by IS NULL (wpisy sprzed feature'a) → każdy member, „trudno”
+// Zwraca null gdy ok, albo { status, body } do oddania jako 403.
+function assertCanMutateResource({ isOwner, createdBy, userId }) {
+  if (isOwner) return null;
+  if (createdBy == null) return null;
+  if (createdBy === userId) return null;
+  return { status: 403, body: { error: "forbidden_not_owner_of_entry" } };
 }
 
 function snapshotSavingsGoal(row) {
@@ -459,8 +473,10 @@ app.put("/api/finance", authMiddleware, async (c) => {
  */
 async function loadTransactionForMutation(sql, userId, id, ifMatch, rawKey) {
   const [row] = await sql`
-    SELECT t.* FROM transactions t
+    SELECT t.*, h.owner_id AS household_owner_id
+    FROM transactions t
     JOIN household_members hm ON hm.household_id = t.household_id
+    JOIN households h ON h.id = t.household_id
     WHERE t.id = ${id} AND hm.user_id = ${userId}
   `;
   if (!row) {
@@ -587,6 +603,7 @@ app.post("/api/transactions", authMiddleware, async (c) => {
       month: body.month,
       isFixed: body.isFixed,
       category: body.category ?? null,
+      createdBy: user.id,
       updatedAt: row.updated_at,
     },
     201,
@@ -607,6 +624,12 @@ app.patch("/api/transactions/:id", authMiddleware, async (c) => {
   const result = await loadTransactionForMutation(sql, user.id, id, ifMatch, rawKey);
   if (result.error) return c.json(result.error.body, result.error.status);
   const { row } = result;
+  const permErr = assertCanMutateResource({
+    isOwner: row.household_owner_id === user.id,
+    createdBy: row.created_by,
+    userId: user.id,
+  });
+  if (permErr) return c.json(permErr.body, permErr.status);
 
   const nextName = body.name !== undefined ? body.name : null;
   const nextAmount = body.amount !== undefined ? body.amount : null;
@@ -644,6 +667,7 @@ app.patch("/api/transactions/:id", authMiddleware, async (c) => {
     month: updated.month,
     isFixed: updated.is_fixed,
     category: updated.category,
+    createdBy: row.created_by ?? null,
     updatedAt: updated.updated_at,
   });
 });
@@ -660,6 +684,12 @@ app.delete("/api/transactions/:id", authMiddleware, async (c) => {
 
   const result = await loadTransactionForMutation(sql, user.id, id, ifMatch, rawKey);
   if (result.error) return c.json(result.error.body, result.error.status);
+  const permErr = assertCanMutateResource({
+    isOwner: result.row.household_owner_id === user.id,
+    createdBy: result.row.created_by,
+    userId: user.id,
+  });
+  if (permErr) return c.json(permErr.body, permErr.status);
 
   await sql`DELETE FROM transactions WHERE id = ${id}`;
 
@@ -687,8 +717,10 @@ function validateSavingsAccountInput(body) {
 
 async function loadSavingsAccountForMutation(sql, userId, id, ifMatch, rawKey) {
   const [row] = await sql`
-    SELECT s.* FROM savings_accounts s
+    SELECT s.*, h.owner_id AS household_owner_id
+    FROM savings_accounts s
     JOIN household_members hm ON hm.household_id = s.household_id
+    JOIN households h ON h.id = s.household_id
     WHERE s.id = ${id} AND hm.user_id = ${userId}
   `;
   if (!row) {
@@ -735,8 +767,8 @@ app.post("/api/savings-accounts", authMiddleware, async (c) => {
   const amountEnc = await encryptField(body.amount, rawKey);
 
   const [row] = await sql`
-    INSERT INTO savings_accounts (household_id, name, amount, icon)
-    VALUES (${membership.household_id}, ${nameEnc}, ${amountEnc}, ${body.icon ?? null})
+    INSERT INTO savings_accounts (household_id, name, amount, icon, created_by)
+    VALUES (${membership.household_id}, ${nameEnc}, ${amountEnc}, ${body.icon ?? null}, ${user.id})
     RETURNING id, updated_at
   `;
 
@@ -747,7 +779,7 @@ app.post("/api/savings-accounts", authMiddleware, async (c) => {
     resourceType: "savings_account",
     resourceId: row.id,
     before: null,
-    after: snapshotSavingsAccount({ id: row.id, name: nameEnc, amount: amountEnc, icon: body.icon ?? null }),
+    after: snapshotSavingsAccount({ id: row.id, name: nameEnc, amount: amountEnc, icon: body.icon ?? null, created_by: user.id }),
   });
 
   return c.json({
@@ -755,6 +787,7 @@ app.post("/api/savings-accounts", authMiddleware, async (c) => {
     name: body.name,
     amount: body.amount,
     icon: body.icon ?? null,
+    createdBy: user.id,
     updatedAt: row.updated_at,
   }, 201);
 });
@@ -771,6 +804,12 @@ app.patch("/api/savings-accounts/:id", authMiddleware, async (c) => {
   const result = await loadSavingsAccountForMutation(sql, user.id, id, ifMatch, rawKey);
   if (result.error) return c.json(result.error.body, result.error.status);
   const { row } = result;
+  const permErr = assertCanMutateResource({
+    isOwner: row.household_owner_id === user.id,
+    createdBy: row.created_by,
+    userId: user.id,
+  });
+  if (permErr) return c.json(permErr.body, permErr.status);
 
   const nextName = body.name !== undefined ? body.name : null;
   const nextAmount = body.amount !== undefined ? body.amount : null;
@@ -792,7 +831,7 @@ app.patch("/api/savings-accounts/:id", authMiddleware, async (c) => {
     resourceType: "savings_account",
     resourceId: id,
     before: snapshotSavingsAccount(row),
-    after: snapshotSavingsAccount({ id, name: nameEnc, amount: amountEnc, icon: nextIcon }),
+    after: snapshotSavingsAccount({ id, name: nameEnc, amount: amountEnc, icon: nextIcon, created_by: row.created_by }),
   });
 
   return c.json({
@@ -800,6 +839,7 @@ app.patch("/api/savings-accounts/:id", authMiddleware, async (c) => {
     name: nextName ?? (await decryptField(row.name, rawKey)),
     amount: nextAmount ?? Number(await decryptField(row.amount, rawKey)),
     icon: updated.icon,
+    createdBy: row.created_by ?? null,
     updatedAt: updated.updated_at,
   });
 });
@@ -814,6 +854,12 @@ app.delete("/api/savings-accounts/:id", authMiddleware, async (c) => {
 
   const result = await loadSavingsAccountForMutation(sql, user.id, id, ifMatch, rawKey);
   if (result.error) return c.json(result.error.body, result.error.status);
+  const permErr = assertCanMutateResource({
+    isOwner: result.row.household_owner_id === user.id,
+    createdBy: result.row.created_by,
+    userId: user.id,
+  });
+  if (permErr) return c.json(permErr.body, permErr.status);
 
   await sql`DELETE FROM savings_accounts WHERE id = ${id}`;
 
@@ -841,8 +887,10 @@ function validateCategoryBudgetInput(body) {
 
 async function loadCategoryBudgetForMutation(sql, userId, id, ifMatch, rawKey) {
   const [row] = await sql`
-    SELECT c.* FROM category_budgets c
+    SELECT c.*, h.owner_id AS household_owner_id
+    FROM category_budgets c
     JOIN household_members hm ON hm.household_id = c.household_id
+    JOIN households h ON h.id = c.household_id
     WHERE c.id = ${id} AND hm.user_id = ${userId}
   `;
   if (!row) {
@@ -888,8 +936,8 @@ app.post("/api/category-budgets", authMiddleware, async (c) => {
   const limitEnc = await encryptField(body.limit, rawKey);
 
   const [row] = await sql`
-    INSERT INTO category_budgets (household_id, name, monthly_limit)
-    VALUES (${membership.household_id}, ${nameEnc}, ${limitEnc})
+    INSERT INTO category_budgets (household_id, name, monthly_limit, created_by)
+    VALUES (${membership.household_id}, ${nameEnc}, ${limitEnc}, ${user.id})
     RETURNING id, updated_at
   `;
 
@@ -900,13 +948,14 @@ app.post("/api/category-budgets", authMiddleware, async (c) => {
     resourceType: "category_budget",
     resourceId: row.id,
     before: null,
-    after: snapshotCategoryBudget({ id: row.id, name: nameEnc, monthly_limit: limitEnc }),
+    after: snapshotCategoryBudget({ id: row.id, name: nameEnc, monthly_limit: limitEnc, created_by: user.id }),
   });
 
   return c.json({
     id: row.id,
     name: body.name,
     limit: body.limit,
+    createdBy: user.id,
     updatedAt: row.updated_at,
   }, 201);
 });
@@ -923,6 +972,12 @@ app.patch("/api/category-budgets/:id", authMiddleware, async (c) => {
   const result = await loadCategoryBudgetForMutation(sql, user.id, id, ifMatch, rawKey);
   if (result.error) return c.json(result.error.body, result.error.status);
   const { row } = result;
+  const permErr = assertCanMutateResource({
+    isOwner: row.household_owner_id === user.id,
+    createdBy: row.created_by,
+    userId: user.id,
+  });
+  if (permErr) return c.json(permErr.body, permErr.status);
 
   const nextName = body.name !== undefined ? body.name : null;
   const nextLimit = body.limit !== undefined ? body.limit : null;
@@ -943,13 +998,14 @@ app.patch("/api/category-budgets/:id", authMiddleware, async (c) => {
     resourceType: "category_budget",
     resourceId: id,
     before: snapshotCategoryBudget(row),
-    after: snapshotCategoryBudget({ id, name: nameEnc, monthly_limit: limitEnc }),
+    after: snapshotCategoryBudget({ id, name: nameEnc, monthly_limit: limitEnc, created_by: row.created_by }),
   });
 
   return c.json({
     id: updated.id,
     name: nextName ?? (await decryptField(row.name, rawKey)),
     limit: nextLimit ?? Number(await decryptField(row.monthly_limit, rawKey)),
+    createdBy: row.created_by ?? null,
     updatedAt: updated.updated_at,
   });
 });
@@ -964,6 +1020,12 @@ app.delete("/api/category-budgets/:id", authMiddleware, async (c) => {
 
   const result = await loadCategoryBudgetForMutation(sql, user.id, id, ifMatch, rawKey);
   if (result.error) return c.json(result.error.body, result.error.status);
+  const permErr = assertCanMutateResource({
+    isOwner: result.row.household_owner_id === user.id,
+    createdBy: result.row.created_by,
+    userId: user.id,
+  });
+  if (permErr) return c.json(permErr.body, permErr.status);
 
   await sql`DELETE FROM category_budgets WHERE id = ${id}`;
 
@@ -1000,9 +1062,17 @@ app.put("/api/savings-goal", authMiddleware, async (c) => {
   if (validationError) return c.json({ error: validationError }, 400);
 
   const [membership] = await sql`
-    SELECT household_id FROM household_members WHERE user_id = ${user.id}
+    SELECT hm.household_id, h.owner_id
+    FROM household_members hm
+    JOIN households h ON h.id = hm.household_id
+    WHERE hm.user_id = ${user.id}
   `;
   if (!membership) return c.json({ error: "No household" }, 400);
+  // savings_goal to singleton bez `created_by` — przyjmujemy że tylko owner gospodarstwa
+  // może go zmieniać (członek nie ma "swojej" wersji celu).
+  if (membership.owner_id !== user.id) {
+    return c.json({ error: "forbidden_owner_only" }, 403);
+  }
 
   const rawKey = getFinanceDataKey(c);
   const monthlyEnc = await encryptField(body.monthlyAmount ?? 0, rawKey);
@@ -1074,20 +1144,48 @@ app.get("/api/action-log", authMiddleware, async (c) => {
     LIMIT 20
   `;
 
+  const parseSnapshot = (raw) => {
+    if (raw == null) return {};
+    if (typeof raw === "object") return raw;
+    if (typeof raw === "string") {
+      try {
+        return JSON.parse(raw);
+      } catch {
+        return {};
+      }
+    }
+    return {};
+  };
+
   const entries = [];
   for (const r of rows) {
     // Z `after`/`before` wyciągamy "label" — name/type — odszyfrowany żeby UI mógł go pokazać.
-    const snapshotForLabel = r.after ?? r.before ?? {};
+    const snapshotForLabel = parseSnapshot(r.after ?? r.before);
     let label = null;
     if (snapshotForLabel.name) {
       try { label = await decryptField(snapshotForLabel.name, rawKey); }
       catch { label = null; }
     }
     let amount = null;
-    if (snapshotForLabel.amount) {
+    if (snapshotForLabel.amount != null) {
       try { amount = Number(await decryptField(snapshotForLabel.amount, rawKey)); }
       catch { amount = null; }
     }
+    if (amount == null && snapshotForLabel.monthly_limit != null) {
+      try { amount = Number(await decryptField(snapshotForLabel.monthly_limit, rawKey)); }
+      catch { amount = null; }
+    }
+    const txnKind =
+      r.resource_type === "transaction" && snapshotForLabel.kind
+        ? String(snapshotForLabel.kind)
+        : null;
+    const monthRaw = snapshotForLabel.month;
+    const monthNum =
+      monthRaw != null && monthRaw !== "" ? Number(monthRaw) : NaN;
+    const month =
+      r.resource_type === "transaction" && Number.isInteger(monthNum) && monthNum >= 0 && monthNum <= 11
+        ? monthNum
+        : null;
     entries.push({
       id: r.id,
       at: r.at instanceof Date ? r.at.toISOString() : String(r.at),
@@ -1104,6 +1202,8 @@ app.get("/api/action-log", authMiddleware, async (c) => {
       undoesEntryId: r.undoes_entry_id ?? null,
       label,
       amount,
+      txnKind,
+      month,
     });
   }
 
