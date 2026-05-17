@@ -67,9 +67,9 @@ function snapshotSavingsGoal(row) {
   };
 }
 
-// Okno czasowe dla undo — 1h od momentu akcji. Po tym czasie wpis zostaje
+// Okno czasowe dla undo — 24h od momentu akcji. Po tym czasie wpis zostaje
 // w action_log do audytu, ale nie da sie juz go cofnac.
-const UNDO_WINDOW_MS = 60 * 60 * 1000;
+const UNDO_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 // Wrapper: log + nie przerywaj endpointu gdyby coś wybuchło w logu.
 // (action_log to audit/undo, nie source of truth — błąd nie powinien zwalić mutacji)
@@ -1268,7 +1268,7 @@ app.post("/api/action-log/:id/undo", authMiddleware, async (c) => {
   // ale juz go nie cofniesz — chroni przed "odkopaniem" starej zmiany.
   const entryAtMs = entry.at instanceof Date ? entry.at.getTime() : new Date(entry.at).getTime();
   if (Number.isFinite(entryAtMs) && Date.now() - entryAtMs > UNDO_WINDOW_MS) {
-    return c.json({ error: "undo_window_expired", notice: "Okno cofania (1h) wygasło" }, 400);
+    return c.json({ error: "undo_window_expired", notice: "Okno cofania (24h) wygasło" }, 400);
   }
 
   const before = entry.before; // jsonb deserializowany przez Neon

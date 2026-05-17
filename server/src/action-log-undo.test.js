@@ -187,7 +187,7 @@ describe('POST /api/action-log/:id/undo', () => {
     expect(res.status).toBe(200)
   })
 
-  it('400 gdy wpis starszy niż 1h — okno cofania wygasło', async () => {
+  it('400 gdy wpis starszy niż 24h — okno cofania wygasło', async () => {
     const { token, householdId } = await setupOwner('-exp')
     const created = await (await api('/api/transactions', {
       method: 'POST', headers: auth(token),
@@ -196,8 +196,8 @@ describe('POST /api/action-log/:id/undo', () => {
     const [logRow] = await sql`
       SELECT id FROM action_log WHERE household_id = ${householdId} AND operation = 'CREATE' AND resource_id = ${created.id}
     `
-    // Cofamy `at` 2h wstecz — udajemy że wpis ma więcej niż 1h
-    await sql`UPDATE action_log SET at = NOW() - INTERVAL '2 hours' WHERE id = ${logRow.id}`
+    // Cofamy `at` 25h wstecz — udajemy że wpis ma więcej niż 24h
+    await sql`UPDATE action_log SET at = NOW() - INTERVAL '25 hours' WHERE id = ${logRow.id}`
 
     const res = await api(`/api/action-log/${logRow.id}/undo`, { method: 'POST', headers: auth(token) })
     expect(res.status).toBe(400)
