@@ -1,9 +1,13 @@
-import { useMemo, useState, useEffect, useCallback, useRef } from 'react';
+import { useMemo, useState, useEffect, useCallback } from 'react';
 import { History, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Trash2, Undo2 } from 'lucide-react';
 import { ConfirmDialog } from './ConfirmDialog';
 import { fetchActionLog, undoActionLogEntry } from '../lib/api';
 
 const PAGE_SIZE = 8;
+// Okno cofania = 1h. Po wygaśnięciu przycisk Cofnij znika; backend i tak
+// odrzuci żądanie. Świadoma decyzja: brak hotkey Ctrl+Z, tylko przycisk —
+// hotkey był zbyt łatwo wciskany przypadkowo.
+const UNDO_WINDOW_MS = 60 * 60 * 1000;
 
 const formatCurrency = (amount) =>
   new Intl.NumberFormat('pl-PL', {
@@ -168,23 +172,14 @@ export const ActivityHistory = ({
     [filtered, page],
   );
 
-  const myLatestUndoable = useMemo(() => {
-    if (isGuest) return null;
-    return (
-      serverEntries.find(
-        (e) =>
-          e.actorId === currentUserId &&
-          e.operation !== 'UNDO' &&
-          !e.undoneAt &&
-          matchesMonth(e, selectedMonth),
-      ) || null
-    );
-  }, [isGuest, serverEntries, currentUserId, selectedMonth]);
-
-  const latestRef = useRef(myLatestUndoable);
+  // Tick co 60s, żeby `canUndo` przeliczył się i przycisk znikł po wygaśnięciu
+  // okna bez ręcznego refreshu strony.
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    latestRef.current = myLatestUndoable;
-  }, [myLatestUndoable]);
+    if (isGuest) return;
+    const id = setInterval(() => setNow(Date.now()), 60000);
+    return () => clearInterval(id);
+  }, [isGuest]);
 
   const doUndo = useCallback(
     async (entry) => {
@@ -212,24 +207,6 @@ export const ActivityHistory = ({
   );
 
   useEffect(() => {
-    if (isGuest) return;
-    const onKey = (e) => {
-      const isCtrlZ =
-        (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey;
-      if (!isCtrlZ) return;
-      const t = e.target;
-      const tag = t?.tagName?.toLowerCase();
-      if (tag === 'input' || tag === 'textarea' || t?.isContentEditable) return;
-      const candidate = latestRef.current;
-      if (!candidate) return;
-      e.preventDefault();
-      doUndo(candidate);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [isGuest, doUndo]);
-
-  useEffect(() => {
     setPage(0);
   }, [selectedMonth]);
 
@@ -255,7 +232,6 @@ export const ActivityHistory = ({
               <p className="text-xs text-slate-400">
                 {MONTHS[selectedMonth]}
                 {filtered.length > 0 ? ` (${filtered.length})` : ' — brak wpisów'}
-                {!isGuest && myLatestUndoable && ' · Ctrl+Z cofa Twoją ostatnią akcję'}
               </p>
             </div>
           </div>
@@ -299,11 +275,15 @@ export const ActivityHistory = ({
               <ul className="mt-4 space-y-2 border-t border-slate-700/50 pt-4">
                 {pageSlice.map((entry) => {
                   const isOwn = entry.actorId === currentUserId;
+                  const entryAtMs = entry.at ? new Date(entry.at).getTime() : NaN;
+                  const ageMs = Number.isFinite(entryAtMs) ? now - entryAtMs : Infinity;
+                  const withinWindow = ageMs <= UNDO_WINDOW_MS;
                   const canUndo =
                     !isGuest &&
                     !entry.undoneAt &&
                     entry.operation !== 'UNDO' &&
-                    (isOwner || isOwn);
+                    (isOwner || isOwn) &&
+                    withinWindow;
                   return (
                     <li
                       key={entry.id}
@@ -332,11 +312,15 @@ export const ActivityHistory = ({
                           onClick={() => doUndo(entry)}
                           disabled={pendingUndoId === entry.id}
                           className="shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-200 bg-slate-700/60 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                          title="Cofnij tę akcję"
+                          title="Cofnij tę akcję (do 1h od dodania)"
                         >
                           <Undo2 className="w-3.5 h-3.5" />
                           {pendingUndoId === entry.id ? 'Cofam…' : 'Cofnij'}
                         </button>
+                      ) : !isGuest && !entry.undoneAt && entry.operation !== 'UNDO' && (isOwner || isOwn) && !withinWindow ? (
+                        <span className="shrink-0 text-xs text-slate-600 italic" title="Okno cofania (1h) wygasło">
+                          wygasło
+                        </span>
                       ) : null}
                     </li>
                   );

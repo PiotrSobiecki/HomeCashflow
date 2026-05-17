@@ -187,6 +187,28 @@ describe('POST /api/action-log/:id/undo', () => {
     expect(res.status).toBe(200)
   })
 
+  it('400 gdy wpis starszy niż 1h — okno cofania wygasło', async () => {
+    const { token, householdId } = await setupOwner('-exp')
+    const created = await (await api('/api/transactions', {
+      method: 'POST', headers: auth(token),
+      body: JSON.stringify({ kind: 'expense', name: 'Old', amount: 7, txnDate: '2026-05-16', year: 2026, month: 4, isFixed: false }),
+    })).json()
+    const [logRow] = await sql`
+      SELECT id FROM action_log WHERE household_id = ${householdId} AND operation = 'CREATE' AND resource_id = ${created.id}
+    `
+    // Cofamy `at` 2h wstecz — udajemy że wpis ma więcej niż 1h
+    await sql`UPDATE action_log SET at = NOW() - INTERVAL '2 hours' WHERE id = ${logRow.id}`
+
+    const res = await api(`/api/action-log/${logRow.id}/undo`, { method: 'POST', headers: auth(token) })
+    expect(res.status).toBe(400)
+    const body = await res.json()
+    expect(body.error).toBe('undo_window_expired')
+
+    // Zasób w bazie zostaje nietknięty
+    const [stillThere] = await sql`SELECT 1 FROM transactions WHERE id = ${created.id}`
+    expect(stillThere).toBeTruthy()
+  })
+
   it('403: user z innego household nie widzi wpisu (404 by default ale 403 dopuszczamy)', async () => {
     const a = await setupOwner('-aa')
     const b = await setupOwner('-bb')
