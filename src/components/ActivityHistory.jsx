@@ -125,6 +125,7 @@ export const ActivityHistory = ({
   const [open, setOpen] = useState(true);
   const [page, setPage] = useState(0);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [undoTarget, setUndoTarget] = useState(null);
   const [serverEntries, setServerEntries] = useState([]);
   const [pendingUndoId, setPendingUndoId] = useState(null);
   const [error, setError] = useState(null);
@@ -309,7 +310,7 @@ export const ActivityHistory = ({
                       {canUndo ? (
                         <button
                           type="button"
-                          onClick={() => doUndo(entry)}
+                          onClick={() => setUndoTarget(entry)}
                           disabled={pendingUndoId === entry.id}
                           className="shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-200 bg-slate-700/60 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                           title="Cofnij tę akcję (do 24h od dodania)"
@@ -317,10 +318,6 @@ export const ActivityHistory = ({
                           <Undo2 className="w-3.5 h-3.5" />
                           {pendingUndoId === entry.id ? 'Cofam…' : 'Cofnij'}
                         </button>
-                      ) : !isGuest && !entry.undoneAt && entry.operation !== 'UNDO' && (isOwner || isOwn) && !withinWindow ? (
-                        <span className="shrink-0 text-xs text-slate-600 italic" title="Okno cofania (24h) wygasło">
-                          wygasło
-                        </span>
                       ) : null}
                     </li>
                   );
@@ -356,6 +353,24 @@ export const ActivityHistory = ({
         </>
       )}
 
+      <ConfirmDialog
+        open={undoTarget !== null}
+        onClose={() => setUndoTarget(null)}
+        onConfirm={() => {
+          const entry = undoTarget;
+          setUndoTarget(null);
+          if (entry) doUndo(entry);
+        }}
+        title="Cofnąć akcję?"
+        description={
+          undoTarget
+            ? `Dane finansowe wrócą do stanu sprzed tej zmiany (przychody, wydatki, oszczędności itd.).\n\nOperacja: ${describeActivity(undoTarget, MONTHS)}`
+            : ''
+        }
+        confirmLabel="Tak, cofnij"
+        cancelLabel="Anuluj"
+        variant="danger"
+      />
       <ConfirmDialog
         open={confirmClear}
         onClose={() => setConfirmClear(false)}

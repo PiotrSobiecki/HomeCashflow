@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { LayoutGrid, Plus, Pencil, Trash2, Check, X, AlertTriangle, ChevronDown } from 'lucide-react';
 import { DEFAULT_BUDGET_CATEGORIES } from '../hooks/useFinanceData';
 import { ConfirmDialog } from './ConfirmDialog';
+import { ReadOnlyEntryActions } from './ReadOnlyEntryActions';
 
 const formatCurrency = (amount) => new Intl.NumberFormat('pl-PL', { style: 'currency', currency: 'PLN', minimumFractionDigits: 2 }).format(amount);
 
@@ -186,7 +187,7 @@ export const CategoryBudgets = ({
                           <button type="button" onClick={() => setDeleteTarget({ id: cat.id, name: cat.name })} className="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-500/20 rounded-lg transition-all"><Trash2 className="w-4 h-4" /></button>
                         </div>
                       ) : (
-                        <span className="text-xs text-slate-600 italic px-2" title="Tylko właściciel lub autor wpisu">cudzy</span>
+                        <ReadOnlyEntryActions kind="categoryBudget" />
                       )}
                     </div>
                   </div>

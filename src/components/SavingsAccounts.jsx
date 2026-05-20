@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { PiggyBank, Plus, Pencil, Trash2, Check, X, Landmark, Wallet, TrendingUp, ChevronDown } from 'lucide-react';
 import { ConfirmDialog } from './ConfirmDialog';
+import { ReadOnlyEntryActions } from './ReadOnlyEntryActions';
 
 const formatCurrency = (amount) => new Intl.NumberFormat('pl-PL', { style: 'currency', currency: 'PLN', minimumFractionDigits: 2 }).format(amount);
 
@@ -182,12 +183,7 @@ export const SavingsAccounts = ({ accounts, totalSavings, addAccount, updateAcco
                         </button>
                       </div>
                     ) : (
-                      <span
-                        className="shrink-0 px-2 text-xs italic text-slate-600"
-                        title="Tylko właściciel lub autor wpisu"
-                      >
-                        cudzy
-                      </span>
+                      <ReadOnlyEntryActions kind="savings" />
                     )}
                   </div>
                 </>

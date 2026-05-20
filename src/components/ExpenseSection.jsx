@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { TrendingDown, Plus, Pencil, Trash2, Check, X, CalendarDays, Lock, ShoppingBag } from 'lucide-react';
 import { ConfirmDialog } from './ConfirmDialog';
+import { ReadOnlyEntryActions } from './ReadOnlyEntryActions';
 
 const formatCurrency = (amount) =>
   new Intl.NumberFormat('pl-PL', {
@@ -352,7 +353,7 @@ export const ExpenseSection = ({
                         </button>
                       </div>
                     ) : (
-                      <span className="text-xs text-slate-600 italic px-2" title="Tylko właściciel gospodarstwa lub autor wpisu mogą zmieniać">cudzy</span>
+                      <ReadOnlyEntryActions kind="expense" />
                     )}
                   </div>
                 </>
