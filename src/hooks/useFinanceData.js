@@ -125,6 +125,7 @@ export const useFinanceData = () => {
 
   // savingRef: usePolling musi mieć stabilne ref do flagi (nie odpalać tick gdy mutacja w toku)
   const savingRef = useRef(false);
+  const repairedFixedDatesRef = useRef(new Set());
   useEffect(() => { savingRef.current = saving; }, [saving]);
 
   // Wspólne pobranie z API (reuse w initial load + polling)
@@ -228,6 +229,28 @@ export const useFinanceData = () => {
     return [...log, entry].slice(-ACTIVITY_LOG_MAX);
   }, [user]);
 
+  const monthDefaultDate = (monthIdx) =>
+    `${CURRENT_YEAR}-${String(monthIdx + 1).padStart(2, '0')}-01`;
+
+  /** Stałe: ten sam dzień miesiąca w roku bieżącym (np. 20.05 → 20.06; 31.01 → 28.02). */
+  const shiftFixedDateToMonth = (sourceDateStr, targetMonthIdx, year = CURRENT_YEAR) => {
+    const m = sourceDateStr?.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    const day = m ? Math.max(1, Math.min(31, parseInt(m[3], 10) || 1)) : 1;
+    const lastDay = getTotalDaysInMonth(targetMonthIdx, year);
+    const safeDay = Math.min(day, lastDay);
+    return `${year}-${String(targetMonthIdx + 1).padStart(2, '0')}-${String(safeDay).padStart(2, '0')}`;
+  };
+
+  const buildTxnDate = (date, monthIdx) => date || monthDefaultDate(monthIdx);
+
+  const txnDateMonthIndex = (dateStr) => {
+    if (!dateStr || typeof dateStr !== 'string') return null;
+    const m = dateStr.match(/^(\d{4})-(\d{2})/);
+    if (!m) return null;
+    const idx = parseInt(m[2], 10) - 1;
+    return idx >= 0 && idx <= 11 ? idx : null;
+  };
+
   // ============ AUTO-PRZENOSZENIE STAŁYCH ============
   // Przy wejściu w miesiąc, dokopiuj brakujące stałe przychody/wydatki z poprzedniego miesiąca
   useEffect(() => {
@@ -256,14 +279,22 @@ export const useFinanceData = () => {
 
     const newFixedIncomes = source.incomes
       .filter(i => i.isFixed && !existingIncomeNames.has(i.name) && !deletedFixedIncomeNames.has(i.name))
-      .map(i => ({ ...i, id: Date.now() + Math.random() }));
+      .map(i => ({
+        name: i.name,
+        amount: i.amount,
+        isFixed: true,
+        id: Date.now() + Math.random(),
+        date: shiftFixedDateToMonth(i.date, selectedMonth),
+      }));
     const newFixedExpenses = source.expenses
       .filter(e => e.isFixed && !existingExpenseNames.has(e.name) && !deletedFixedExpenseNames.has(e.name))
       .map(e => ({
-        ...e,
+        name: e.name,
+        amount: e.amount,
+        isFixed: true,
         category: e.category,
         id: Date.now() + Math.random(),
-        date: `${CURRENT_YEAR}-${String(selectedMonth + 1).padStart(2, '0')}-01`,
+        date: shiftFixedDateToMonth(e.date, selectedMonth),
       }));
 
     if (newFixedIncomes.length === 0 && newFixedExpenses.length === 0) return;
@@ -286,19 +317,22 @@ export const useFinanceData = () => {
 
     // Live mode — per-row POST per kopiowaną stałą (liveCreate wstawia optimistic + utrwala)
     for (const inc of newFixedIncomes) {
-      liveCreate('income', selectedMonth, { name: inc.name, amount: inc.amount, isFixed: true, date: inc.date ?? '' });
+      liveCreate('income', selectedMonth, { name: inc.name, amount: inc.amount, isFixed: true, date: inc.date });
     }
     for (const exp of newFixedExpenses) {
-      liveCreate('expense', selectedMonth, { name: exp.name, amount: exp.amount, isFixed: true, date: exp.date ?? '' });
+      liveCreate('expense', selectedMonth, {
+        name: exp.name,
+        amount: exp.amount,
+        isFixed: true,
+        date: exp.date,
+        ...(exp.category ? { category: exp.category } : {}),
+      });
     }
   }, [selectedMonth, loading]);
 
   // ============ CRUD DLA PRZYCHODÓW ============
   // Live mode (zalogowany, nie gość) → per-row API z optimistic+rollback+conflict.
   // Guest mode → stary path przez updateData → localStorage.
-
-  const buildTxnDate = (date, monthIdx) =>
-    date || `${CURRENT_YEAR}-${String(monthIdx + 1).padStart(2, '0')}-01`;
 
   const replaceItem = (collection, predicate, value) =>
     collection.map(it => (predicate(it) ? value : it));
@@ -398,7 +432,8 @@ export const useFinanceData = () => {
       return;
     }
     setSaving(true);
-    const changes = { name: fields.name, amount: fields.amount };
+    const txnDate = buildTxnDate(fields.date, monthIdx);
+    const changes = { name: fields.name, amount: fields.amount, txnDate };
     try {
       const saved = await patchTransaction(id, prevItem.updatedAt, changes);
       upsertTxnLocal(kind, monthIdx, it => it.id === id, {
@@ -482,6 +517,132 @@ export const useFinanceData = () => {
       setSaving(false);
     }
   };
+
+  // Stałe skopiowane wcześniej bez poprawnej daty (np. maj w widoku czerwca) — jednorazowa korekta
+  useEffect(() => {
+    if (loading) return;
+    const repairKey = `${CURRENT_YEAR}-${selectedMonth}`;
+    if (repairedFixedDatesRef.current.has(repairKey)) return;
+
+    const monthData = data.months[selectedMonth];
+    if (!monthData) return;
+
+    let sourceMonth = null;
+    for (let m = selectedMonth - 1; m >= 0; m--) {
+      const md = data.months[m];
+      if (md && (md.incomes.some(i => i.isFixed) || md.expenses.some(e => e.isFixed))) {
+        sourceMonth = m;
+        break;
+      }
+    }
+    const source = sourceMonth !== null ? data.months[sourceMonth] : null;
+
+    const expectedFixedDate = (item, sourceList) => {
+      const src = sourceList?.find((x) => x.isFixed && x.name === item.name);
+      if (src) return shiftFixedDateToMonth(src.date, selectedMonth);
+      if (txnDateMonthIndex(item.date) !== selectedMonth) {
+        return shiftFixedDateToMonth(item.date, selectedMonth);
+      }
+      return null;
+    };
+
+    const fixIncome = monthData.incomes
+      .map((inc) => {
+        if (!inc.isFixed) return null;
+        const expected = expectedFixedDate(inc, source?.incomes);
+        return expected && inc.date !== expected ? { ...inc, expected } : null;
+      })
+      .filter(Boolean);
+    const fixExpense = monthData.expenses
+      .map((exp) => {
+        if (!exp.isFixed) return null;
+        const expected = expectedFixedDate(exp, source?.expenses);
+        return expected && exp.date !== expected ? { ...exp, expected } : null;
+      })
+      .filter(Boolean);
+    if (fixIncome.length === 0 && fixExpense.length === 0) {
+      repairedFixedDatesRef.current.add(repairKey);
+      return;
+    }
+
+    if (!isLive) {
+      updateData((prev) => ({
+        ...prev,
+        months: {
+          ...prev.months,
+          [selectedMonth]: {
+            ...prev.months[selectedMonth],
+            incomes: prev.months[selectedMonth].incomes.map((inc) => {
+              const fix = fixIncome.find((f) => f.id === inc.id);
+              return fix ? { ...inc, date: fix.expected } : inc;
+            }),
+            expenses: prev.months[selectedMonth].expenses.map((exp) => {
+              const fix = fixExpense.find((f) => f.id === exp.id);
+              return fix ? { ...exp, date: fix.expected } : exp;
+            }),
+          },
+        },
+      }));
+      repairedFixedDatesRef.current.add(repairKey);
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      for (const inc of fixIncome) {
+        if (cancelled || !inc.updatedAt || String(inc.id).startsWith('temp-')) continue;
+        upsertTxnLocal('income', selectedMonth, (it) => it.id === inc.id, { ...inc, date: inc.expected });
+        try {
+          const saved = await patchTransaction(inc.id, inc.updatedAt, {
+            name: inc.name,
+            amount: inc.amount,
+            txnDate: inc.expected,
+          });
+          if (cancelled) return;
+          upsertTxnLocal('income', selectedMonth, (it) => it.id === inc.id, {
+            id: saved.id,
+            name: saved.name,
+            amount: saved.amount,
+            isFixed: saved.isFixed,
+            date: saved.txnDate,
+            updatedAt: saved.updatedAt,
+            createdBy: saved.createdBy ?? null,
+          });
+        } catch (err) {
+          console.error('repair fixed income date:', err);
+        }
+      }
+      for (const exp of fixExpense) {
+        if (cancelled || !exp.updatedAt || String(exp.id).startsWith('temp-')) continue;
+        upsertTxnLocal('expense', selectedMonth, (it) => it.id === exp.id, { ...exp, date: exp.expected });
+        try {
+          const saved = await patchTransaction(exp.id, exp.updatedAt, {
+            name: exp.name,
+            amount: exp.amount,
+            txnDate: exp.expected,
+          });
+          if (cancelled) return;
+          upsertTxnLocal('expense', selectedMonth, (it) => it.id === exp.id, {
+            id: saved.id,
+            name: saved.name,
+            amount: saved.amount,
+            isFixed: saved.isFixed,
+            date: saved.txnDate,
+            updatedAt: saved.updatedAt,
+            createdBy: saved.createdBy ?? null,
+            ...(saved.category ? { category: saved.category } : {}),
+          });
+        } catch (err) {
+          console.error('repair fixed expense date:', err);
+        }
+      }
+      if (!cancelled) repairedFixedDatesRef.current.add(repairKey);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedMonth, loading, isLive, data.months, updateData]);
 
   const addIncome = (name, amount, isFixed = false, date = '') => {
     const amt = parseFloat(amount);

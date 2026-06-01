@@ -637,15 +637,24 @@ app.patch("/api/transactions/:id", authMiddleware, async (c) => {
 
   const nextName = body.name !== undefined ? body.name : null;
   const nextAmount = body.amount !== undefined ? body.amount : null;
+  const nextTxnDate = body.txnDate !== undefined ? body.txnDate : null;
+  if (
+    nextTxnDate !== null &&
+    (typeof nextTxnDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(nextTxnDate))
+  ) {
+    return c.json({ error: "txnDate must be YYYY-MM-DD" }, 400);
+  }
   const nameEnc =
     nextName !== null ? await encryptField(nextName, rawKey) : row.name;
   const amountEnc =
     nextAmount !== null ? await encryptField(nextAmount, rawKey) : row.amount;
+  const txnDateVal = nextTxnDate !== null ? nextTxnDate : row.txn_date;
 
   const [updated] = await sql`
     UPDATE transactions
     SET name = ${nameEnc},
         amount = ${amountEnc},
+        txn_date = ${txnDateVal},
         updated_at = NOW()
     WHERE id = ${id}
     RETURNING id, kind, txn_date, year, month, is_fixed, category, updated_at
@@ -658,7 +667,12 @@ app.patch("/api/transactions/:id", authMiddleware, async (c) => {
     resourceType: "transaction",
     resourceId: id,
     before: snapshotTransaction(row),
-    after: snapshotTransaction({ ...row, name: nameEnc, amount: amountEnc }),
+    after: snapshotTransaction({
+      ...row,
+      name: nameEnc,
+      amount: amountEnc,
+      txn_date: txnDateVal,
+    }),
   });
 
   return c.json({
