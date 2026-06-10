@@ -6,6 +6,7 @@ import { TuyaIntegration } from './TuyaIntegration'
 import { SmartDeviceCard } from './SmartDeviceCard'
 import { AddSmartDeviceModal } from './AddSmartDeviceModal'
 import { ConfirmDialog } from './ConfirmDialog'
+import { ErrorBoundary } from './ErrorBoundary'
 import { useSmartDevices } from '../hooks/useSmartDevices'
 import { getApiUrl } from '../lib/api'
 
@@ -70,17 +71,18 @@ export const SmartDevicesView = () => {
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {devices.map((device) => (
-                <SmartDeviceCard
-                  key={device.id}
-                  device={device}
-                  status={statusById[device.id]}
-                  isOwner={isOwner}
-                  onRefresh={refreshOne}
-                  onRename={rename}
-                  onToggleActive={setActive}
-                  onRemove={setRemoveTarget}
-                  onSend={sendCommand}
-                />
+                <ErrorBoundary key={device.id}>
+                  <SmartDeviceCard
+                    device={device}
+                    status={statusById[device.id]}
+                    isOwner={isOwner}
+                    onRefresh={refreshOne}
+                    onRename={rename}
+                    onToggleActive={setActive}
+                    onRemove={setRemoveTarget}
+                    onSend={sendCommand}
+                  />
+                </ErrorBoundary>
               ))}
             </div>
           )}
