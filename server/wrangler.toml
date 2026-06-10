@@ -2,6 +2,10 @@ name = "homecashflow-api"
 main = "src/worker.js"
 compatibility_date = "2024-12-01"
 
+# Cron: snapshot zużycia urządzeń Tuya co 15 min (Slice 4).
+[triggers]
+crons = ["*/15 * * * *"]
+
 [vars]
 FRONTEND_URL = "https://homecashflow.org"
 NEXTAUTH_URL = "https://api.homecashflow.org"
