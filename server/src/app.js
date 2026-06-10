@@ -5,6 +5,10 @@ import { jwtVerify, SignJWT } from "jose";
 import { neon } from "@neondatabase/serverless";
 import { decodeFinanceDataKey, encryptField, decryptField } from "./finance-crypto.js";
 import {
+  getTuyaToken, getDeviceInfo, getDeviceFunctions, getDeviceStatus,
+  listProjectDevices, formatStatuses,
+} from "./tuya/client.js";
+import {
   readFinanceFromRelational,
   writeFinanceToRelational,
 } from "./finance-relational.js";
@@ -1135,6 +1139,371 @@ app.put("/api/savings-goal", authMiddleware, async (c) => {
     yearlyAmount: Number(body.yearlyAmount ?? 0),
     targetMonth,
   });
+});
+
+// ============ TUYA CREDENTIALS (Slice 1) ============
+//
+// Każde gospodarstwo ma własne konto Tuya. Owner wpisuje poświadczenia w panelu;
+// trzymamy je zaszyfrowane (ff1:… AES-GCM, FINANCE_DATA_KEY). client_secret nigdy
+// nie wraca do frontu. Tylko owner gospodarstwa zarządza integracją.
+
+const TUYA_DATACENTERS = ["eu", "us", "cn", "in"];
+
+function validateTuyaCredentialsInput(body) {
+  if (!body || typeof body !== "object") return "Body must be a JSON object";
+  if (typeof body.clientId !== "string" || !body.clientId.trim()) return "clientId is required";
+  if (typeof body.clientSecret !== "string" || !body.clientSecret.trim()) return "clientSecret is required";
+  if (body.datacenter !== undefined && !TUYA_DATACENTERS.includes(body.datacenter)) {
+    return "datacenter must be one of eu|us|cn|in";
+  }
+  return null;
+}
+
+/** Zwraca { household_id, owner_id } gospodarstwa usera albo null. */
+async function getMembershipWithOwner(sql, userId) {
+  const [m] = await sql`
+    SELECT hm.household_id, h.owner_id
+    FROM household_members hm
+    JOIN households h ON h.id = hm.household_id
+    WHERE hm.user_id = ${userId}
+  `;
+  return m ?? null;
+}
+
+const toIso = (v) => (v instanceof Date ? v.toISOString() : v == null ? null : String(v));
+
+app.put("/api/tuya/credentials", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+
+  let body;
+  try { body = await c.req.json(); } catch { return c.json({ error: "Invalid JSON body" }, 400); }
+  const validationError = validateTuyaCredentialsInput(body);
+  if (validationError) return c.json({ error: validationError }, 400);
+
+  const membership = await getMembershipWithOwner(sql, user.id);
+  if (!membership) return c.json({ error: "No household" }, 400);
+  if (membership.owner_id !== user.id) return c.json({ error: "forbidden_owner_only" }, 403);
+
+  const datacenter = body.datacenter ?? "eu";
+
+  // Weryfikacja: udany token = poświadczenia poprawne. Bez tego nie zapisujemy.
+  try {
+    await getTuyaToken({
+      clientId: body.clientId,
+      clientSecret: body.clientSecret,
+      datacenter,
+    });
+  } catch (err) {
+    console.error("[tuya] credential verification failed", err);
+    return c.json({ error: "tuya_auth_failed" }, 400);
+  }
+
+  const rawKey = getFinanceDataKey(c);
+  const clientIdEnc = await encryptField(body.clientId, rawKey);
+  const clientSecretEnc = await encryptField(body.clientSecret, rawKey);
+
+  const [row] = await sql`
+    INSERT INTO tuya_credentials
+      (household_id, client_id_enc, client_secret_enc, datacenter, verified_at, created_by, updated_at)
+    VALUES
+      (${membership.household_id}, ${clientIdEnc}, ${clientSecretEnc},
+       ${datacenter}, NOW(), ${user.id}, NOW())
+    ON CONFLICT (household_id) DO UPDATE SET
+      client_id_enc = EXCLUDED.client_id_enc,
+      client_secret_enc = EXCLUDED.client_secret_enc,
+      datacenter = EXCLUDED.datacenter,
+      verified_at = NOW(),
+      updated_at = NOW()
+    RETURNING datacenter, verified_at
+  `;
+
+  return c.json({
+    configured: true,
+    datacenter: row.datacenter,
+    verifiedAt: toIso(row.verified_at),
+  });
+});
+
+app.get("/api/tuya/credentials", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+
+  const membership = await getMembershipWithOwner(sql, user.id);
+  if (!membership) return c.json({ error: "No household" }, 400);
+  if (membership.owner_id !== user.id) return c.json({ error: "forbidden_owner_only" }, 403);
+
+  const [row] = await sql`
+    SELECT datacenter, verified_at
+    FROM tuya_credentials WHERE household_id = ${membership.household_id}
+  `;
+  if (!row) return c.json({ configured: false });
+  // Nigdy nie zwracamy client_secret/client_id.
+  return c.json({
+    configured: true,
+    datacenter: row.datacenter,
+    verifiedAt: toIso(row.verified_at),
+  });
+});
+
+app.delete("/api/tuya/credentials", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+
+  const membership = await getMembershipWithOwner(sql, user.id);
+  if (!membership) return c.json({ error: "No household" }, 400);
+  if (membership.owner_id !== user.id) return c.json({ error: "forbidden_owner_only" }, 403);
+
+  await sql`DELETE FROM tuya_credentials WHERE household_id = ${membership.household_id}`;
+  return c.body(null, 204);
+});
+
+// ============ SMART DEVICES (Tuya — Slice 2) ============
+//
+// N urządzeń per gospodarstwo. Poświadczenia (jedne) z tuya_credentials.
+// Zarządzanie (dodaj/usuń/edytuj) owner-only; podgląd statusu member+.
+
+/** Deszyfruje poświadczenia gospodarstwa i pobiera token → ctx dla wywołań urządzeń. Null gdy brak konfiguracji. */
+async function loadTuyaContext(c, sql, householdId) {
+  const [cred] = await sql`
+    SELECT client_id_enc, client_secret_enc, datacenter
+    FROM tuya_credentials WHERE household_id = ${householdId}
+  `;
+  if (!cred) return null;
+  const rawKey = getFinanceDataKey(c);
+  const clientId = await decryptField(cred.client_id_enc, rawKey);
+  const clientSecret = await decryptField(cred.client_secret_enc, rawKey);
+  const { accessToken } = await getTuyaToken({ clientId, clientSecret, datacenter: cred.datacenter });
+  return { clientId, clientSecret, datacenter: cred.datacenter, accessToken };
+}
+
+function mapDevice(row) {
+  return {
+    id: row.id,
+    tuyaDeviceId: row.tuya_device_id,
+    displayName: row.display_name,
+    productName: row.product_name ?? null,
+    productId: row.product_id ?? null,
+    deviceType: row.device_type ?? null,
+    functionsJson: row.functions_json ?? null,
+    isActive: row.is_active,
+    createdBy: row.created_by ?? null,
+    updatedAt: toIso(row.updated_at),
+  };
+}
+
+app.get("/api/smart-devices", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+  const [membership] = await sql`
+    SELECT household_id FROM household_members WHERE user_id = ${user.id}
+  `;
+  if (!membership) return c.json({ devices: [] });
+  const rows = await sql`
+    SELECT * FROM smart_devices WHERE household_id = ${membership.household_id}
+    ORDER BY created_at ASC
+  `;
+  return c.json({ devices: rows.map(mapDevice) });
+});
+
+/** Status pojedynczego urządzenia po odczycie z Tuya (graceful gdy Tuya nie odpowiada). */
+function deviceStatusPayload(row, formatted) {
+  return {
+    id: row.id,
+    tuyaDeviceId: row.tuya_device_id ?? row.tuyaDeviceId,
+    ok: true,
+    online: true,
+    ...formatted,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+// Discover: urządzenia z powiązanego konta (owner-only). Statyczna ścieżka przed /:id.
+app.get("/api/smart-devices/discover", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+  const membership = await getMembershipWithOwner(sql, user.id);
+  if (!membership) return c.json({ error: "No household" }, 400);
+  if (membership.owner_id !== user.id) return c.json({ error: "forbidden_owner_only" }, 403);
+
+  const ctx = await loadTuyaContext(c, sql, membership.household_id);
+  if (!ctx) return c.json({ error: "tuya_not_configured" }, 400);
+
+  let result;
+  try {
+    result = await listProjectDevices(ctx);
+  } catch (err) {
+    console.error("[smart-devices] discover failed", err);
+    return c.json({ error: "tuya_unavailable" }, 502);
+  }
+  const devices = (result?.devices ?? []).map((d) => ({
+    id: d.id,
+    name: d.name ?? null,
+    online: d.online ?? d.isOnline ?? false,
+  }));
+  return c.json({ devices });
+});
+
+// Batch status wszystkich aktywnych urządzeń (member+). Jeden błąd nie wywala reszty.
+app.get("/api/smart-devices/status", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+  const [membership] = await sql`
+    SELECT household_id FROM household_members WHERE user_id = ${user.id}
+  `;
+  if (!membership) return c.json({ statuses: [] });
+
+  const rows = await sql`
+    SELECT id, tuya_device_id FROM smart_devices
+    WHERE household_id = ${membership.household_id} AND is_active = true
+    ORDER BY created_at ASC
+  `;
+  if (rows.length === 0) return c.json({ statuses: [] });
+
+  const ctx = await loadTuyaContext(c, sql, membership.household_id);
+  if (!ctx) return c.json({ error: "tuya_not_configured" }, 400);
+
+  const statuses = await Promise.all(
+    rows.map(async (r) => {
+      try {
+        const raw = await getDeviceStatus(ctx, r.tuya_device_id);
+        return deviceStatusPayload(r, formatStatuses(raw));
+      } catch (err) {
+        console.error("[smart-devices] status failed", r.tuya_device_id, err);
+        return { id: r.id, tuyaDeviceId: r.tuya_device_id, ok: false, online: false };
+      }
+    }),
+  );
+  return c.json({ statuses });
+});
+
+app.get("/api/smart-devices/:id/status", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+  const id = c.req.param("id");
+
+  const result = await loadDeviceInHousehold(sql, user.id, id);
+  if (result.error) return c.json(result.error.body, result.error.status);
+
+  const ctx = await loadTuyaContext(c, sql, result.row.household_id);
+  if (!ctx) return c.json({ error: "tuya_not_configured" }, 400);
+
+  try {
+    const raw = await getDeviceStatus(ctx, result.row.tuya_device_id);
+    return c.json(deviceStatusPayload(result.row, formatStatuses(raw)));
+  } catch (err) {
+    console.error("[smart-devices] single status failed", err);
+    return c.json({ id: result.row.id, tuyaDeviceId: result.row.tuya_device_id, ok: false, online: false });
+  }
+});
+
+app.post("/api/smart-devices", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+
+  let body;
+  try { body = await c.req.json(); } catch { return c.json({ error: "Invalid JSON body" }, 400); }
+  if (typeof body?.tuyaDeviceId !== "string" || !body.tuyaDeviceId.trim()) {
+    return c.json({ error: "tuyaDeviceId is required" }, 400);
+  }
+  const tuyaDeviceId = body.tuyaDeviceId.trim();
+
+  const membership = await getMembershipWithOwner(sql, user.id);
+  if (!membership) return c.json({ error: "No household" }, 400);
+  if (membership.owner_id !== user.id) return c.json({ error: "forbidden_owner_only" }, 403);
+
+  // Duplikat (UNIQUE globalnie) — to samo urządzenie w jakimkolwiek gospodarstwie.
+  const [dupe] = await sql`SELECT 1 FROM smart_devices WHERE tuya_device_id = ${tuyaDeviceId}`;
+  if (dupe) return c.json({ error: "device_already_linked" }, 409);
+
+  const ctx = await loadTuyaContext(c, sql, membership.household_id);
+  if (!ctx) return c.json({ error: "tuya_not_configured" }, 400);
+
+  let info;
+  try {
+    info = await getDeviceInfo(ctx, tuyaDeviceId);
+  } catch (err) {
+    console.error("[smart-devices] getDeviceInfo failed", err);
+    return c.json({ error: "device_not_found_in_tuya" }, 404);
+  }
+
+  // Snapshot funkcji — best-effort (do renderu kontrolek w Slice 3).
+  let functions = null;
+  try {
+    functions = await getDeviceFunctions(ctx, tuyaDeviceId);
+  } catch (err) {
+    console.error("[smart-devices] getDeviceFunctions failed (non-fatal)", err);
+  }
+
+  const displayName = info?.name || tuyaDeviceId;
+
+  const [row] = await sql`
+    INSERT INTO smart_devices
+      (household_id, tuya_device_id, display_name, product_name, product_id, functions_json, created_by)
+    VALUES
+      (${membership.household_id}, ${tuyaDeviceId}, ${displayName},
+       ${info?.product_name ?? null}, ${info?.product_id ?? null},
+       ${functions == null ? null : JSON.stringify(functions)}, ${user.id})
+    RETURNING *
+  `;
+  return c.json(mapDevice(row), 201);
+});
+
+/** Ładuje urządzenie w gospodarstwie usera. 404 gdy nie istnieje, 403 gdy w cudzym. */
+async function loadDeviceInHousehold(sql, userId, id) {
+  const [row] = await sql`
+    SELECT sd.*, h.owner_id AS household_owner_id
+    FROM smart_devices sd
+    JOIN household_members hm ON hm.household_id = sd.household_id
+    JOIN households h ON h.id = sd.household_id
+    WHERE sd.id = ${id} AND hm.user_id = ${userId}
+  `;
+  if (!row) {
+    const [exists] = await sql`SELECT 1 FROM smart_devices WHERE id = ${id}`;
+    return { error: { status: exists ? 403 : 404, body: { error: exists ? "forbidden" : "not found" } } };
+  }
+  return { ok: true, row };
+}
+
+app.patch("/api/smart-devices/:id", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+  const id = c.req.param("id");
+
+  let body;
+  try { body = await c.req.json(); } catch { return c.json({ error: "Invalid JSON body" }, 400); }
+
+  const result = await loadDeviceInHousehold(sql, user.id, id);
+  if (result.error) return c.json(result.error.body, result.error.status);
+  if (result.row.household_owner_id !== user.id) return c.json({ error: "forbidden_owner_only" }, 403);
+
+  const nextName =
+    typeof body.displayName === "string" && body.displayName.trim()
+      ? body.displayName.trim()
+      : result.row.display_name;
+  const nextActive = typeof body.isActive === "boolean" ? body.isActive : result.row.is_active;
+
+  const [row] = await sql`
+    UPDATE smart_devices
+    SET display_name = ${nextName}, is_active = ${nextActive}, updated_at = NOW()
+    WHERE id = ${id}
+    RETURNING *
+  `;
+  return c.json(mapDevice(row));
+});
+
+app.delete("/api/smart-devices/:id", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+  const id = c.req.param("id");
+
+  const result = await loadDeviceInHousehold(sql, user.id, id);
+  if (result.error) return c.json(result.error.body, result.error.status);
+  if (result.row.household_owner_id !== user.id) return c.json({ error: "forbidden_owner_only" }, 403);
+
+  // Usuwamy tylko z naszej DB — w chmurze Tuya urządzenie zostaje.
+  await sql`DELETE FROM smart_devices WHERE id = ${id}`;
+  return c.body(null, 204);
 });
 
 // ============ ACTION LOG (undo Phase 4) ============

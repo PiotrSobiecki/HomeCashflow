@@ -1,0 +1,1 @@
+ALTER TABLE "tuya_credentials" DROP COLUMN "device_id";

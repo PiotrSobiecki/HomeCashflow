@@ -3,6 +3,7 @@ import { Auth } from "./components/Auth";
 import { Dashboard } from "./components/Dashboard";
 import { InviteAccept } from "./components/InviteAccept";
 import { LegalPage } from "./components/LegalPage";
+import { SmartDevicesView } from "./components/SmartDevicesView";
 import { Loader2 } from "lucide-react";
 
 const AppContent = () => {
@@ -34,6 +35,10 @@ const AppContent = () => {
 
   if (view === "polityka-prywatnosci") {
     return <LegalPage type="privacy" />;
+  }
+
+  if (view === "urzadzenia") {
+    return user ? <SmartDevicesView /> : <Auth />;
   }
 
   return user ? <Dashboard /> : <Auth />;

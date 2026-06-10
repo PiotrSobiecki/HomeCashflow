@@ -179,3 +179,45 @@ export const financeDataMigration = pgTable('finance_data_migration', {
   categoryCount: integer('category_count'),
   activityCount: integer('activity_count'),
 })
+
+// ====== Integracja Tuya — poświadczenia per gospodarstwo (Slice 1) ======
+//
+// Każde gospodarstwo ma własne konto Tuya. Owner wpisuje Client ID/Secret w panelu;
+// trzymamy je zaszyfrowane (ff1:… AES-GCM, ten sam FINANCE_DATA_KEY co reszta).
+// Singleton per household → PK = household_id.
+export const tuyaCredentials = pgTable('tuya_credentials', {
+  householdId: uuid('household_id').primaryKey().references(() => households.id, { onDelete: 'cascade' }),
+  clientIdEnc: text('client_id_enc').notNull(), // ciphertext
+  clientSecretEnc: text('client_secret_enc').notNull(), // ciphertext
+  // UWAGA: device_id NIE tutaj — poświadczenia są jedne na konto/projekt Tuya,
+  // a urządzeń może być wiele. Urządzenia → osobna tabela smart_devices (Slice 2).
+  datacenter: text('datacenter').notNull().default('eu'),
+  verifiedAt: timestamp('verified_at', { withTimezone: true }), // ostatnia udana weryfikacja tokenem
+  createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  datacenterCheck: check('tuya_credentials_datacenter_check', sql`${t.datacenter} IN ('eu', 'us', 'cn', 'in')`),
+}))
+
+// ====== Urządzenia Tuya per gospodarstwo (Slice 2) ======
+//
+// N urządzeń per gospodarstwo (poświadczenia są jedne — tuya_credentials).
+// `tuya_device_id` UNIQUE globalnie: jedno fizyczne urządzenie należy do jednego
+// gospodarstwa. `functions_json` to snapshot zapisywalnych DP z Tuya (do renderu
+// kontrolek w Slice 3) pobierany przy dodaniu.
+export const smartDevices = pgTable('smart_devices', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  householdId: uuid('household_id').notNull().references(() => households.id, { onDelete: 'cascade' }),
+  tuyaDeviceId: text('tuya_device_id').notNull().unique(),
+  displayName: text('display_name').notNull(),
+  productName: text('product_name'),
+  productId: text('product_id'),
+  deviceType: text('device_type').default('plug'),
+  functionsJson: jsonb('functions_json'),
+  isActive: boolean('is_active').notNull().default(true),
+  createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  byHousehold: index('idx_smart_devices_household').on(t.householdId),
+}))
