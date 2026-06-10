@@ -16,7 +16,7 @@ export const SmartDeviceCard = ({
   const [name, setName] = useState(device.displayName)
   const [busy, setBusy] = useState(false)
   const [cmdError, setCmdError] = useState('')
-  const [showChart, setShowChart] = useState(false)
+  const [showChart, setShowChart] = useState(true)
 
   const online = status?.ok && status?.online
   const hasReading = status?.ok
