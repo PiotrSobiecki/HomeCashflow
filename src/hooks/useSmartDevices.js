@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   fetchSmartDevices, fetchSmartDevicesStatus,
-  addSmartDevice, patchSmartDevice, deleteSmartDevice,
+  addSmartDevice, patchSmartDevice, deleteSmartDevice, sendDeviceCommands,
 } from '../lib/api'
 import { usePolling } from './usePolling'
 
@@ -80,5 +80,19 @@ export function useSmartDevices() {
     setDevices((prev) => prev.filter((d) => d.id !== id))
   }, [])
 
-  return { devices, statusById, loading, error, reload, refreshStatus, add, rename, setActive, remove }
+  const sendCommand = useCallback(async (deviceId, commands) => {
+    await sendDeviceCommands(deviceId, commands)
+    // Optimistic: nadpisz raw w statusie, potem potwierdź realnym odczytem.
+    setStatusById((prev) => {
+      const s = prev[deviceId]
+      if (!s) return prev
+      const raw = { ...(s.raw || {}) }
+      for (const cmd of commands) raw[cmd.code] = cmd.value
+      const switchOn = raw.switch_1 ?? raw.switch ?? raw.switch_led ?? s.switchOn
+      return { ...prev, [deviceId]: { ...s, raw, switchOn } }
+    })
+    setTimeout(refreshStatus, 1200)
+  }, [refreshStatus])
+
+  return { devices, statusById, loading, error, reload, refreshStatus, add, rename, setActive, remove, sendCommand }
 }

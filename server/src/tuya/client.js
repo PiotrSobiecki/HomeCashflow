@@ -151,6 +151,11 @@ export function listProjectDevices(ctx) {
   return tuyaFetchWithToken(ctx, 'GET', '/v1.0/iot-01/associated-users/devices')
 }
 
+/** Wysyła komendy sterujące. `commands` = [{ code, value }]. Zwraca result (zwykle true). */
+export function sendCommands(ctx, deviceId, commands) {
+  return tuyaFetchWithToken(ctx, 'POST', `/v1.0/iot-03/devices/${deviceId}/commands`, { commands })
+}
+
 function round(n, decimals) {
   const f = 10 ** decimals
   return Math.round(n * f) / f

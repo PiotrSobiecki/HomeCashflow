@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import {
   getTuyaToken, getDeviceInfo, getDeviceStatus, getDeviceFunctions,
-  listProjectDevices, formatStatuses,
+  listProjectDevices, formatStatuses, sendCommands,
 } from './client.js'
 
 const CTX = { clientId: 'cid', clientSecret: 'secret', datacenter: 'eu', accessToken: 'tok' }
@@ -125,5 +125,16 @@ describe('device endpoints', () => {
     const res = await listProjectDevices(CTX)
     expect(res.devices[0].id).toBe('d1')
     expect(fetchMock.mock.calls[0][0]).toContain('/v1.0/iot-01/associated-users/devices')
+  })
+
+  it('sendCommands POSTs the commands payload signed with the token', async () => {
+    const fetchMock = mockTuya({ success: true, result: true })
+    const res = await sendCommands(CTX, 'dev123', [{ code: 'switch_1', value: false }])
+    expect(res).toBe(true)
+    const [url, opts] = fetchMock.mock.calls[0]
+    expect(url).toBe('https://openapi.tuyaeu.com/v1.0/iot-03/devices/dev123/commands')
+    expect(opts.method).toBe('POST')
+    expect(JSON.parse(opts.body)).toEqual({ commands: [{ code: 'switch_1', value: false }] })
+    expect(opts.headers.access_token).toBe('tok')
   })
 })

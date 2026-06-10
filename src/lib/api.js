@@ -280,3 +280,13 @@ export const deleteSmartDevice = async (id) => {
   }
   return true;
 };
+
+export const sendDeviceCommands = async (id, commands) => {
+  const res = await fetch(`${API_URL}/api/smart-devices/${id}/commands`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ commands }),
+  });
+  return jsonOrThrow(res, 'POST /api/smart-devices/commands');
+};

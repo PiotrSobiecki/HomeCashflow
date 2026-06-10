@@ -221,3 +221,18 @@ export const smartDevices = pgTable('smart_devices', {
 }, (t) => ({
   byHousehold: index('idx_smart_devices_household').on(t.householdId),
 }))
+
+// ====== Audyt sterowania urządzeniami (Slice 3) ======
+//
+// Osobny od action_log (to nie jest cofalna mutacja budżetu) — kto/kiedy/co.
+export const deviceCommandLog = pgTable('device_command_log', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  householdId: uuid('household_id').notNull().references(() => households.id, { onDelete: 'cascade' }),
+  deviceId: uuid('device_id').references(() => smartDevices.id, { onDelete: 'set null' }),
+  actorId: uuid('actor_id').references(() => users.id, { onDelete: 'set null' }),
+  code: text('code').notNull(),
+  value: jsonb('value'),
+  at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  byHouseholdAt: index('idx_device_cmd_household_at').on(t.householdId, t.at),
+}))

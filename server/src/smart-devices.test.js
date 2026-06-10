@@ -9,13 +9,14 @@ vi.mock('./tuya/client.js', async () => {
     getDeviceFunctions: vi.fn(),
     getDeviceStatus: vi.fn(),
     listProjectDevices: vi.fn(),
+    sendCommands: vi.fn(),
     formatStatuses: actual.formatStatuses,
   }
 })
 
 import { app, upsertUserAndHousehold } from './app.js'
 import {
-  getTuyaToken, getDeviceInfo, getDeviceFunctions, getDeviceStatus, listProjectDevices,
+  getTuyaToken, getDeviceInfo, getDeviceFunctions, getDeviceStatus, listProjectDevices, sendCommands,
 } from './tuya/client.js'
 import { neon } from '@neondatabase/serverless'
 import { SignJWT } from 'jose'
@@ -83,6 +84,26 @@ async function addDevice(ownerToken, id = 'dev123', name = 'Salon') {
   return (await postDevice(ownerToken, id)).json()
 }
 
+/** Urządzenie z zapisywalnym DP switch_1 (do testów sterowania). */
+async function addControllableDevice(ownerToken, id = 'dev123') {
+  vi.mocked(getDeviceInfo).mockResolvedValue({ name: 'Gniazdo', online: true })
+  vi.mocked(getDeviceFunctions).mockResolvedValue({ functions: [{ code: 'switch_1', type: 'Boolean' }] })
+  return (await postDevice(ownerToken, id)).json()
+}
+
+function sendCommand(token, deviceRowId, commands) {
+  return app.request(`/api/smart-devices/${deviceRowId}/commands`, {
+    method: 'POST',
+    headers: { cookie: `token=${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ commands }),
+  })
+}
+
+async function countCommandLog(deviceRowId) {
+  const [r] = await sql`SELECT count(*)::int n FROM device_command_log WHERE device_id = ${deviceRowId}`
+  return r.n
+}
+
 beforeEach(() => {
   createdUserIds = []
   vi.mocked(getTuyaToken).mockReset()
@@ -90,6 +111,7 @@ beforeEach(() => {
   vi.mocked(getDeviceFunctions).mockReset()
   vi.mocked(getDeviceStatus).mockReset()
   vi.mocked(listProjectDevices).mockReset()
+  vi.mocked(sendCommands).mockReset()
 })
 
 afterEach(async () => {
@@ -277,5 +299,68 @@ describe('GET /api/smart-devices/discover', () => {
     const member = await addMemberToHousehold(owner.token)
     const res = await app.request('/api/smart-devices/discover', { headers: { cookie: `token=${member.token}` } })
     expect(res.status).toBe(403)
+  })
+})
+
+describe('POST /api/smart-devices/:id/commands', () => {
+  it('owner sends a valid command, it reaches Tuya and is logged', async () => {
+    const owner = await createOwnerWithCreds()
+    const dev = await addControllableDevice(owner.token)
+    vi.mocked(sendCommands).mockResolvedValue(true)
+
+    const res = await sendCommand(owner.token, dev.id, [{ code: 'switch_1', value: false }])
+    expect(res.status).toBe(200)
+    expect((await res.json()).ok).toBe(true)
+
+    expect(vi.mocked(sendCommands)).toHaveBeenCalledWith(
+      expect.anything(), 'dev123', [{ code: 'switch_1', value: false }],
+    )
+    expect(await countCommandLog(dev.id)).toBe(1)
+  })
+
+  it('lets a member control the device', async () => {
+    const owner = await createOwnerWithCreds()
+    const dev = await addControllableDevice(owner.token)
+    const member = await addMemberToHousehold(owner.token)
+    vi.mocked(sendCommands).mockResolvedValue(true)
+
+    const res = await sendCommand(member.token, dev.id, [{ code: 'switch_1', value: true }])
+    expect(res.status).toBe(200)
+  })
+
+  it('rejects a command for a non-writable DP without calling Tuya or logging', async () => {
+    const owner = await createOwnerWithCreds()
+    const dev = await addControllableDevice(owner.token)
+    vi.mocked(sendCommands).mockResolvedValue(true)
+
+    const res = await sendCommand(owner.token, dev.id, [{ code: 'evil_code', value: true }])
+    expect(res.status).toBe(400)
+    expect(vi.mocked(sendCommands)).not.toHaveBeenCalled()
+    expect(await countCommandLog(dev.id)).toBe(0)
+  })
+
+  it('rejects a wrong value type for a Boolean DP', async () => {
+    const owner = await createOwnerWithCreds()
+    const dev = await addControllableDevice(owner.token)
+    const res = await sendCommand(owner.token, dev.id, [{ code: 'switch_1', value: 'on' }])
+    expect(res.status).toBe(400)
+  })
+
+  it('returns 401 without auth', async () => {
+    const res = await app.request('/api/smart-devices/whatever/commands', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ commands: [{ code: 'switch_1', value: true }] }),
+    })
+    expect(res.status).toBe(401)
+  })
+
+  it('does not log a false success when Tuya rejects the command', async () => {
+    const owner = await createOwnerWithCreds()
+    const dev = await addControllableDevice(owner.token)
+    vi.mocked(sendCommands).mockRejectedValue(new Error('Tuya API: command failed'))
+
+    const res = await sendCommand(owner.token, dev.id, [{ code: 'switch_1', value: false }])
+    expect(res.status).toBeGreaterThanOrEqual(500)
+    expect(await countCommandLog(dev.id)).toBe(0)
   })
 })

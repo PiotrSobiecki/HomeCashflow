@@ -6,8 +6,9 @@ import { neon } from "@neondatabase/serverless";
 import { decodeFinanceDataKey, encryptField, decryptField } from "./finance-crypto.js";
 import {
   getTuyaToken, getDeviceInfo, getDeviceFunctions, getDeviceStatus,
-  listProjectDevices, formatStatuses,
+  listProjectDevices, formatStatuses, sendCommands,
 } from "./tuya/client.js";
+import { validateCommands } from "./tuya/commands.js";
 import {
   readFinanceFromRelational,
   writeFinanceToRelational,
@@ -1504,6 +1505,48 @@ app.delete("/api/smart-devices/:id", authMiddleware, async (c) => {
   // Usuwamy tylko z naszej DB — w chmurze Tuya urządzenie zostaje.
   await sql`DELETE FROM smart_devices WHERE id = ${id}`;
   return c.body(null, 204);
+});
+
+// Sterowanie — member+ (wspólne gospodarstwo). Komendy walidowane względem
+// zapisanych funkcji DP przed wysłaniem do Tuya. Audyt w device_command_log.
+app.post("/api/smart-devices/:id/commands", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+  const id = c.req.param("id");
+
+  let body;
+  try { body = await c.req.json(); } catch { return c.json({ error: "Invalid JSON body" }, 400); }
+
+  const result = await loadDeviceInHousehold(sql, user.id, id);
+  if (result.error) return c.json(result.error.body, result.error.status);
+
+  const commands = body?.commands;
+  const validationError = validateCommands(result.row.functions_json, commands);
+  if (validationError) return c.json({ error: "command_not_allowed", detail: validationError }, 400);
+
+  const ctx = await loadTuyaContext(c, sql, result.row.household_id);
+  if (!ctx) return c.json({ error: "tuya_not_configured" }, 400);
+
+  try {
+    await sendCommands(ctx, result.row.tuya_device_id, commands);
+  } catch (err) {
+    console.error("[smart-devices] command failed", err);
+    return c.json({ error: "command_failed" }, 502);
+  }
+
+  // Audyt po udanym wysłaniu — jeden wpis per komenda. Błąd logu nie wywala akcji.
+  for (const cmd of commands) {
+    try {
+      await sql`
+        INSERT INTO device_command_log (household_id, device_id, actor_id, code, value)
+        VALUES (${result.row.household_id}, ${result.row.id}, ${user.id}, ${cmd.code}, ${JSON.stringify(cmd.value ?? null)})
+      `;
+    } catch (err) {
+      console.error("[device-command-log] insert failed", err);
+    }
+  }
+
+  return c.json({ ok: true });
 });
 
 // ============ ACTION LOG (undo Phase 4) ============

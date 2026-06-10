@@ -3,20 +3,30 @@ import {
   Power, Wifi, WifiOff, Zap, Activity, Gauge, RefreshCw,
   Pencil, Trash2, Check, X, Eye, EyeOff,
 } from 'lucide-react'
+import { DeviceControls } from './DeviceControls'
 
 /**
- * Karta pojedynczego urządzenia. Sterowanie (wł./wył.) dochodzi w Slice 3 —
- * tu przełącznik jest tylko odczytem stanu.
+ * Karta pojedynczego urządzenia: status na żywo + sterowanie (Slice 3).
  */
 export const SmartDeviceCard = ({
-  device, status, isOwner, onRefresh, onRename, onToggleActive, onRemove,
+  device, status, isOwner, onRefresh, onRename, onToggleActive, onRemove, onSend,
 }) => {
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(device.displayName)
   const [busy, setBusy] = useState(false)
+  const [cmdError, setCmdError] = useState('')
 
   const online = status?.ok && status?.online
   const hasReading = status?.ok
+
+  const handleSend = async (commands) => {
+    setCmdError('')
+    try {
+      await onSend(device.id, commands)
+    } catch {
+      setCmdError('Nie udało się wysłać polecenia — stan bez zmian.')
+    }
+  }
 
   const saveName = async () => {
     if (!name.trim() || name.trim() === device.displayName) { setEditing(false); return }
@@ -61,6 +71,16 @@ export const SmartDeviceCard = ({
       ) : (
         <p className="text-xs text-slate-500 mb-3">Nie udało się odświeżyć statusu.</p>
       )}
+
+      {/* Sterowanie — generowane z zapisywalnych DP */}
+      <DeviceControls
+        functionsJson={device.functionsJson}
+        raw={status?.raw}
+        onSend={handleSend}
+        disabled={!online}
+      />
+
+      {cmdError && <p className="text-xs text-rose-400 mb-2">{cmdError}</p>}
 
       <div className="flex items-center justify-between">
         <button

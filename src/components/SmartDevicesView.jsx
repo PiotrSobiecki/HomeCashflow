@@ -18,7 +18,7 @@ export const SmartDevicesView = () => {
   const [isOwner, setIsOwner] = useState(false)
   const {
     devices, statusById, loading, error,
-    refreshStatus, add, rename, setActive, remove,
+    refreshStatus, add, rename, setActive, remove, sendCommand,
   } = useSmartDevices()
   const [showAdd, setShowAdd] = useState(false)
   const [removeTarget, setRemoveTarget] = useState(null)
@@ -79,6 +79,7 @@ export const SmartDevicesView = () => {
                   onRename={rename}
                   onToggleActive={setActive}
                   onRemove={setRemoveTarget}
+                  onSend={sendCommand}
                 />
               ))}
             </div>
