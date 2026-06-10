@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import {
   Power, Wifi, WifiOff, Zap, Activity, Gauge, RefreshCw,
-  Pencil, Trash2, Check, X, Eye, EyeOff,
+  Pencil, Trash2, Check, X, Eye, EyeOff, BarChart3, ChevronDown,
 } from 'lucide-react'
 import { DeviceControls } from './DeviceControls'
+import { DeviceEnergyChart } from './DeviceEnergyChart'
 
 /**
  * Karta pojedynczego urządzenia: status na żywo + sterowanie (Slice 3).
@@ -15,6 +16,7 @@ export const SmartDeviceCard = ({
   const [name, setName] = useState(device.displayName)
   const [busy, setBusy] = useState(false)
   const [cmdError, setCmdError] = useState('')
+  const [showChart, setShowChart] = useState(false)
 
   const online = status?.ok && status?.online
   const hasReading = status?.ok
@@ -82,7 +84,19 @@ export const SmartDeviceCard = ({
 
       {cmdError && <p className="text-xs text-rose-400 mb-2">{cmdError}</p>}
 
-      <div className="flex items-center justify-between">
+      {/* Wykres zużycia (rozwijany — montowany dopiero po otwarciu) */}
+      <button
+        type="button"
+        onClick={() => setShowChart((v) => !v)}
+        className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-indigo-400 transition-colors mb-1"
+      >
+        <BarChart3 className="w-3.5 h-3.5" />
+        Zużycie
+        <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showChart ? 'rotate-180' : ''}`} />
+      </button>
+      {showChart && <DeviceEnergyChart deviceId={device.id} />}
+
+      <div className="flex items-center justify-between mt-2">
         <button
           type="button"
           onClick={() => onRefresh(device.id)}

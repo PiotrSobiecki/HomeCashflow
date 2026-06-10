@@ -104,6 +104,13 @@ async function countCommandLog(deviceRowId) {
   return r.n
 }
 
+async function insertSnapshot(deviceId, { at, powerW, energyKwh }) {
+  await sql`
+    INSERT INTO device_energy_snapshots (device_id, recorded_at, power_w, energy_kwh, switch_on, is_online)
+    VALUES (${deviceId}, ${at}, ${powerW}, ${energyKwh}, true, true)
+  `
+}
+
 beforeEach(() => {
   createdUserIds = []
   vi.mocked(getTuyaToken).mockReset()
@@ -362,5 +369,58 @@ describe('POST /api/smart-devices/:id/commands', () => {
     const res = await sendCommand(owner.token, dev.id, [{ code: 'switch_1', value: false }])
     expect(res.status).toBeGreaterThanOrEqual(500)
     expect(await countCommandLog(dev.id)).toBe(0)
+  })
+})
+
+describe('GET /api/smart-devices/:id/history', () => {
+  it('returns aggregated series and summary (kWh delta + peak power)', async () => {
+    const owner = await createOwnerWithCreds()
+    const dev = await addDevice(owner.token)
+    const now = Date.now()
+    await insertSnapshot(dev.id, { at: new Date(now - 3 * 3600e3).toISOString(), powerW: 100, energyKwh: 10.0 })
+    await insertSnapshot(dev.id, { at: new Date(now - 2 * 3600e3).toISOString(), powerW: 250, energyKwh: 11.0 })
+    await insertSnapshot(dev.id, { at: new Date(now - 1 * 3600e3).toISOString(), powerW: 180, energyKwh: 12.5 })
+
+    const res = await app.request(`/api/smart-devices/${dev.id}/history?range=7d`, {
+      headers: { cookie: `token=${owner.token}` },
+    })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.range).toBe('7d')
+    expect(body.summary.energyKwh).toBeCloseTo(2.5, 3) // 12.5 - 10.0
+    expect(body.summary.peakW).toBe(250)
+    expect(body.series.length).toBeGreaterThan(0)
+  })
+
+  it('lets a member read history', async () => {
+    const owner = await createOwnerWithCreds()
+    const dev = await addDevice(owner.token)
+    await insertSnapshot(dev.id, { at: new Date().toISOString(), powerW: 50, energyKwh: 1 })
+    const member = await addMemberToHousehold(owner.token)
+    const res = await app.request(`/api/smart-devices/${dev.id}/history?range=30d`, {
+      headers: { cookie: `token=${member.token}` },
+    })
+    expect(res.status).toBe(200)
+  })
+
+  it('returns an empty series with zero summary when there is no data', async () => {
+    const owner = await createOwnerWithCreds()
+    const dev = await addDevice(owner.token)
+    const res = await app.request(`/api/smart-devices/${dev.id}/history?range=7d`, {
+      headers: { cookie: `token=${owner.token}` },
+    })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.series).toEqual([])
+    expect(body.summary.energyKwh).toBe(0)
+  })
+
+  it('rejects an invalid range', async () => {
+    const owner = await createOwnerWithCreds()
+    const dev = await addDevice(owner.token)
+    const res = await app.request(`/api/smart-devices/${dev.id}/history?range=banana`, {
+      headers: { cookie: `token=${owner.token}` },
+    })
+    expect(res.status).toBe(400)
   })
 })

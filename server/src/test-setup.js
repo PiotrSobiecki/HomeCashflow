@@ -60,6 +60,7 @@ export async function cleanDb() {
   }
 
   const sql = getTestSql()
+  await sql`DELETE FROM device_energy_snapshots`
   await sql`DELETE FROM device_command_log`
   await sql`DELETE FROM smart_devices`
   await sql`DELETE FROM tuya_credentials`

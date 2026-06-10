@@ -3,7 +3,7 @@
  * Źródło prawdy dla migracji generowanych przez `drizzle-kit generate`.
  */
 import {
-  pgTable, uuid, text, timestamp, boolean, integer, jsonb,
+  pgTable, uuid, text, timestamp, boolean, integer, jsonb, numeric,
   primaryKey, index, check,
 } from 'drizzle-orm/pg-core'
 import { sql } from 'drizzle-orm'
@@ -235,4 +235,20 @@ export const deviceCommandLog = pgTable('device_command_log', {
   at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({
   byHouseholdAt: index('idx_device_cmd_household_at').on(t.householdId, t.at),
+}))
+
+// ====== Pomiary zużycia w czasie (Slice 4 — wykresy) ======
+//
+// Snapshot co 15 min (cron). energy_kwh to skumulowany licznik urządzenia —
+// zużycie w oknie liczymy jako różnicę skrajnych wartości. Retencja 400 dni.
+export const deviceEnergySnapshots = pgTable('device_energy_snapshots', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  deviceId: uuid('device_id').notNull().references(() => smartDevices.id, { onDelete: 'cascade' }),
+  recordedAt: timestamp('recorded_at', { withTimezone: true }).notNull().defaultNow(),
+  powerW: numeric('power_w', { precision: 10, scale: 2 }),
+  energyKwh: numeric('energy_kwh', { precision: 12, scale: 4 }),
+  switchOn: boolean('switch_on'),
+  isOnline: boolean('is_online'),
+}, (t) => ({
+  byDeviceAt: index('idx_energy_device_at').on(t.deviceId, t.recordedAt),
 }))

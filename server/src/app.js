@@ -1398,6 +1398,61 @@ app.get("/api/smart-devices/:id/status", authMiddleware, async (c) => {
   }
 });
 
+// Historia zużycia (member+). Agregacja po stronie DB, bucket rośnie z zakresem.
+const HISTORY_RANGES = {
+  "7d": { interval: "7 days", bucketSec: 3600 },     // godzinowo
+  "30d": { interval: "30 days", bucketSec: 21600 },  // co 6h
+  "90d": { interval: "90 days", bucketSec: 86400 },  // dziennie
+  "1y": { interval: "365 days", bucketSec: 604800 }, // tygodniowo
+};
+
+app.get("/api/smart-devices/:id/history", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+  const id = c.req.param("id");
+  const range = c.req.query("range") || "30d";
+  const cfg = HISTORY_RANGES[range];
+  if (!cfg) return c.json({ error: "invalid_range" }, 400);
+
+  const result = await loadDeviceInHousehold(sql, user.id, id);
+  if (result.error) return c.json(result.error.body, result.error.status);
+
+  const series = await sql`
+    SELECT to_timestamp(floor(extract(epoch from recorded_at) / ${cfg.bucketSec}::float8) * ${cfg.bucketSec}::float8) AS bucket,
+           avg(power_w)::float8 AS avg_w,
+           max(power_w)::float8 AS max_w,
+           (max(energy_kwh) - min(energy_kwh))::float8 AS delta_kwh
+    FROM device_energy_snapshots
+    WHERE device_id = ${id} AND recorded_at >= NOW() - ${cfg.interval}::interval
+    GROUP BY bucket
+    ORDER BY bucket ASC
+  `;
+  const [summary] = await sql`
+    SELECT (max(energy_kwh) - min(energy_kwh))::float8 AS energy_kwh,
+           max(power_w)::float8 AS peak_w,
+           min(recorded_at) AS from_at,
+           max(recorded_at) AS to_at
+    FROM device_energy_snapshots
+    WHERE device_id = ${id} AND recorded_at >= NOW() - ${cfg.interval}::interval
+  `;
+
+  return c.json({
+    range,
+    series: series.map((r) => ({
+      t: toIso(r.bucket),
+      avgW: r.avg_w == null ? null : Number(r.avg_w),
+      maxW: r.max_w == null ? null : Number(r.max_w),
+      energyKwh: r.delta_kwh == null ? 0 : Number(r.delta_kwh),
+    })),
+    summary: {
+      energyKwh: summary?.energy_kwh == null ? 0 : Number(summary.energy_kwh),
+      peakW: summary?.peak_w == null ? null : Number(summary.peak_w),
+      from: toIso(summary?.from_at ?? null),
+      to: toIso(summary?.to_at ?? null),
+    },
+  });
+});
+
 app.post("/api/smart-devices", authMiddleware, async (c) => {
   const user = c.get("user");
   const sql = getDb(c);

@@ -290,3 +290,11 @@ export const sendDeviceCommands = async (id, commands) => {
   });
   return jsonOrThrow(res, 'POST /api/smart-devices/commands');
 };
+
+export const fetchDeviceHistory = async (id, range) => {
+  const res = await fetch(`${API_URL}/api/smart-devices/${id}/history?range=${range}`, {
+    credentials: 'include',
+    headers: { Accept: 'application/json' },
+  });
+  return jsonOrThrow(res, 'GET /api/smart-devices/history');
+};
