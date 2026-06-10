@@ -1417,8 +1417,11 @@ app.get("/api/smart-devices/:id/history", authMiddleware, async (c) => {
   const result = await loadDeviceInHousehold(sql, user.id, id);
   if (result.error) return c.json(result.error.body, result.error.status);
 
+  // Bucket wyrównany do czasu warszawskiego (granice na czyste lokalne godziny/północe),
+  // nie do epoki UTC — inaczej 6h/dzień/tydzień startują o 02:00/20:00 lokalnego czasu.
   const series = await sql`
-    SELECT to_timestamp(floor(extract(epoch from recorded_at) / ${cfg.bucketSec}::float8) * ${cfg.bucketSec}::float8) AS bucket,
+    SELECT (to_timestamp(floor(extract(epoch from (recorded_at AT TIME ZONE 'Europe/Warsaw')) / ${cfg.bucketSec}::float8) * ${cfg.bucketSec}::float8)
+              AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Warsaw') AS bucket,
            avg(power_w)::float8 AS avg_w,
            max(power_w)::float8 AS max_w,
            (max(energy_kwh) - min(energy_kwh))::float8 AS delta_kwh
