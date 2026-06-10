@@ -169,7 +169,7 @@ function num(v) {
 
 /**
  * Normalizacja surowego statusu Tuya do ludzkich jednostek.
- * cur_power ×0.1 W, cur_voltage ×0.1 V, cur_current ×0.001 A, add_ele ×0.01 kWh.
+ * cur_power ×0.1 W, cur_voltage ×0.1 V, cur_current ×0.001 A, add_ele ×0.001 kWh (Wh).
  * @see https://developer.tuya.com/en/docs/iot/standarddescription?id=K9i5ql6waswzq
  */
 export function formatStatuses(statuses) {
@@ -183,7 +183,7 @@ export function formatStatuses(statuses) {
     voltageV: rawVoltage !== undefined ? round(rawVoltage / 10, 1) : undefined,
     powerW: rawPower !== undefined ? round(rawPower / 10, 1) : undefined,
     currentA: rawCurrent !== undefined ? round(rawCurrent / 1000, 3) : undefined,
-    energyKwh: rawEnergy !== undefined ? round(rawEnergy / 100, 3) : undefined,
+    energyKwh: rawEnergy !== undefined ? round(rawEnergy / 1000, 3) : undefined,
     raw: map,
   }
 }

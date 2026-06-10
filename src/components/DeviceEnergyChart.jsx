@@ -23,6 +23,12 @@ function formatTick(iso, range) {
   return d.toLocaleDateString('pl-PL', { timeZone: TZ, day: '2-digit', month: '2-digit' })
 }
 
+// Małe zużycie (np. 0.021) potrzebuje 3 miejsc; przy większych 2 wystarczą.
+const fmtKwh = (v) => {
+  const n = v ?? 0
+  return n !== 0 && Math.abs(n) < 1 ? n.toFixed(3) : n.toFixed(2)
+}
+
 export const DeviceEnergyChart = ({ deviceId }) => {
   const [range, setRange] = useState('30d')
   const [data, setData] = useState(null)
@@ -64,7 +70,7 @@ export const DeviceEnergyChart = ({ deviceId }) => {
             <Activity className="w-3 h-3" /> Zużycie
           </p>
           <p className="text-lg font-bold text-white leading-none">
-            {(summary?.energyKwh ?? 0).toFixed(2)} <span className="text-xs font-medium text-slate-400">kWh</span>
+            {fmtKwh(summary?.energyKwh)} <span className="text-xs font-medium text-slate-400">kWh</span>
           </p>
         </div>
         <div className="bg-gradient-to-br from-amber-500/20 to-amber-600/10 border border-amber-500/30 rounded-xl p-2.5">
@@ -84,8 +90,8 @@ export const DeviceEnergyChart = ({ deviceId }) => {
         ) : series.length === 0 ? (
           <p className="text-xs text-slate-400 py-8 text-center">Za mało pomiarów dla tego okresu.</p>
         ) : (
-          <ResponsiveContainer width="100%" height={140}>
-            <AreaChart data={series} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+          <ResponsiveContainer width="100%" height={150}>
+            <AreaChart data={series} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               <defs>
                 <linearGradient id={`grad-${deviceId}`} x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="#818cf8" stopOpacity={0.6} />
@@ -97,7 +103,7 @@ export const DeviceEnergyChart = ({ deviceId }) => {
                 dataKey="t" tickFormatter={(t) => formatTick(t, range)}
                 tick={{ fontSize: 10, fill: '#a5b4fc' }} stroke="#3f3f6e" minTickGap={24}
               />
-              <YAxis tick={{ fontSize: 10, fill: '#a5b4fc' }} stroke="#3f3f6e" width={32} unit="W" />
+              <YAxis tick={{ fontSize: 10, fill: '#c7d2fe' }} stroke="#3f3f6e" width={44} unit=" W" tickFormatter={(v) => Math.round(v)} />
               <Tooltip
                 contentStyle={{ background: '#1e1b4b', border: '1px solid #4f46e5', borderRadius: 8, fontSize: 12 }}
                 labelStyle={{ color: '#c7d2fe' }}

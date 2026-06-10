@@ -79,7 +79,7 @@ describe('formatStatuses', () => {
     expect(out.powerW).toBe(12.3)
     expect(out.voltageV).toBe(230)
     expect(out.currentA).toBe(0.456)
-    expect(out.energyKwh).toBe(7.89)
+    expect(out.energyKwh).toBe(0.789)
   })
 
   it('falls back across switch codes and tolerates missing fields', () => {

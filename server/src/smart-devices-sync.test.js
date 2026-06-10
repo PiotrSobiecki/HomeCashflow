@@ -70,7 +70,7 @@ describe('collectEnergySnapshots', () => {
     const rows = await sql`SELECT * FROM device_energy_snapshots WHERE device_id = ${dev.id}`
     expect(rows).toHaveLength(1)
     expect(Number(rows[0].power_w)).toBe(15.5)
-    expect(Number(rows[0].energy_kwh)).toBe(12.34)
+    expect(Number(rows[0].energy_kwh)).toBe(1.234)
     expect(rows[0].switch_on).toBe(true)
     expect(rows[0].is_online).toBe(true)
   })
