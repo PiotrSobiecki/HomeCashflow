@@ -111,6 +111,16 @@ async function insertSnapshot(deviceId, { at, powerW, energyKwh }) {
   `
 }
 
+// ISO znacznika N dni temu o danej godzinie UTC. 10–12 UTC = 12–14 Warszawa (środek
+// doby warszawskiej), więc oba odczyty trafiają w ten sam dzień warszawski — bez ryzyka
+// przeskoku o północy. W bazie trzymamy UTC, dni liczymy w Europe/Warsaw.
+function dayAtUtc(daysAgo, hourUtc) {
+  const d = new Date()
+  d.setUTCDate(d.getUTCDate() - daysAgo)
+  d.setUTCHours(hourUtc, 0, 0, 0)
+  return d.toISOString()
+}
+
 beforeEach(() => {
   createdUserIds = []
   vi.mocked(getTuyaToken).mockReset()
@@ -373,13 +383,12 @@ describe('POST /api/smart-devices/:id/commands', () => {
 })
 
 describe('GET /api/smart-devices/:id/history', () => {
-  it('returns aggregated series and summary (kWh delta + peak power)', async () => {
+  it('daily consumption = max reading of the day (counter resets at midnight)', async () => {
     const owner = await createOwnerWithCreds()
     const dev = await addDevice(owner.token)
-    const now = Date.now()
-    await insertSnapshot(dev.id, { at: new Date(now - 3 * 3600e3).toISOString(), powerW: 100, energyKwh: 10.0 })
-    await insertSnapshot(dev.id, { at: new Date(now - 2 * 3600e3).toISOString(), powerW: 250, energyKwh: 11.0 })
-    await insertSnapshot(dev.id, { at: new Date(now - 1 * 3600e3).toISOString(), powerW: 180, energyKwh: 12.5 })
+    // Jeden dzień (2 dni temu, 10:00 i 12:00 UTC = środek dnia warszawskiego): 0.5 → 2.0.
+    await insertSnapshot(dev.id, { at: dayAtUtc(2, 10), powerW: 100, energyKwh: 0.5 })
+    await insertSnapshot(dev.id, { at: dayAtUtc(2, 12), powerW: 250, energyKwh: 2.0 })
 
     const res = await app.request(`/api/smart-devices/${dev.id}/history?range=7d`, {
       headers: { cookie: `token=${owner.token}` },
@@ -387,9 +396,25 @@ describe('GET /api/smart-devices/:id/history', () => {
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(body.range).toBe('7d')
-    expect(body.summary.energyKwh).toBeCloseTo(2.5, 3) // 12.5 - 10.0
+    expect(body.summary.energyKwh).toBeCloseTo(2.0, 3) // max dnia = wartość przed resetem
     expect(body.summary.peakW).toBe(250)
     expect(body.series.length).toBeGreaterThan(0)
+  })
+
+  it('sums daily totals across days for ranges > 1 day', async () => {
+    const owner = await createOwnerWithCreds()
+    const dev = await addDevice(owner.token)
+    // Dzień A (3 dni temu): max 1.5. Dzień B (2 dni temu): max 2.0. Suma = 3.5.
+    await insertSnapshot(dev.id, { at: dayAtUtc(3, 10), powerW: 100, energyKwh: 0.4 })
+    await insertSnapshot(dev.id, { at: dayAtUtc(3, 12), powerW: 100, energyKwh: 1.5 })
+    await insertSnapshot(dev.id, { at: dayAtUtc(2, 10), powerW: 100, energyKwh: 0.3 })
+    await insertSnapshot(dev.id, { at: dayAtUtc(2, 12), powerW: 100, energyKwh: 2.0 })
+
+    const res = await app.request(`/api/smart-devices/${dev.id}/history?range=7d`, {
+      headers: { cookie: `token=${owner.token}` },
+    })
+    const body = await res.json()
+    expect(body.summary.energyKwh).toBeCloseTo(3.5, 3) // 1.5 + 2.0
   })
 
   it('lets a member read history', async () => {

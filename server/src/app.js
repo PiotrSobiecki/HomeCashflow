@@ -1430,13 +1430,25 @@ app.get("/api/smart-devices/:id/history", authMiddleware, async (c) => {
     GROUP BY bucket
     ORDER BY bucket ASC
   `;
+  // add_ele to licznik DZIENNY: rośnie od 00:00 czasu warszawskiego i zeruje się o północy.
+  // Dzienne zużycie = max odczytu w danym dniu (wartość tuż przed resetem). Zużycie w
+  // zakresie = suma dziennych maksów po dniach. GREATEST per dzień chroni przed wartościami <0.
   const [summary] = await sql`
-    SELECT (max(energy_kwh) - min(energy_kwh))::float8 AS energy_kwh,
-           max(power_w)::float8 AS peak_w,
-           min(recorded_at) AS from_at,
-           max(recorded_at) AS to_at
-    FROM device_energy_snapshots
-    WHERE device_id = ${id} AND recorded_at >= NOW() - ${cfg.interval}::interval
+    SELECT
+      COALESCE((
+        SELECT SUM(daily_max)::float8 FROM (
+          SELECT GREATEST(max(energy_kwh), 0) AS daily_max
+          FROM device_energy_snapshots
+          WHERE device_id = ${id} AND recorded_at >= NOW() - ${cfg.interval}::interval
+          GROUP BY date_trunc('day', recorded_at AT TIME ZONE 'Europe/Warsaw')
+        ) days
+      ), 0) AS energy_kwh,
+      (SELECT max(power_w) FROM device_energy_snapshots
+       WHERE device_id = ${id} AND recorded_at >= NOW() - ${cfg.interval}::interval)::float8 AS peak_w,
+      (SELECT min(recorded_at) FROM device_energy_snapshots
+       WHERE device_id = ${id} AND recorded_at >= NOW() - ${cfg.interval}::interval) AS from_at,
+      (SELECT max(recorded_at) FROM device_energy_snapshots
+       WHERE device_id = ${id} AND recorded_at >= NOW() - ${cfg.interval}::interval) AS to_at
   `;
 
   return c.json({
