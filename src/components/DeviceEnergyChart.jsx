@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
 } from 'recharts'
-import { Loader2, Zap } from 'lucide-react'
+import { Loader2, Zap, Activity } from 'lucide-react'
 import { fetchDeviceHistory } from '../lib/api'
 
 const RANGES = [
