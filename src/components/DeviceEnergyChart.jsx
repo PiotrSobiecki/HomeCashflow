@@ -12,12 +12,15 @@ const RANGES = [
   { key: '1y', label: '1 rok' },
 ]
 
+// Pomiary zapisywane w UTC — wyświetlamy zawsze w czasie warszawskim.
+const TZ = 'Europe/Warsaw'
+
 function formatTick(iso, range) {
   const d = new Date(iso)
   if (range === '7d') {
-    return d.toLocaleString('pl-PL', { weekday: 'short', hour: '2-digit' })
+    return d.toLocaleString('pl-PL', { timeZone: TZ, weekday: 'short', hour: '2-digit', minute: '2-digit' })
   }
-  return d.toLocaleDateString('pl-PL', { day: '2-digit', month: '2-digit' })
+  return d.toLocaleDateString('pl-PL', { timeZone: TZ, day: '2-digit', month: '2-digit' })
 }
 
 export const DeviceEnergyChart = ({ deviceId }) => {
@@ -98,7 +101,7 @@ export const DeviceEnergyChart = ({ deviceId }) => {
               <Tooltip
                 contentStyle={{ background: '#1e1b4b', border: '1px solid #4f46e5', borderRadius: 8, fontSize: 12 }}
                 labelStyle={{ color: '#c7d2fe' }}
-                labelFormatter={(t) => new Date(t).toLocaleString('pl-PL')}
+                labelFormatter={(t) => new Date(t).toLocaleString('pl-PL', { timeZone: TZ })}
                 formatter={(v, name) => [`${v ?? '—'} W`, name === 'avgW' ? 'Śr. moc' : name]}
               />
               <Area type="monotone" dataKey="avgW" stroke="#a78bfa" strokeWidth={2} fill={`url(#grad-${deviceId})`} />
