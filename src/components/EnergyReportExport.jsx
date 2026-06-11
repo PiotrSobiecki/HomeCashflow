@@ -232,12 +232,12 @@ export const EnergyReportExport = ({ devices }) => {
           <p className="text-[11px] font-medium uppercase tracking-wider text-emerald-400 mb-3">
             Eksport
           </p>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2">
             <button
               type="button"
               onClick={() => handleExport("download")}
               disabled={!!busy}
-              className="flex items-center justify-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-medium rounded-xl transition-colors disabled:opacity-50"
+              className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-medium rounded-xl transition-colors disabled:opacity-50"
             >
               {busy === "download" ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
@@ -250,7 +250,7 @@ export const EnergyReportExport = ({ devices }) => {
               type="button"
               onClick={() => handleExport("email")}
               disabled={!!busy}
-              className="flex items-center justify-center gap-2 px-4 py-2 text-slate-300 hover:text-emerald-400 hover:bg-emerald-500/10 border border-slate-600 rounded-xl text-sm transition-all disabled:opacity-50"
+              className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 text-slate-300 hover:text-emerald-400 hover:bg-emerald-500/10 border border-slate-600 rounded-xl text-sm transition-all disabled:opacity-50"
             >
               {busy === "email" ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
