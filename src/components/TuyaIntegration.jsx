@@ -92,10 +92,10 @@ export const TuyaIntegration = () => {
   const configured = status?.configured
 
   return (
-    <div className="bg-slate-800/50 border border-slate-700/50 rounded-2xl p-6 mb-6">
+    <div className="bg-gradient-to-br from-amber-500/10 to-slate-800/50 border border-amber-500/30 rounded-2xl p-6 mb-6">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
-          <Plug className="w-5 h-5 text-indigo-400" />
+          <Plug className="w-5 h-5 text-amber-400" />
           <h3 className="text-lg font-semibold text-white">Integracja Tuya</h3>
         </div>
         {configured ? (
