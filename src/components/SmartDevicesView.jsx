@@ -4,6 +4,7 @@ import { AppHeader } from './AppHeader'
 import { AppFooter } from './AppFooter'
 import { TuyaIntegration } from './TuyaIntegration'
 import { SmartDeviceCard } from './SmartDeviceCard'
+import { EnergyReportExport } from './EnergyReportExport'
 import { AddSmartDeviceModal } from './AddSmartDeviceModal'
 import { ConfirmDialog } from './ConfirmDialog'
 import { ErrorBoundary } from './ErrorBoundary'
@@ -37,7 +38,7 @@ export const SmartDevicesView = () => {
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800">
       <AppHeader activeView="urzadzenia" />
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Panel poświadczeń (owner-only — sam się ukrywa dla membera) */}
+        {/* Panel poświadczeń Tuya — pełna szerokość (owner-only, sam się ukrywa) */}
         <TuyaIntegration />
 
         {/* Sekcja urządzeń */}
@@ -89,6 +90,13 @@ export const SmartDevicesView = () => {
 
           {error && <p className="mt-3 text-sm text-rose-400">{error}</p>}
         </div>
+
+        {/* Raport zużycia — na dole, pełna szerokość */}
+        {devices.length > 0 && (
+          <div className="mt-6">
+            <EnergyReportExport key={devices.map((d) => d.id).join(',')} devices={devices} />
+          </div>
+        )}
       </main>
       <AppFooter />
 

@@ -34,13 +34,46 @@ Ta instrukcja opisuje szybki start i najwazniejsze scenariusze pracy z aplikacja
 3. Sprawdzaj podsumowania miesieczne i prognoze finansowa.
 4. Korzystaj z metryk (np. poduszka bezpieczenstwa, biezacy limit wydatkow).
 
-## 6. Dobre praktyki
+## 6. Inteligentne urzadzenia (zakladka "Urzadzenia")
+
+Zakladka pozwala podlaczyc urzadzenia smart home z chmury Tuya (np. gniazdka
+z pomiarem energii) i sledzic ich zuzycie pradu.
+
+### 6.1 Polaczenie konta Tuya (tylko wlasciciel gospodarstwa)
+
+1. Sparuj urzadzenia w aplikacji Tuya Smart / Smart Life.
+2. Na iot.tuya.com utworz Cloud Project (region EU), zlinkuj konto z aplikacji
+   (Link App Account) i wlacz uprawnienia Device Status / Management / Control.
+3. W zakladce "Urzadzenia" wpisz Client ID i Client Secret z projektu oraz region.
+4. W formularzu "Zmien dane" mozesz ustawic cene za 1 kWh (w zl) - na jej
+   podstawie aplikacja liczy koszty energii.
+
+### 6.2 Praca z urzadzeniami
+
+1. Wlasciciel dodaje urzadzenia przyciskiem "Dodaj urzadzenie" (lista z konta Tuya).
+2. Karta urzadzenia pokazuje status na zywo: moc, napiecie, zuzycie od polnocy
+   oraz szacowany czas poboru mocy w danym dniu.
+3. Urzadzeniem mozna sterowac (np. wlaczyc/wylaczyc), o ile jest online.
+4. Wykres zuzycia ma zakresy 7/30/90 dni i 1 rok oraz kafelki: zuzycie w okresie,
+   szczyt mocy i koszt (gdy ustawiona jest cena za 1 kWh).
+5. Status odswieza sie automatycznie co 30 sekund, wykresy co 10 minut;
+   przycisk "Odswiez" wymusza natychmiastowe odswiezenie.
+
+### 6.3 Raport zuzycia (PDF)
+
+1. Panel "Raport zuzycia" znajduje sie na dole zakladki.
+2. Wybierz zakres dat (maksymalnie rok) i urzadzenia z listy rozwijanej.
+3. Raport mozesz pobrac jako PDF albo wyslac na adres e-mail swojego konta.
+4. PDF zawiera podsumowanie per urzadzenie (zuzycie, koszt, szczyt mocy,
+   czas poboru) oraz tabele zuzycia dziennego.
+
+## 7. Dobre praktyki
 
 1. Aktualizuj dane regularnie (np. codziennie lub co tydzien).
 2. Weryfikuj kategorie wydatkow, aby raporty byly czytelne.
 3. W przypadku wspolnego gospodarstwa ustalcie wspolne zasady opisu wydatkow.
 
-## 7. Rozwiazywanie problemow
+## 8. Rozwiazywanie problemow
 
 1. Problem z logowaniem Google:
    - odswiez strone i sproboj ponownie,
@@ -49,8 +82,13 @@ Ta instrukcja opisuje szybki start i najwazniejsze scenariusze pracy z aplikacja
    - sprawdz, czy e-mail konta Google jest taki sam jak w zaproszeniu.
 3. Brak danych w trybie goscia:
    - sprawdz, czy nie zostaly wyczyszczone dane przegladarki.
+4. Urzadzenie Tuya pokazuje "Brak polaczenia":
+   - sprawdz, czy urzadzenie jest online w aplikacji Tuya Smart / Smart Life,
+   - zweryfikuj poswiadczenia i region w panelu "Integracja Tuya".
+5. Brak kosztow w raporcie lub na wykresie:
+   - ustaw cene za 1 kWh w formularzu "Zmien dane" panelu Tuya.
 
-## 8. Dokumenty powiazane
+## 9. Dokumenty powiazane
 
 - `docs/regulamin.md`
 - `docs/polityka-prywatnosci.md`

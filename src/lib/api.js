@@ -241,6 +241,28 @@ export const fetchSmartDevicesStatus = async () => {
   return Array.isArray(data.statuses) ? data.statuses : [];
 };
 
+/** Dane do raportu PDF: zakres dat (max rok) + opcjonalny filtr urządzeń. */
+export const fetchEnergyReport = async ({ from, to, deviceIds }) => {
+  const params = new URLSearchParams({ from, to });
+  if (deviceIds?.length) params.set('deviceIds', deviceIds.join(','));
+  const res = await fetch(`${API_URL}/api/smart-devices/report?${params}`, {
+    credentials: 'include',
+    headers: { Accept: 'application/json' },
+  });
+  return jsonOrThrow(res, 'GET /api/smart-devices/report');
+};
+
+/** Wysyła wygenerowany PDF raportu na email zalogowanego usera. */
+export const emailEnergyReport = async ({ pdfBase64, from, to }) => {
+  const res = await fetch(`${API_URL}/api/smart-devices/report/email`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ pdfBase64, from, to }),
+  });
+  return jsonOrThrow(res, 'POST /api/smart-devices/report/email');
+};
+
 export const discoverSmartDevices = async () => {
   const res = await fetch(`${API_URL}/api/smart-devices/discover`, {
     credentials: 'include',
