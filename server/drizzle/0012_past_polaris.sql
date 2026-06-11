@@ -1,0 +1,1 @@
+ALTER TABLE "tuya_credentials" ADD COLUMN "energy_price_pln" numeric(10, 4);

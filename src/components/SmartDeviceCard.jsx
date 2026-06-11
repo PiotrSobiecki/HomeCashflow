@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import {
-  Power, Wifi, WifiOff, Zap, Activity, Gauge, RefreshCw,
+  Power, Wifi, WifiOff, Zap, Activity, Gauge, RefreshCw, Clock,
   Pencil, Trash2, Check, X, Eye, EyeOff, BarChart3, ChevronDown,
 } from 'lucide-react'
 import { DeviceControls } from './DeviceControls'
@@ -17,9 +17,16 @@ export const SmartDeviceCard = ({
   const [busy, setBusy] = useState(false)
   const [cmdError, setCmdError] = useState('')
   const [showChart, setShowChart] = useState(true)
+  const [refreshKey, setRefreshKey] = useState(0)
 
   const online = status?.ok && status?.online
   const hasReading = status?.ok
+
+  // Statystyki dzisiejsze (od północy czasu warszawskiego) — liczone w backendzie
+  const todayKwh = status?.todayKwh ?? null
+  const todayUptimeMin = status?.todayUptimeMin ?? null
+  const fmtKwh = (v) => (v !== 0 && Math.abs(v) < 1 ? v.toFixed(3) : v.toFixed(2))
+  const fmtUptime = (min) => (min < 60 ? `${min} min` : `${Math.floor(min / 60)} h ${min % 60} min`)
 
   const handleSend = async (commands) => {
     setCmdError('')
@@ -65,10 +72,17 @@ export const SmartDeviceCard = ({
 
       {/* Pomiary */}
       {hasReading ? (
-        <div className="grid grid-cols-3 gap-2 mb-3">
-          <Metric icon={Zap} label="Moc" value={status.powerW != null ? `${status.powerW} W` : '—'} />
-          <Metric icon={Gauge} label="Napięcie" value={status.voltageV != null ? `${status.voltageV} V` : '—'} />
-          <Metric icon={Activity} label="Zużycie" value={status.energyKwh != null ? `${status.energyKwh} kWh` : '—'} />
+        <div className="mb-3">
+          <div className="grid grid-cols-3 gap-2">
+            <Metric icon={Zap} label="Moc" value={status.powerW != null ? `${status.powerW} W` : '—'} />
+            <Metric icon={Gauge} label="Napięcie" value={status.voltageV != null ? `${status.voltageV} V` : '—'} />
+            <Metric icon={Activity} label="Zużycie dziś" value={todayKwh != null ? `${fmtKwh(todayKwh)} kWh` : '—'} />
+          </div>
+          {todayUptimeMin != null && (
+            <p className="flex items-center gap-1 text-[11px] text-slate-500 mt-1.5">
+              <Clock className="w-3 h-3" /> Czas poboru mocy dziś: {fmtUptime(todayUptimeMin)}
+            </p>
+          )}
         </div>
       ) : (
         <p className="text-xs text-slate-500 mb-3">Nie udało się odświeżyć statusu.</p>
@@ -94,12 +108,12 @@ export const SmartDeviceCard = ({
         Zużycie
         <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showChart ? 'rotate-180' : ''}`} />
       </button>
-      {showChart && <DeviceEnergyChart deviceId={device.id} />}
+      {showChart && <DeviceEnergyChart deviceId={device.id} refreshKey={refreshKey} />}
 
       <div className="flex items-center justify-between mt-2">
         <button
           type="button"
-          onClick={() => onRefresh(device.id)}
+          onClick={() => { setRefreshKey((k) => k + 1); onRefresh(device.id) }}
           className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-indigo-400 transition-colors"
         >
           <RefreshCw className="w-3.5 h-3.5" /> Odśwież

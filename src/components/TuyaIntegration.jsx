@@ -13,7 +13,7 @@ const DATACENTERS = [
   { value: 'in', label: 'Indie (IN)' },
 ]
 
-const EMPTY_FORM = { clientId: '', clientSecret: '', datacenter: 'eu' }
+const EMPTY_FORM = { clientId: '', clientSecret: '', datacenter: 'eu', energyPrice: '' }
 
 function friendlyError(err) {
   if (err?.code === 'tuya_auth_failed') {
@@ -51,6 +51,12 @@ export const TuyaIntegration = () => {
 
   const handleSave = async (e) => {
     e.preventDefault()
+    const normalizedPrice = form.energyPrice.trim().replace(',', '.')
+    const energyPricePln = normalizedPrice === '' ? null : Number(normalizedPrice)
+    if (energyPricePln !== null && (!Number.isFinite(energyPricePln) || energyPricePln < 0 || energyPricePln > 100)) {
+      setError('Cena za 1 kWh musi być liczbą od 0 do 100 zł.')
+      return
+    }
     setSaving(true)
     setError('')
     try {
@@ -58,8 +64,9 @@ export const TuyaIntegration = () => {
         clientId: form.clientId.trim(),
         clientSecret: form.clientSecret.trim(),
         datacenter: form.datacenter,
+        energyPricePln,
       })
-      setStatus({ configured: true, datacenter: data.datacenter, verifiedAt: data.verifiedAt })
+      setStatus({ configured: true, datacenter: data.datacenter, verifiedAt: data.verifiedAt, energyPricePln: data.energyPricePln })
       setForm(EMPTY_FORM)
       setEditing(false)
     } catch (err) {
@@ -129,16 +136,20 @@ export const TuyaIntegration = () => {
         </ol>
       )}
 
-      {/* Status połączenia */}
+      {/* Status połączenia — po zminimalizowaniu tylko przyciski, szczegóły w „Zmień dane" */}
       {configured && !editing && (
         <div className="space-y-3">
-          <div className="text-sm text-slate-300 bg-slate-900/40 rounded-xl p-3 space-y-1">
-            <p>Region: <span className="text-white">{DATACENTERS.find((d) => d.value === status.datacenter)?.label || status.datacenter}</span></p>
-          </div>
           <div className="flex gap-2">
             <button
               type="button"
-              onClick={() => { setForm({ ...EMPTY_FORM, datacenter: status.datacenter }); setEditing(true) }}
+              onClick={() => {
+                setForm({
+                  ...EMPTY_FORM,
+                  datacenter: status.datacenter,
+                  energyPrice: status.energyPricePln != null ? String(status.energyPricePln) : '',
+                })
+                setEditing(true)
+              }}
               className="px-3 py-2 text-slate-300 hover:text-indigo-400 hover:bg-indigo-500/10 border border-slate-600 rounded-xl text-sm transition-all"
             >
               Zmień dane
@@ -173,6 +184,16 @@ export const TuyaIntegration = () => {
           >
             {DATACENTERS.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
           </select>
+          <div className="flex items-center gap-2">
+            <label htmlFor="tuya-energy-price" className="text-sm text-slate-300 shrink-0">Cena za 1 kWh:</label>
+            <input
+              id="tuya-energy-price"
+              type="text" inputMode="decimal" value={form.energyPrice} onChange={setField('energyPrice')}
+              placeholder="np. 1.20"
+              className="w-24 px-3 py-1.5 bg-slate-900/50 border border-slate-600 rounded-lg text-white text-sm placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
+            />
+            <span className="text-sm text-slate-400">zł (do liczenia kosztów; opcjonalna)</span>
+          </div>
           <div className="flex gap-2">
             <button
               type="submit" disabled={saving}

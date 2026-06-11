@@ -1157,6 +1157,11 @@ function validateTuyaCredentialsInput(body) {
   if (body.datacenter !== undefined && !TUYA_DATACENTERS.includes(body.datacenter)) {
     return "datacenter must be one of eu|us|cn|in";
   }
+  const price = body.energyPricePln;
+  if (price !== undefined && price !== null
+      && (typeof price !== "number" || !Number.isFinite(price) || price < 0 || price > 100)) {
+    return "energyPricePln must be a number 0-100 or null";
+  }
   return null;
 }
 
@@ -1204,25 +1209,28 @@ app.put("/api/tuya/credentials", authMiddleware, async (c) => {
   const clientIdEnc = await encryptField(body.clientId, rawKey);
   const clientSecretEnc = await encryptField(body.clientSecret, rawKey);
 
+  const energyPricePln = body.energyPricePln ?? null;
   const [row] = await sql`
     INSERT INTO tuya_credentials
-      (household_id, client_id_enc, client_secret_enc, datacenter, verified_at, created_by, updated_at)
+      (household_id, client_id_enc, client_secret_enc, datacenter, energy_price_pln, verified_at, created_by, updated_at)
     VALUES
       (${membership.household_id}, ${clientIdEnc}, ${clientSecretEnc},
-       ${datacenter}, NOW(), ${user.id}, NOW())
+       ${datacenter}, ${energyPricePln}, NOW(), ${user.id}, NOW())
     ON CONFLICT (household_id) DO UPDATE SET
       client_id_enc = EXCLUDED.client_id_enc,
       client_secret_enc = EXCLUDED.client_secret_enc,
       datacenter = EXCLUDED.datacenter,
+      energy_price_pln = EXCLUDED.energy_price_pln,
       verified_at = NOW(),
       updated_at = NOW()
-    RETURNING datacenter, verified_at
+    RETURNING datacenter, verified_at, energy_price_pln
   `;
 
   return c.json({
     configured: true,
     datacenter: row.datacenter,
     verifiedAt: toIso(row.verified_at),
+    energyPricePln: row.energy_price_pln == null ? null : Number(row.energy_price_pln),
   });
 });
 
@@ -1235,7 +1243,7 @@ app.get("/api/tuya/credentials", authMiddleware, async (c) => {
   if (membership.owner_id !== user.id) return c.json({ error: "forbidden_owner_only" }, 403);
 
   const [row] = await sql`
-    SELECT datacenter, verified_at
+    SELECT datacenter, verified_at, energy_price_pln
     FROM tuya_credentials WHERE household_id = ${membership.household_id}
   `;
   if (!row) return c.json({ configured: false });
@@ -1244,8 +1252,10 @@ app.get("/api/tuya/credentials", authMiddleware, async (c) => {
     configured: true,
     datacenter: row.datacenter,
     verifiedAt: toIso(row.verified_at),
+    energyPricePln: row.energy_price_pln == null ? null : Number(row.energy_price_pln),
   });
 });
+
 
 app.delete("/api/tuya/credentials", authMiddleware, async (c) => {
   const user = c.get("user");
@@ -1319,6 +1329,43 @@ function deviceStatusPayload(row, formatted) {
   };
 }
 
+// Sync snapshotów mocy leci cronem co 15 min — czas działania szacujemy jako
+// liczba próbek "włączone" × 15 min.
+const SNAPSHOT_INTERVAL_MIN = 15;
+
+/**
+ * Statystyki dzisiejsze (od północy czasu warszawskiego) per urządzenie:
+ *  - kwh: zużycie z DISTINCT paczek add_ele (ta sama logika co w /history),
+ *  - uptimeMin: szacowany czas poboru mocy z próbek (tylko power_w > 0; włączone bez poboru nie liczy się).
+ * Zwraca mapę device_id → { kwh, uptimeMin }.
+ */
+async function getTodayStatsByDevice(sql, deviceIds) {
+  if (deviceIds.length === 0) return {};
+  const energyRows = await sql`
+    SELECT device_id, COALESCE(SUM(energy_kwh), 0)::float8 AS kwh FROM (
+      SELECT DISTINCT ON (device_id, energy_reported_at) device_id, energy_kwh
+      FROM device_energy_snapshots
+      WHERE device_id = ANY(${deviceIds}) AND energy_reported_at IS NOT NULL
+        AND energy_reported_at >= date_trunc('day', NOW() AT TIME ZONE 'Europe/Warsaw') AT TIME ZONE 'Europe/Warsaw'
+      ORDER BY device_id, energy_reported_at, recorded_at
+    ) s
+    GROUP BY device_id
+  `;
+  const uptimeRows = await sql`
+    SELECT device_id, count(*)::int AS on_samples
+    FROM device_energy_snapshots
+    WHERE device_id = ANY(${deviceIds}) AND energy_reported_at IS NULL
+      AND recorded_at >= date_trunc('day', NOW() AT TIME ZONE 'Europe/Warsaw') AT TIME ZONE 'Europe/Warsaw'
+      AND power_w > 0
+    GROUP BY device_id
+  `;
+  const stats = {};
+  for (const id of deviceIds) stats[id] = { kwh: 0, uptimeMin: 0 };
+  for (const r of energyRows) stats[r.device_id].kwh = Number(r.kwh);
+  for (const r of uptimeRows) stats[r.device_id].uptimeMin = Number(r.on_samples) * SNAPSHOT_INTERVAL_MIN;
+  return stats;
+}
+
 // Discover: urządzenia z powiązanego konta (owner-only). Statyczna ścieżka przed /:id.
 app.get("/api/smart-devices/discover", authMiddleware, async (c) => {
   const user = c.get("user");
@@ -1364,11 +1411,17 @@ app.get("/api/smart-devices/status", authMiddleware, async (c) => {
   const ctx = await loadTuyaContext(c, sql, membership.household_id);
   if (!ctx) return c.json({ error: "tuya_not_configured" }, 400);
 
+  const todayByDevice = await getTodayStatsByDevice(sql, rows.map((r) => r.id));
   const statuses = await Promise.all(
     rows.map(async (r) => {
       try {
         const raw = await getDeviceStatus(ctx, r.tuya_device_id);
-        return deviceStatusPayload(r, formatStatuses(raw));
+        const today = todayByDevice[r.id] ?? { kwh: 0, uptimeMin: 0 };
+        return {
+          ...deviceStatusPayload(r, formatStatuses(raw)),
+          todayKwh: today.kwh,
+          todayUptimeMin: today.uptimeMin,
+        };
       } catch (err) {
         console.error("[smart-devices] status failed", r.tuya_device_id, err);
         return { id: r.id, tuyaDeviceId: r.tuya_device_id, ok: false, online: false };
@@ -1391,7 +1444,13 @@ app.get("/api/smart-devices/:id/status", authMiddleware, async (c) => {
 
   try {
     const raw = await getDeviceStatus(ctx, result.row.tuya_device_id);
-    return c.json(deviceStatusPayload(result.row, formatStatuses(raw)));
+    const todayByDevice = await getTodayStatsByDevice(sql, [result.row.id]);
+    const today = todayByDevice[result.row.id] ?? { kwh: 0, uptimeMin: 0 };
+    return c.json({
+      ...deviceStatusPayload(result.row, formatStatuses(raw)),
+      todayKwh: today.kwh,
+      todayUptimeMin: today.uptimeMin,
+    });
   } catch (err) {
     console.error("[smart-devices] single status failed", err);
     return c.json({ id: result.row.id, tuyaDeviceId: result.row.tuya_device_id, ok: false, online: false });
@@ -1455,7 +1514,12 @@ app.get("/api/smart-devices/:id/history", authMiddleware, async (c) => {
     FROM device_energy_snapshots
     WHERE device_id = ${id} AND recorded_at >= NOW() - ${cfg.interval}::interval
   `;
+  const [priceRow] = await sql`
+    SELECT energy_price_pln FROM tuya_credentials WHERE household_id = ${result.row.household_id}
+  `;
+  const pricePln = priceRow?.energy_price_pln == null ? null : Number(priceRow.energy_price_pln);
 
+  const energyKwh = rangeEnergy?.kwh == null ? 0 : Number(rangeEnergy.kwh);
   return c.json({
     range,
     series: series.map((r) => ({
@@ -1464,9 +1528,10 @@ app.get("/api/smart-devices/:id/history", authMiddleware, async (c) => {
       maxW: r.max_w == null ? null : Number(r.max_w),
     })),
     summary: {
-      energyKwh: rangeEnergy?.kwh == null ? 0 : Number(rangeEnergy.kwh),
+      energyKwh,
       lastHourKwh: lastHour?.kwh == null ? 0 : Number(lastHour.kwh),
       peakW: peak?.peak_w == null ? null : Number(peak.peak_w),
+      costPln: pricePln == null ? null : energyKwh * pricePln,
     },
   });
 });
