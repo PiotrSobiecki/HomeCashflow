@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
 } from 'recharts'
-import { Loader2, Zap, Activity } from 'lucide-react'
+import { Loader2, Zap, Activity, Banknote } from 'lucide-react'
 import { fetchDeviceHistory } from '../lib/api'
+import { usePolling } from '../hooks/usePolling'
 
 const RANGES = [
   { key: '7d', label: '7 dni' },
@@ -29,20 +30,27 @@ const fmtKwh = (v) => {
   return n !== 0 && Math.abs(n) < 1 ? n.toFixed(3) : n.toFixed(2)
 }
 
-export const DeviceEnergyChart = ({ deviceId }) => {
+export const DeviceEnergyChart = ({ deviceId, refreshKey = 0 }) => {
   const [range, setRange] = useState('30d')
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    let alive = true
-    setLoading(true)
-    fetchDeviceHistory(deviceId, range)
-      .then((d) => { if (alive) setData(d) })
-      .catch(() => { if (alive) setData(null) })
-      .finally(() => { if (alive) setLoading(false) })
-    return () => { alive = false }
+  // silent: odświeżenie w tle bez spinnera i bez kasowania danych przy błędzie
+  const load = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true)
+    try {
+      setData(await fetchDeviceHistory(deviceId, range))
+    } catch {
+      if (!silent) setData(null)
+    } finally {
+      if (!silent) setLoading(false)
+    }
   }, [deviceId, range])
+
+  useEffect(() => { load() }, [load, refreshKey])
+
+  const silentReload = useCallback(() => load({ silent: true }), [load])
+  usePolling({ intervalMs: 600000, enabled: true, onTick: silentReload })
 
   const series = data?.series || []
   const summary = data?.summary
@@ -63,8 +71,8 @@ export const DeviceEnergyChart = ({ deviceId }) => {
         ))}
       </div>
 
-      {/* Podsumowanie — zużycie w okresie (lewo) + szczyt mocy (prawo) */}
-      <div className="grid grid-cols-2 gap-2 mb-2">
+      {/* Podsumowanie — zużycie w okresie + szczyt mocy + koszt (przy ustawionej cenie kWh) */}
+      <div className="grid grid-cols-3 gap-2 mb-2">
         <div className="bg-gradient-to-br from-emerald-500/20 to-emerald-600/10 border border-emerald-500/30 rounded-xl p-2.5">
           <p className="text-emerald-400 text-[11px] font-medium mb-0.5 flex items-center gap-1">
             <Activity className="w-3 h-3" /> Zużycie
@@ -79,6 +87,14 @@ export const DeviceEnergyChart = ({ deviceId }) => {
           </p>
           <p className="text-lg font-bold text-white leading-none">
             {summary?.peakW != null ? summary.peakW : '—'} <span className="text-xs font-medium text-slate-400">W</span>
+          </p>
+        </div>
+        <div className="bg-gradient-to-br from-sky-500/20 to-sky-600/10 border border-sky-500/30 rounded-xl p-2.5">
+          <p className="text-sky-400 text-[11px] font-medium mb-0.5 flex items-center gap-1">
+            <Banknote className="w-3 h-3" /> Koszt
+          </p>
+          <p className="text-lg font-bold text-white leading-none">
+            {summary?.costPln != null ? summary.costPln.toFixed(2) : '—'} <span className="text-xs font-medium text-slate-400">zł</span>
           </p>
         </div>
       </div>

@@ -192,6 +192,7 @@ export const tuyaCredentials = pgTable('tuya_credentials', {
   // UWAGA: device_id NIE tutaj — poświadczenia są jedne na konto/projekt Tuya,
   // a urządzeń może być wiele. Urządzenia → osobna tabela smart_devices (Slice 2).
   datacenter: text('datacenter').notNull().default('eu'),
+  energyPricePln: numeric('energy_price_pln', { precision: 10, scale: 4 }), // cena 1 kWh w zł (do kosztów); null = nieustawiona
   verifiedAt: timestamp('verified_at', { withTimezone: true }), // ostatnia udana weryfikacja tokenem
   createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
