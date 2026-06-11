@@ -1,0 +1,1 @@
+ALTER TABLE "device_energy_snapshots" ADD COLUMN "energy_reported_at" timestamp with time zone;

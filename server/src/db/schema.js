@@ -239,14 +239,19 @@ export const deviceCommandLog = pgTable('device_command_log', {
 
 // ====== Pomiary zużycia w czasie (Slice 4 — wykresy) ======
 //
-// Snapshot co 15 min (cron). energy_kwh to skumulowany licznik urządzenia —
-// zużycie w oknie liczymy jako różnicę skrajnych wartości. Retencja 400 dni.
+// Snapshot co 15 min (cron). energy_kwh to wartość DP add_ele = PRZYROST zdarzeniowy
+// (kWh od poprzedniego raportu), nie licznik narastający. Zużycie w oknie = suma
+// distinct paczek po energy_reported_at (każda raz). power_w to chwilowa moc. Retencja 400 dni.
 export const deviceEnergySnapshots = pgTable('device_energy_snapshots', {
   id: uuid('id').defaultRandom().primaryKey(),
   deviceId: uuid('device_id').notNull().references(() => smartDevices.id, { onDelete: 'cascade' }),
   recordedAt: timestamp('recorded_at', { withTimezone: true }).notNull().defaultNow(),
   powerW: numeric('power_w', { precision: 10, scale: 2 }),
   energyKwh: numeric('energy_kwh', { precision: 12, scale: 4 }),
+  // Czas raportu DP add_ele z cienia Tuya. add_ele to przyrost zdarzeniowy
+  // (kWh od poprzedniego raportu), więc zużycie liczymy sumując po DISTINCT
+  // energy_reported_at — każdą paczkę raz, ignorując zatrzaśnięte powtórki.
+  energyReportedAt: timestamp('energy_reported_at', { withTimezone: true }),
   switchOn: boolean('switch_on'),
   isOnline: boolean('is_online'),
 }, (t) => ({

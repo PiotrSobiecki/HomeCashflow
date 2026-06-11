@@ -1417,53 +1417,59 @@ app.get("/api/smart-devices/:id/history", authMiddleware, async (c) => {
   const result = await loadDeviceInHousehold(sql, user.id, id);
   if (result.error) return c.json(result.error.body, result.error.status);
 
-  // Bucket wyrównany do czasu warszawskiego (granice na czyste lokalne godziny/północe),
-  // nie do epoki UTC — inaczej 6h/dzień/tydzień startują o 02:00/20:00 lokalnego czasu.
+  // add_ele to PRZYROST zdarzeniowy (kWh od poprzedniego raportu), oddawany przez
+  // chmurę jako zatrzaśnięty "cień" między raportami — ten sam odczyt potrafi się
+  // powtórzyć w wielu snapshotach (np. 0.014 przez całą bezczynną noc). Dlatego
+  // energię liczymy z DISTINCT paczek po `energy_reported_at` (czas raportu z Tuya),
+  // każdą raz. Stare snapshoty bez tego znacznika (NULL) pomijamy — to właśnie szum.
+  // Bucket energii wyrównany do czasu warszawskiego (czyste lokalne godziny/północe).
   const series = await sql`
-    SELECT (to_timestamp(floor(extract(epoch from (recorded_at AT TIME ZONE 'Europe/Warsaw')) / ${cfg.bucketSec}::float8) * ${cfg.bucketSec}::float8)
+    WITH reports AS (
+      SELECT DISTINCT ON (energy_reported_at) energy_reported_at AS rt, energy_kwh
+      FROM device_energy_snapshots
+      WHERE device_id = ${id}
+        AND energy_reported_at IS NOT NULL
+        AND energy_reported_at >= NOW() - ${cfg.interval}::interval
+      ORDER BY energy_reported_at, recorded_at
+    )
+    SELECT (to_timestamp(floor(extract(epoch from (rt AT TIME ZONE 'Europe/Warsaw')) / ${cfg.bucketSec}::float8) * ${cfg.bucketSec}::float8)
               AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Warsaw') AS bucket,
-           avg(power_w)::float8 AS avg_w,
-           max(power_w)::float8 AS max_w,
-           (max(energy_kwh) - min(energy_kwh))::float8 AS delta_kwh
-    FROM device_energy_snapshots
-    WHERE device_id = ${id} AND recorded_at >= NOW() - ${cfg.interval}::interval
+           SUM(energy_kwh)::float8 AS energy_kwh
+    FROM reports
     GROUP BY bucket
     ORDER BY bucket ASC
   `;
-  // add_ele to licznik DZIENNY: rośnie od 00:00 czasu warszawskiego i zeruje się o północy.
-  // Dzienne zużycie = max odczytu w danym dniu (wartość tuż przed resetem). Zużycie w
-  // zakresie = suma dziennych maksów po dniach. GREATEST per dzień chroni przed wartościami <0.
-  const [summary] = await sql`
-    SELECT
-      COALESCE((
-        SELECT SUM(daily_max)::float8 FROM (
-          SELECT GREATEST(max(energy_kwh), 0) AS daily_max
-          FROM device_energy_snapshots
-          WHERE device_id = ${id} AND recorded_at >= NOW() - ${cfg.interval}::interval
-          GROUP BY date_trunc('day', recorded_at AT TIME ZONE 'Europe/Warsaw')
-        ) days
-      ), 0) AS energy_kwh,
-      (SELECT max(power_w) FROM device_energy_snapshots
-       WHERE device_id = ${id} AND recorded_at >= NOW() - ${cfg.interval}::interval)::float8 AS peak_w,
-      (SELECT min(recorded_at) FROM device_energy_snapshots
-       WHERE device_id = ${id} AND recorded_at >= NOW() - ${cfg.interval}::interval) AS from_at,
-      (SELECT max(recorded_at) FROM device_energy_snapshots
-       WHERE device_id = ${id} AND recorded_at >= NOW() - ${cfg.interval}::interval) AS to_at
+  // Zużycie w ostatniej godzinie — suma distinct paczek z ostatnich 60 min
+  // (niezależne od wybranego zakresu wykresu).
+  const [lastHour] = await sql`
+    SELECT COALESCE(SUM(energy_kwh), 0)::float8 AS kwh FROM (
+      SELECT DISTINCT ON (energy_reported_at) energy_kwh
+      FROM device_energy_snapshots
+      WHERE device_id = ${id}
+        AND energy_reported_at IS NOT NULL
+        AND energy_reported_at >= NOW() - interval '1 hour'
+      ORDER BY energy_reported_at, recorded_at
+    ) s
+  `;
+
+  // Zużycie w całym zakresie = suma bucketów. Szczyt mocy nadal z chwilowych power_w.
+  const rangeKwh = series.reduce((acc, r) => acc + (r.energy_kwh == null ? 0 : Number(r.energy_kwh)), 0);
+  const [peak] = await sql`
+    SELECT max(power_w)::float8 AS peak_w
+    FROM device_energy_snapshots
+    WHERE device_id = ${id} AND recorded_at >= NOW() - ${cfg.interval}::interval
   `;
 
   return c.json({
     range,
     series: series.map((r) => ({
       t: toIso(r.bucket),
-      avgW: r.avg_w == null ? null : Number(r.avg_w),
-      maxW: r.max_w == null ? null : Number(r.max_w),
-      energyKwh: r.delta_kwh == null ? 0 : Number(r.delta_kwh),
+      energyKwh: r.energy_kwh == null ? 0 : Number(r.energy_kwh),
     })),
     summary: {
-      energyKwh: summary?.energy_kwh == null ? 0 : Number(summary.energy_kwh),
-      peakW: summary?.peak_w == null ? null : Number(summary.peak_w),
-      from: toIso(summary?.from_at ?? null),
-      to: toIso(summary?.to_at ?? null),
+      energyKwh: rangeKwh,
+      lastHourKwh: lastHour?.kwh == null ? 0 : Number(lastHour.kwh),
+      peakW: peak?.peak_w == null ? null : Number(peak.peak_w),
     },
   });
 });

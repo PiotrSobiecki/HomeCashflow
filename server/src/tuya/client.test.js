@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import {
-  getTuyaToken, getDeviceInfo, getDeviceStatus, getDeviceFunctions,
-  listProjectDevices, formatStatuses, sendCommands,
+  getTuyaToken, getDeviceInfo, getDeviceStatus, getDeviceProperties, getDeviceFunctions,
+  listProjectDevices, formatStatuses, formatProperties, sendCommands,
 } from './client.js'
 
 const CTX = { clientId: 'cid', clientSecret: 'secret', datacenter: 'eu', accessToken: 'tok' }
@@ -90,6 +90,28 @@ describe('formatStatuses', () => {
   })
 })
 
+describe('formatProperties', () => {
+  it('scales values and extracts the add_ele report time as a Date', () => {
+    const t = 1781120049291
+    const out = formatProperties({
+      properties: [
+        { code: 'cur_power', value: 123 },
+        { code: 'add_ele', value: 789, time: t },
+      ],
+    })
+    expect(out.powerW).toBe(12.3)
+    expect(out.energyKwh).toBe(0.789)
+    expect(out.energyReportedAt).toBeInstanceOf(Date)
+    expect(out.energyReportedAt.getTime()).toBe(t)
+  })
+
+  it('leaves energyReportedAt undefined when add_ele is absent', () => {
+    const out = formatProperties({ properties: [{ code: 'cur_power', value: 50 }] })
+    expect(out.powerW).toBe(5)
+    expect(out.energyReportedAt).toBeUndefined()
+  })
+})
+
 describe('device endpoints', () => {
   it('getDeviceStatus signs with the access token and returns the result', async () => {
     const fetchMock = mockTuya({ success: true, result: [{ code: 'switch_1', value: true }] })
@@ -99,6 +121,14 @@ describe('device endpoints', () => {
     expect(url).toBe('https://openapi.tuyaeu.com/v1.0/iot-03/devices/dev123/status')
     expect(opts.headers.access_token).toBe('tok')
     expect(opts.headers.sign).toMatch(/^[0-9A-F]{64}$/)
+  })
+
+  it('getDeviceProperties hits the v2.0 shadow/properties endpoint', async () => {
+    const fetchMock = mockTuya({ success: true, result: { properties: [{ code: 'add_ele', value: 14, time: 1 }] } })
+    const res = await getDeviceProperties(CTX, 'dev123')
+    expect(res.properties[0].code).toBe('add_ele')
+    expect(fetchMock.mock.calls[0][0]).toBe('https://openapi.tuyaeu.com/v2.0/cloud/thing/dev123/shadow/properties')
+    expect(fetchMock.mock.calls[0][1].headers.access_token).toBe('tok')
   })
 
   it('getDeviceInfo hits the device endpoint', async () => {

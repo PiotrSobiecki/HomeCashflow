@@ -4,7 +4,7 @@
  * Urządzenie offline/błąd jest pomijane — runda leci dalej.
  */
 import { decryptField } from './finance-crypto.js'
-import { getTuyaToken, getDeviceStatus, formatStatuses } from './tuya/client.js'
+import { getTuyaToken, getDeviceProperties, formatProperties } from './tuya/client.js'
 
 /**
  * @param {import('@neondatabase/serverless').NeonQueryFunction} sql
@@ -45,12 +45,14 @@ export async function collectEnergySnapshots(sql, rawKey, { householdId } = {}) 
         ctxByHousehold.set(d.household_id, ctx)
       }
 
-      const raw = await getDeviceStatus(ctx, d.tuya_device_id)
-      const f = formatStatuses(raw)
+      // shadow/properties (nie iot-03/status) — niesie `time` per DP, dzięki czemu
+      // znamy moment raportu add_ele i nie liczymy zatrzaśniętej powtórki dwa razy.
+      const raw = await getDeviceProperties(ctx, d.tuya_device_id)
+      const f = formatProperties(raw)
 
       await sql`
-        INSERT INTO device_energy_snapshots (device_id, power_w, energy_kwh, switch_on, is_online)
-        VALUES (${d.id}, ${f.powerW ?? null}, ${f.energyKwh ?? null}, ${f.switchOn ?? null}, true)
+        INSERT INTO device_energy_snapshots (device_id, power_w, energy_kwh, energy_reported_at, switch_on, is_online)
+        VALUES (${d.id}, ${f.powerW ?? null}, ${f.energyKwh ?? null}, ${f.energyReportedAt ?? null}, ${f.switchOn ?? null}, true)
       `
       inserted++
     } catch (err) {

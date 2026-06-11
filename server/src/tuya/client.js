@@ -142,6 +142,16 @@ export function getDeviceStatus(ctx, deviceId) {
   return tuyaFetchWithToken(ctx, 'GET', `/v1.0/iot-03/devices/${deviceId}/status`)
 }
 
+/**
+ * Stan "cienia" urządzenia z czasem ostatniego raportu per DP (`time`, ms epoch).
+ * Kluczowe dla energii: `add_ele` to przyrost zdarzeniowy — bez `time` nie da się
+ * odróżnić nowego raportu od zatrzaśniętej starej wartości oddawanej między raportami.
+ * @returns {Promise<{ properties: Array<{ code: string, value: unknown, time?: number }> }>}
+ */
+export function getDeviceProperties(ctx, deviceId) {
+  return tuyaFetchWithToken(ctx, 'GET', `/v2.0/cloud/thing/${deviceId}/shadow/properties`)
+}
+
 export function getDeviceFunctions(ctx, deviceId) {
   return tuyaFetchWithToken(ctx, 'GET', `/v1.0/iot-03/devices/${deviceId}/functions`)
 }
@@ -174,6 +184,26 @@ function num(v) {
  */
 export function formatStatuses(statuses) {
   const map = Object.fromEntries((statuses ?? []).map((s) => [s.code, s.value]))
+  return formatMap(map)
+}
+
+/**
+ * Jak formatStatuses, ale z tablicy properties (shadow) — dodatkowo wyciąga
+ * `energyReportedAt`: czas ostatniego raportu DP `add_ele` (Date z pola `time` ms).
+ * To on pozwala policzyć każdy przyrost energii dokładnie raz.
+ */
+export function formatProperties(result) {
+  const props = result?.properties ?? result ?? []
+  const map = Object.fromEntries(props.map((p) => [p.code, p.value]))
+  const addEle = props.find((p) => p.code === 'add_ele')
+  const t = num(addEle?.time)
+  return {
+    ...formatMap(map),
+    energyReportedAt: t !== undefined ? new Date(t) : undefined,
+  }
+}
+
+function formatMap(map) {
   const rawVoltage = num(map.cur_voltage)
   const rawPower = num(map.cur_power)
   const rawCurrent = num(map.cur_current)

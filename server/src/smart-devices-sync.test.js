@@ -4,13 +4,13 @@ vi.mock('./tuya/client.js', async () => {
   const actual = await vi.importActual('./tuya/client.js')
   return {
     getTuyaToken: vi.fn(),
-    getDeviceStatus: vi.fn(),
-    formatStatuses: actual.formatStatuses,
+    getDeviceProperties: vi.fn(),
+    formatProperties: actual.formatProperties,
   }
 })
 
 import { collectEnergySnapshots } from './smart-devices-sync.js'
-import { getTuyaToken, getDeviceStatus } from './tuya/client.js'
+import { getTuyaToken, getDeviceProperties } from './tuya/client.js'
 import { upsertUserAndHousehold } from './app.js'
 import { decodeFinanceDataKey, encryptField } from './finance-crypto.js'
 import { neon } from '@neondatabase/serverless'
@@ -47,7 +47,7 @@ async function insertDevice(householdId, tuyaDeviceId, isActive = true) {
 beforeEach(() => {
   createdUserIds = []
   vi.mocked(getTuyaToken).mockReset()
-  vi.mocked(getDeviceStatus).mockReset()
+  vi.mocked(getDeviceProperties).mockReset()
 })
 
 afterEach(async () => {
@@ -60,9 +60,14 @@ describe('collectEnergySnapshots', () => {
     await insertCreds(hh)
     const dev = await insertDevice(hh, `dev-${uniq()}`)
     vi.mocked(getTuyaToken).mockResolvedValue({ accessToken: 'tok', expireTime: 7200 })
-    vi.mocked(getDeviceStatus).mockResolvedValue([
-      { code: 'switch_1', value: true }, { code: 'cur_power', value: 155 }, { code: 'add_ele', value: 1234 },
-    ])
+    const reportTime = 1781120049291
+    vi.mocked(getDeviceProperties).mockResolvedValue({
+      properties: [
+        { code: 'switch_1', value: true },
+        { code: 'cur_power', value: 155 },
+        { code: 'add_ele', value: 1234, time: reportTime },
+      ],
+    })
 
     const res = await collectEnergySnapshots(sql, rawKey, { householdId: hh })
     expect(res.inserted).toBe(1)
@@ -71,6 +76,7 @@ describe('collectEnergySnapshots', () => {
     expect(rows).toHaveLength(1)
     expect(Number(rows[0].power_w)).toBe(15.5)
     expect(Number(rows[0].energy_kwh)).toBe(1.234)
+    expect(new Date(rows[0].energy_reported_at).getTime()).toBe(reportTime)
     expect(rows[0].switch_on).toBe(true)
     expect(rows[0].is_online).toBe(true)
   })
@@ -83,9 +89,9 @@ describe('collectEnergySnapshots', () => {
     const a = await insertDevice(hh, idA)
     await insertDevice(hh, idB)
     vi.mocked(getTuyaToken).mockResolvedValue({ accessToken: 'tok', expireTime: 7200 })
-    vi.mocked(getDeviceStatus).mockImplementation(async (_ctx, deviceId) => {
+    vi.mocked(getDeviceProperties).mockImplementation(async (_ctx, deviceId) => {
       if (deviceId === idB) throw new Error('Tuya API: device offline')
-      return [{ code: 'cur_power', value: 100 }]
+      return { properties: [{ code: 'cur_power', value: 100 }] }
     })
 
     const res = await collectEnergySnapshots(sql, rawKey, { householdId: hh })
@@ -101,7 +107,7 @@ describe('collectEnergySnapshots', () => {
     await insertDevice(hh, `act-${uniq()}`, true)
     await insertDevice(hh, `inact-${uniq()}`, false)
     vi.mocked(getTuyaToken).mockResolvedValue({ accessToken: 'tok', expireTime: 7200 })
-    vi.mocked(getDeviceStatus).mockResolvedValue([{ code: 'cur_power', value: 50 }])
+    vi.mocked(getDeviceProperties).mockResolvedValue({ properties: [{ code: 'cur_power', value: 50 }] })
 
     const res = await collectEnergySnapshots(sql, rawKey, { householdId: hh })
     expect(res.inserted).toBe(1)
