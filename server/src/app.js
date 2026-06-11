@@ -1536,6 +1536,136 @@ app.get("/api/smart-devices/:id/history", authMiddleware, async (c) => {
   });
 });
 
+// Dane do raportu PDF: dowolna liczba dni (1–365), wszystkie aktywne urządzenia (member+).
+app.get("/api/smart-devices/report", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+  const days = Number(c.req.query("days") || 30);
+  if (!Number.isInteger(days) || days < 1 || days > 365) {
+    return c.json({ error: "days must be an integer 1-365" }, 400);
+  }
+
+  const [membership] = await sql`
+    SELECT household_id FROM household_members WHERE user_id = ${user.id}
+  `;
+  if (!membership) return c.json({ error: "No household" }, 400);
+
+  const devices = await sql`
+    SELECT id, display_name FROM smart_devices
+    WHERE household_id = ${membership.household_id} AND is_active = true
+    ORDER BY created_at ASC
+  `;
+  const ids = devices.map((d) => d.id);
+  const [priceRow] = await sql`
+    SELECT energy_price_pln FROM tuya_credentials WHERE household_id = ${membership.household_id}
+  `;
+  const pricePln = priceRow?.energy_price_pln == null ? null : Number(priceRow.energy_price_pln);
+  const interval = `${days} days`;
+
+  // Per urządzenie: energia (DISTINCT paczki add_ele), szczyt mocy, próbki z poborem.
+  const energyRows = ids.length === 0 ? [] : await sql`
+    SELECT device_id, COALESCE(SUM(energy_kwh), 0)::float8 AS kwh FROM (
+      SELECT DISTINCT ON (device_id, energy_reported_at) device_id, energy_kwh
+      FROM device_energy_snapshots
+      WHERE device_id = ANY(${ids}) AND energy_reported_at IS NOT NULL
+        AND energy_reported_at >= NOW() - ${interval}::interval
+      ORDER BY device_id, energy_reported_at, recorded_at
+    ) s GROUP BY device_id
+  `;
+  const peakRows = ids.length === 0 ? [] : await sql`
+    SELECT device_id, max(power_w)::float8 AS peak_w
+    FROM device_energy_snapshots
+    WHERE device_id = ANY(${ids}) AND recorded_at >= NOW() - ${interval}::interval
+    GROUP BY device_id
+  `;
+  const uptimeRows = ids.length === 0 ? [] : await sql`
+    SELECT device_id, count(*)::int AS on_samples
+    FROM device_energy_snapshots
+    WHERE device_id = ANY(${ids}) AND energy_reported_at IS NULL
+      AND recorded_at >= NOW() - ${interval}::interval AND power_w > 0
+    GROUP BY device_id
+  `;
+  // Zużycie dzienne łącznie (daty warszawskie) — tabela w raporcie.
+  const dailyRows = ids.length === 0 ? [] : await sql`
+    SELECT day, COALESCE(SUM(energy_kwh), 0)::float8 AS kwh FROM (
+      SELECT DISTINCT ON (device_id, energy_reported_at)
+        (energy_reported_at AT TIME ZONE 'Europe/Warsaw')::date AS day, energy_kwh
+      FROM device_energy_snapshots
+      WHERE device_id = ANY(${ids}) AND energy_reported_at IS NOT NULL
+        AND energy_reported_at >= NOW() - ${interval}::interval
+      ORDER BY device_id, energy_reported_at, recorded_at
+    ) s GROUP BY day ORDER BY day ASC
+  `;
+
+  const kwhBy = Object.fromEntries(energyRows.map((r) => [r.device_id, Number(r.kwh)]));
+  const peakBy = Object.fromEntries(peakRows.map((r) => [r.device_id, Number(r.peak_w)]));
+  const samplesBy = Object.fromEntries(uptimeRows.map((r) => [r.device_id, Number(r.on_samples)]));
+
+  return c.json({
+    days,
+    from: new Date(Date.now() - days * 86400000).toISOString(),
+    to: new Date().toISOString(),
+    energyPricePln: pricePln,
+    devices: devices.map((d) => {
+      const kwh = kwhBy[d.id] ?? 0;
+      return {
+        id: d.id,
+        name: d.display_name,
+        energyKwh: kwh,
+        costPln: pricePln == null ? null : kwh * pricePln,
+        peakW: peakBy[d.id] ?? null,
+        uptimeMin: (samplesBy[d.id] ?? 0) * SNAPSHOT_INTERVAL_MIN,
+      };
+    }),
+    daily: dailyRows.map((r) => ({
+      date: typeof r.day === "string" ? r.day : new Date(r.day).toISOString().slice(0, 10),
+      kwh: Number(r.kwh),
+    })),
+  });
+});
+
+// Wysyłka raportu PDF na email zalogowanego usera (załącznik przez Resend).
+// PDF generuje frontend; tu tylko walidacja i przekazanie — zawsze na własny adres (anty-spam).
+const REPORT_PDF_MAX_BASE64_CHARS = 4 * 1024 * 1024; // ~3 MB PDF
+
+app.post("/api/smart-devices/report/email", authMiddleware, async (c) => {
+  const user = c.get("user");
+
+  let body;
+  try { body = await c.req.json(); } catch { return c.json({ error: "Invalid JSON body" }, 400); }
+  const { pdfBase64, days } = body ?? {};
+  if (typeof pdfBase64 !== "string" || pdfBase64.length === 0) {
+    return c.json({ error: "pdfBase64 is required" }, 400);
+  }
+  if (pdfBase64.length > REPORT_PDF_MAX_BASE64_CHARS) return c.json({ error: "pdf_too_large" }, 413);
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(pdfBase64)) return c.json({ error: "pdfBase64 must be base64" }, 400);
+  const safeDays = Number.isInteger(days) && days >= 1 && days <= 365 ? days : null;
+
+  const resendKey = getEnv(c, "RESEND_API_KEY");
+  if (!resendKey) return c.json({ error: "email_not_configured" }, 503);
+
+  const dateStr = new Date().toISOString().slice(0, 10);
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${resendKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from: "HomeCashflow <noreply@homecashflow.org>",
+      to: [user.email],
+      subject: safeDays ? `Raport energii — ostatnie ${safeDays} dni` : "Raport energii",
+      html: `<p>Cześć${user.name ? ` ${user.name}` : ""}!</p><p>W załączniku raport zużycia energii${safeDays ? ` za ostatnie ${safeDays} dni` : ""} wygenerowany w HomeCashflow.</p>`,
+      attachments: [{ filename: `raport-energii-${dateStr}.pdf`, content: pdfBase64 }],
+    }),
+  });
+  if (!res.ok) {
+    console.error("[report-email] Resend error", res.status, await res.text().catch(() => ""));
+    return c.json({ error: "email_send_failed" }, 502);
+  }
+  return c.json({ sent: true, to: user.email });
+});
+
 app.post("/api/smart-devices", authMiddleware, async (c) => {
   const user = c.get("user");
   const sql = getDb(c);

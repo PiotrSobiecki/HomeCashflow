@@ -4,6 +4,7 @@ import { AppHeader } from './AppHeader'
 import { AppFooter } from './AppFooter'
 import { TuyaIntegration } from './TuyaIntegration'
 import { SmartDeviceCard } from './SmartDeviceCard'
+import { EnergyReportExport } from './EnergyReportExport'
 import { AddSmartDeviceModal } from './AddSmartDeviceModal'
 import { ConfirmDialog } from './ConfirmDialog'
 import { ErrorBoundary } from './ErrorBoundary'
@@ -89,6 +90,9 @@ export const SmartDevicesView = () => {
 
           {error && <p className="mt-3 text-sm text-rose-400">{error}</p>}
         </div>
+
+        {/* Eksport raportu PDF (pobranie / email) — tylko gdy są urządzenia */}
+        {devices.length > 0 && <EnergyReportExport />}
       </main>
       <AppFooter />
 
