@@ -1417,43 +1417,39 @@ app.get("/api/smart-devices/:id/history", authMiddleware, async (c) => {
   const result = await loadDeviceInHousehold(sql, user.id, id);
   if (result.error) return c.json(result.error.body, result.error.status);
 
-  // add_ele to PRZYROST zdarzeniowy (kWh od poprzedniego raportu), oddawany przez
-  // chmurę jako zatrzaśnięty "cień" między raportami — ten sam odczyt potrafi się
-  // powtórzyć w wielu snapshotach (np. 0.014 przez całą bezczynną noc). Dlatego
-  // energię liczymy z DISTINCT paczek po `energy_reported_at` (czas raportu z Tuya),
-  // każdą raz. Stare snapshoty bez tego znacznika (NULL) pomijamy — to właśnie szum.
-  // Bucket energii wyrównany do czasu warszawskiego (czyste lokalne godziny/północe).
+  // Wykres mocy: średnia/szczyt power_w per bucket (po recorded_at), wyrównany do
+  // czasu warszawskiego (granice na czyste lokalne godziny/północe), nie do epoki UTC.
   const series = await sql`
-    WITH reports AS (
-      SELECT DISTINCT ON (energy_reported_at) energy_reported_at AS rt, energy_kwh
-      FROM device_energy_snapshots
-      WHERE device_id = ${id}
-        AND energy_reported_at IS NOT NULL
-        AND energy_reported_at >= NOW() - ${cfg.interval}::interval
-      ORDER BY energy_reported_at, recorded_at
-    )
-    SELECT (to_timestamp(floor(extract(epoch from (rt AT TIME ZONE 'Europe/Warsaw')) / ${cfg.bucketSec}::float8) * ${cfg.bucketSec}::float8)
+    SELECT (to_timestamp(floor(extract(epoch from (recorded_at AT TIME ZONE 'Europe/Warsaw')) / ${cfg.bucketSec}::float8) * ${cfg.bucketSec}::float8)
               AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Warsaw') AS bucket,
-           SUM(energy_kwh)::float8 AS energy_kwh
-    FROM reports
+           avg(power_w)::float8 AS avg_w,
+           max(power_w)::float8 AS max_w
+    FROM device_energy_snapshots
+    WHERE device_id = ${id} AND power_w IS NOT NULL AND recorded_at >= NOW() - ${cfg.interval}::interval
     GROUP BY bucket
     ORDER BY bucket ASC
   `;
-  // Zużycie w ostatniej godzinie — suma distinct paczek z ostatnich 60 min
-  // (niezależne od wybranego zakresu wykresu).
+
+  // Energia z DISTINCT paczek add_ele (po energy_reported_at = event_time z logów),
+  // każda raz. Zużycie w wybranym zakresie + w ostatniej godzinie (niezależne od zakresu).
+  const [rangeEnergy] = await sql`
+    SELECT COALESCE(SUM(energy_kwh), 0)::float8 AS kwh FROM (
+      SELECT DISTINCT ON (energy_reported_at) energy_kwh
+      FROM device_energy_snapshots
+      WHERE device_id = ${id} AND energy_reported_at IS NOT NULL
+        AND energy_reported_at >= NOW() - ${cfg.interval}::interval
+      ORDER BY energy_reported_at, recorded_at
+    ) s
+  `;
   const [lastHour] = await sql`
     SELECT COALESCE(SUM(energy_kwh), 0)::float8 AS kwh FROM (
       SELECT DISTINCT ON (energy_reported_at) energy_kwh
       FROM device_energy_snapshots
-      WHERE device_id = ${id}
-        AND energy_reported_at IS NOT NULL
+      WHERE device_id = ${id} AND energy_reported_at IS NOT NULL
         AND energy_reported_at >= NOW() - interval '1 hour'
       ORDER BY energy_reported_at, recorded_at
     ) s
   `;
-
-  // Zużycie w całym zakresie = suma bucketów. Szczyt mocy nadal z chwilowych power_w.
-  const rangeKwh = series.reduce((acc, r) => acc + (r.energy_kwh == null ? 0 : Number(r.energy_kwh)), 0);
   const [peak] = await sql`
     SELECT max(power_w)::float8 AS peak_w
     FROM device_energy_snapshots
@@ -1464,10 +1460,11 @@ app.get("/api/smart-devices/:id/history", authMiddleware, async (c) => {
     range,
     series: series.map((r) => ({
       t: toIso(r.bucket),
-      energyKwh: r.energy_kwh == null ? 0 : Number(r.energy_kwh),
+      avgW: r.avg_w == null ? null : Number(r.avg_w),
+      maxW: r.max_w == null ? null : Number(r.max_w),
     })),
     summary: {
-      energyKwh: rangeKwh,
+      energyKwh: rangeEnergy?.kwh == null ? 0 : Number(rangeEnergy.kwh),
       lastHourKwh: lastHour?.kwh == null ? 0 : Number(lastHour.kwh),
       peakW: peak?.peak_w == null ? null : Number(peak.peak_w),
     },
