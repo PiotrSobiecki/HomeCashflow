@@ -4,7 +4,7 @@
  */
 import {
   pgTable, uuid, text, timestamp, boolean, integer, jsonb, numeric,
-  primaryKey, index, check,
+  primaryKey, index, uniqueIndex, check,
 } from 'drizzle-orm/pg-core'
 import { sql } from 'drizzle-orm'
 
@@ -239,21 +239,25 @@ export const deviceCommandLog = pgTable('device_command_log', {
 
 // ====== Pomiary zużycia w czasie (Slice 4 — wykresy) ======
 //
-// Snapshot co 15 min (cron). energy_kwh to wartość DP add_ele = PRZYROST zdarzeniowy
-// (kWh od poprzedniego raportu), nie licznik narastający. Zużycie w oknie = suma
-// distinct paczek po energy_reported_at (każda raz). power_w to chwilowa moc. Retencja 400 dni.
+// Dwa rodzaje wierszy w jednej tabeli:
+//  • snapshot mocy (cron co 15 min): power_w/switch_on, energy_reported_at = NULL,
+//  • paczka energii (z logów zdarzeń Tuya): energy_kwh = przyrost add_ele,
+//    energy_reported_at = event_time, power_w = NULL.
+// Zużycie w oknie = SUMA paczek (DISTINCT po energy_reported_at). Szczyt/wykres mocy
+// = power_w po recorded_at. add_ele to przyrost zdarzeniowy, nie licznik. Retencja 400 dni.
 export const deviceEnergySnapshots = pgTable('device_energy_snapshots', {
   id: uuid('id').defaultRandom().primaryKey(),
   deviceId: uuid('device_id').notNull().references(() => smartDevices.id, { onDelete: 'cascade' }),
   recordedAt: timestamp('recorded_at', { withTimezone: true }).notNull().defaultNow(),
   powerW: numeric('power_w', { precision: 10, scale: 2 }),
   energyKwh: numeric('energy_kwh', { precision: 12, scale: 4 }),
-  // Czas raportu DP add_ele z cienia Tuya. add_ele to przyrost zdarzeniowy
-  // (kWh od poprzedniego raportu), więc zużycie liczymy sumując po DISTINCT
-  // energy_reported_at — każdą paczkę raz, ignorując zatrzaśnięte powtórki.
+  // event_time paczki add_ele z logów Tuya. Klucz dedupu paczek energii.
   energyReportedAt: timestamp('energy_reported_at', { withTimezone: true }),
   switchOn: boolean('switch_on'),
   isOnline: boolean('is_online'),
 }, (t) => ({
   byDeviceAt: index('idx_energy_device_at').on(t.deviceId, t.recordedAt),
+  // Jedna paczka add_ele na (urządzenie, event_time) — idempotentne zaciąganie z logów.
+  uniqEvent: uniqueIndex('uniq_energy_device_event').on(t.deviceId, t.energyReportedAt)
+    .where(sql`${t.energyReportedAt} IS NOT NULL`),
 }))

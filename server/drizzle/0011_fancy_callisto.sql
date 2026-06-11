@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "uniq_energy_device_event" ON "device_energy_snapshots" USING btree ("device_id","energy_reported_at") WHERE "device_energy_snapshots"."energy_reported_at" IS NOT NULL;
