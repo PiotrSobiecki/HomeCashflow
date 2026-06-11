@@ -104,10 +104,12 @@ async function countCommandLog(deviceRowId) {
   return r.n
 }
 
-async function insertSnapshot(deviceId, { at, powerW, energyKwh }) {
+// reportedAt = czas raportu add_ele (DP `time`). Domyślnie = recorded_at; przekaż ten
+// sam reportedAt w kilku wierszach, by zasymulować zatrzaśnięty "cień" (liczy się raz).
+async function insertSnapshot(deviceId, { at, powerW, energyKwh, reportedAt }) {
   await sql`
-    INSERT INTO device_energy_snapshots (device_id, recorded_at, power_w, energy_kwh, switch_on, is_online)
-    VALUES (${deviceId}, ${at}, ${powerW}, ${energyKwh}, true, true)
+    INSERT INTO device_energy_snapshots (device_id, recorded_at, power_w, energy_kwh, energy_reported_at, switch_on, is_online)
+    VALUES (${deviceId}, ${at}, ${powerW}, ${energyKwh}, ${reportedAt === undefined ? at : reportedAt}, true, true)
   `
 }
 
@@ -383,12 +385,17 @@ describe('POST /api/smart-devices/:id/commands', () => {
 })
 
 describe('GET /api/smart-devices/:id/history', () => {
-  it('daily consumption = max reading of the day (counter resets at midnight)', async () => {
+  it('sums distinct add_ele reports and counts a repeated shadow value once', async () => {
     const owner = await createOwnerWithCreds()
     const dev = await addDevice(owner.token)
-    // Jeden dzień (2 dni temu, 10:00 i 12:00 UTC = środek dnia warszawskiego): 0.5 → 2.0.
-    await insertSnapshot(dev.id, { at: dayAtUtc(2, 10), powerW: 100, energyKwh: 0.5 })
-    await insertSnapshot(dev.id, { at: dayAtUtc(2, 12), powerW: 250, energyKwh: 2.0 })
+    // Dwie różne paczki add_ele (0.5 i 2.0) + powtórka cienia 2.0 z tym samym czasem
+    // raportu → liczona raz. Suma przyrostów = 2.5.
+    const t1 = dayAtUtc(2, 10)
+    const t2 = dayAtUtc(2, 12)
+    await insertSnapshot(dev.id, { at: t1, powerW: 100, energyKwh: 0.5, reportedAt: t1 })
+    await insertSnapshot(dev.id, { at: t2, powerW: 250, energyKwh: 2.0, reportedAt: t2 })
+    // Kolejny snapshot 15 min później zwraca zatrzaśnięty cień (ten sam reportedAt=t2).
+    await insertSnapshot(dev.id, { at: dayAtUtc(2, 12), powerW: 0, energyKwh: 2.0, reportedAt: t2 })
 
     const res = await app.request(`/api/smart-devices/${dev.id}/history?range=7d`, {
       headers: { cookie: `token=${owner.token}` },
@@ -396,25 +403,42 @@ describe('GET /api/smart-devices/:id/history', () => {
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(body.range).toBe('7d')
-    expect(body.summary.energyKwh).toBeCloseTo(2.0, 3) // max dnia = wartość przed resetem
+    expect(body.summary.energyKwh).toBeCloseTo(2.5, 3) // 0.5 + 2.0, cień nie podwaja
     expect(body.summary.peakW).toBe(250)
     expect(body.series.length).toBeGreaterThan(0)
   })
 
-  it('sums daily totals across days for ranges > 1 day', async () => {
+  it('ignores snapshots without a report timestamp (legacy shadow noise)', async () => {
     const owner = await createOwnerWithCreds()
     const dev = await addDevice(owner.token)
-    // Dzień A (3 dni temu): max 1.5. Dzień B (2 dni temu): max 2.0. Suma = 3.5.
-    await insertSnapshot(dev.id, { at: dayAtUtc(3, 10), powerW: 100, energyKwh: 0.4 })
-    await insertSnapshot(dev.id, { at: dayAtUtc(3, 12), powerW: 100, energyKwh: 1.5 })
-    await insertSnapshot(dev.id, { at: dayAtUtc(2, 10), powerW: 100, energyKwh: 0.3 })
-    await insertSnapshot(dev.id, { at: dayAtUtc(2, 12), powerW: 100, energyKwh: 2.0 })
+    // Realna paczka 1.2 + 4 stare wiersze bez energy_reported_at (szum jak 0.014 przez noc).
+    await insertSnapshot(dev.id, { at: dayAtUtc(2, 10), powerW: 100, energyKwh: 1.2 })
+    for (let i = 0; i < 4; i++) {
+      await insertSnapshot(dev.id, { at: dayAtUtc(2, 11), powerW: 0, energyKwh: 0.014, reportedAt: null })
+    }
 
     const res = await app.request(`/api/smart-devices/${dev.id}/history?range=7d`, {
       headers: { cookie: `token=${owner.token}` },
     })
     const body = await res.json()
-    expect(body.summary.energyKwh).toBeCloseTo(3.5, 3) // 1.5 + 2.0
+    expect(body.summary.energyKwh).toBeCloseTo(1.2, 3) // tylko paczka z czasem raportu
+  })
+
+  it('reports last-hour consumption independent of the selected range', async () => {
+    const owner = await createOwnerWithCreds()
+    const dev = await addDevice(owner.token)
+    const now = new Date()
+    const recent = new Date(now.getTime() - 10 * 60 * 1000).toISOString() // 10 min temu
+    const old = dayAtUtc(2, 10) // poza ostatnią godziną
+    await insertSnapshot(dev.id, { at: old, powerW: 100, energyKwh: 5.0 })
+    await insertSnapshot(dev.id, { at: recent, powerW: 100, energyKwh: 0.3 })
+
+    const res = await app.request(`/api/smart-devices/${dev.id}/history?range=7d`, {
+      headers: { cookie: `token=${owner.token}` },
+    })
+    const body = await res.json()
+    expect(body.summary.lastHourKwh).toBeCloseTo(0.3, 3)
+    expect(body.summary.energyKwh).toBeCloseTo(5.3, 3)
   })
 
   it('lets a member read history', async () => {

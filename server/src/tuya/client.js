@@ -142,6 +142,58 @@ export function getDeviceStatus(ctx, deviceId) {
   return tuyaFetchWithToken(ctx, 'GET', `/v1.0/iot-03/devices/${deviceId}/status`)
 }
 
+/**
+ * Stan "cienia" urządzenia z czasem ostatniego raportu per DP (`time`, ms epoch).
+ * Kluczowe dla energii: `add_ele` to przyrost zdarzeniowy — bez `time` nie da się
+ * odróżnić nowego raportu od zatrzaśniętej starej wartości oddawanej między raportami.
+ * @returns {Promise<{ properties: Array<{ code: string, value: unknown, time?: number }> }>}
+ */
+export function getDeviceProperties(ctx, deviceId) {
+  return tuyaFetchWithToken(ctx, 'GET', `/v2.0/cloud/thing/${deviceId}/shadow/properties`)
+}
+
+/**
+ * Logi raportów DP (type=7) w oknie [startMs, endMs]. Zwraca KAŻDĄ paczkę add_ele
+ * z jej event_time — bez gubienia (w przeciwieństwie do pollowania cienia).
+ * `codes` filtruje DP (np. 'add_ele'). Tuya stronicuje przez `last_row_key`.
+ * @returns {Promise<{ logs: Array<{ code, value, event_time }>, has_more?: boolean, last_row_key?: string }>}
+ */
+export function getDeviceLogs(ctx, deviceId, { startMs, endMs, codes = 'add_ele', size = 100, lastRowKey } = {}) {
+  const qs = new URLSearchParams({
+    type: '7',
+    codes,
+    start_time: String(startMs),
+    end_time: String(endMs),
+    size: String(size),
+  })
+  if (lastRowKey) qs.set('last_row_key', lastRowKey)
+  qs.sort() // Tuya podpisuje URL z parametrami posortowanymi alfabetycznie po kluczu
+  return tuyaFetchWithToken(ctx, 'GET', `/v1.0/devices/${deviceId}/logs?${qs.toString()}`)
+}
+
+/**
+ * Wszystkie paczki add_ele w oknie [startMs, endMs] (z paginacją), znormalizowane.
+ * To dokładne źródło zużycia — każda paczka z event_time, bez gubienia jak przy
+ * pollowaniu cienia. UWAGA: retencja logów Tuya jest krótka (~doba), więc trzeba
+ * zaciągać przyrostowo i składować lokalnie.
+ * @returns {Promise<Array<{ eventMs: number, kwh: number }>>}
+ */
+export async function getAddEleEvents(ctx, deviceId, { startMs, endMs, maxPages = 50 } = {}) {
+  const out = []
+  let lastRowKey
+  for (let page = 0; page < maxPages; page++) {
+    const r = await getDeviceLogs(ctx, deviceId, { startMs, endMs, codes: 'add_ele', size: 100, lastRowKey })
+    for (const l of r?.logs ?? []) {
+      const eventMs = num(l.event_time)
+      const raw = num(l.value)
+      if (eventMs !== undefined && raw !== undefined) out.push({ eventMs, kwh: raw / 1000 })
+    }
+    if (!r?.has_more || !r?.last_row_key) break
+    lastRowKey = r.last_row_key
+  }
+  return out
+}
+
 export function getDeviceFunctions(ctx, deviceId) {
   return tuyaFetchWithToken(ctx, 'GET', `/v1.0/iot-03/devices/${deviceId}/functions`)
 }
@@ -174,6 +226,26 @@ function num(v) {
  */
 export function formatStatuses(statuses) {
   const map = Object.fromEntries((statuses ?? []).map((s) => [s.code, s.value]))
+  return formatMap(map)
+}
+
+/**
+ * Jak formatStatuses, ale z tablicy properties (shadow) — dodatkowo wyciąga
+ * `energyReportedAt`: czas ostatniego raportu DP `add_ele` (Date z pola `time` ms).
+ * To on pozwala policzyć każdy przyrost energii dokładnie raz.
+ */
+export function formatProperties(result) {
+  const props = result?.properties ?? result ?? []
+  const map = Object.fromEntries(props.map((p) => [p.code, p.value]))
+  const addEle = props.find((p) => p.code === 'add_ele')
+  const t = num(addEle?.time)
+  return {
+    ...formatMap(map),
+    energyReportedAt: t !== undefined ? new Date(t) : undefined,
+  }
+}
+
+function formatMap(map) {
   const rawVoltage = num(map.cur_voltage)
   const rawPower = num(map.cur_power)
   const rawCurrent = num(map.cur_current)

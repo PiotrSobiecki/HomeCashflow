@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import {
-  getTuyaToken, getDeviceInfo, getDeviceStatus, getDeviceFunctions,
-  listProjectDevices, formatStatuses, sendCommands,
+  getTuyaToken, getDeviceInfo, getDeviceStatus, getDeviceProperties, getDeviceFunctions,
+  getDeviceLogs, getAddEleEvents, listProjectDevices, formatStatuses, formatProperties, sendCommands,
 } from './client.js'
 
 const CTX = { clientId: 'cid', clientSecret: 'secret', datacenter: 'eu', accessToken: 'tok' }
@@ -90,6 +90,28 @@ describe('formatStatuses', () => {
   })
 })
 
+describe('formatProperties', () => {
+  it('scales values and extracts the add_ele report time as a Date', () => {
+    const t = 1781120049291
+    const out = formatProperties({
+      properties: [
+        { code: 'cur_power', value: 123 },
+        { code: 'add_ele', value: 789, time: t },
+      ],
+    })
+    expect(out.powerW).toBe(12.3)
+    expect(out.energyKwh).toBe(0.789)
+    expect(out.energyReportedAt).toBeInstanceOf(Date)
+    expect(out.energyReportedAt.getTime()).toBe(t)
+  })
+
+  it('leaves energyReportedAt undefined when add_ele is absent', () => {
+    const out = formatProperties({ properties: [{ code: 'cur_power', value: 50 }] })
+    expect(out.powerW).toBe(5)
+    expect(out.energyReportedAt).toBeUndefined()
+  })
+})
+
 describe('device endpoints', () => {
   it('getDeviceStatus signs with the access token and returns the result', async () => {
     const fetchMock = mockTuya({ success: true, result: [{ code: 'switch_1', value: true }] })
@@ -99,6 +121,37 @@ describe('device endpoints', () => {
     expect(url).toBe('https://openapi.tuyaeu.com/v1.0/iot-03/devices/dev123/status')
     expect(opts.headers.access_token).toBe('tok')
     expect(opts.headers.sign).toMatch(/^[0-9A-F]{64}$/)
+  })
+
+  it('getDeviceProperties hits the v2.0 shadow/properties endpoint', async () => {
+    const fetchMock = mockTuya({ success: true, result: { properties: [{ code: 'add_ele', value: 14, time: 1 }] } })
+    const res = await getDeviceProperties(CTX, 'dev123')
+    expect(res.properties[0].code).toBe('add_ele')
+    expect(fetchMock.mock.calls[0][0]).toBe('https://openapi.tuyaeu.com/v2.0/cloud/thing/dev123/shadow/properties')
+    expect(fetchMock.mock.calls[0][1].headers.access_token).toBe('tok')
+  })
+
+  it('getDeviceLogs signs with alphabetically sorted query params', async () => {
+    const fetchMock = mockTuya({ success: true, result: { logs: [{ code: 'add_ele', value: 21, event_time: 1781120000000 }] } })
+    const res = await getDeviceLogs(CTX, 'dev123', { startMs: 100, endMs: 200, codes: 'add_ele', size: 50 })
+    expect(res.logs[0].value).toBe(21)
+    const url = fetchMock.mock.calls[0][0]
+    // params posortowane: codes, end_time, size, start_time, type (inaczej Tuya: 1004 sign invalid)
+    expect(url).toBe('https://openapi.tuyaeu.com/v1.0/devices/dev123/logs?codes=add_ele&end_time=200&size=50&start_time=100&type=7')
+  })
+
+  it('getAddEleEvents paginates and normalizes packets to kWh', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ json: async () => ({ success: true, result: {
+        logs: [{ code: 'add_ele', value: 21, event_time: 1000 }], has_more: true, last_row_key: 'k1' } }) })
+      .mockResolvedValueOnce({ json: async () => ({ success: true, result: {
+        logs: [{ code: 'add_ele', value: 14, event_time: 2000 }], has_more: false } }) })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const out = await getAddEleEvents(CTX, 'dev123', { startMs: 0, endMs: 9999 })
+    expect(out).toEqual([{ eventMs: 1000, kwh: 0.021 }, { eventMs: 2000, kwh: 0.014 }])
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock.mock.calls[1][0]).toContain('last_row_key=k1')
   })
 
   it('getDeviceInfo hits the device endpoint', async () => {

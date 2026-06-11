@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import {
-  ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
+  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid,
 } from 'recharts'
-import { Loader2, Zap, Activity } from 'lucide-react'
+import { Loader2, Clock, Activity } from 'lucide-react'
 import { fetchDeviceHistory } from '../lib/api'
 
 const RANGES = [
@@ -63,22 +63,22 @@ export const DeviceEnergyChart = ({ deviceId }) => {
         ))}
       </div>
 
-      {/* Podsumowanie — kolorowe kafelki jak na głównych kartach */}
+      {/* Podsumowanie — ostatnia godzina + całe zużycie w wybranym zakresie */}
       <div className="grid grid-cols-2 gap-2 mb-2">
+        <div className="bg-gradient-to-br from-sky-500/20 to-sky-600/10 border border-sky-500/30 rounded-xl p-2.5">
+          <p className="text-sky-400 text-[11px] font-medium mb-0.5 flex items-center gap-1">
+            <Clock className="w-3 h-3" /> Ostatnia godzina
+          </p>
+          <p className="text-lg font-bold text-white leading-none">
+            {fmtKwh(summary?.lastHourKwh)} <span className="text-xs font-medium text-slate-400">kWh</span>
+          </p>
+        </div>
         <div className="bg-gradient-to-br from-emerald-500/20 to-emerald-600/10 border border-emerald-500/30 rounded-xl p-2.5">
           <p className="text-emerald-400 text-[11px] font-medium mb-0.5 flex items-center gap-1">
-            <Activity className="w-3 h-3" /> Zużycie
+            <Activity className="w-3 h-3" /> Zużycie w okresie
           </p>
           <p className="text-lg font-bold text-white leading-none">
             {fmtKwh(summary?.energyKwh)} <span className="text-xs font-medium text-slate-400">kWh</span>
-          </p>
-        </div>
-        <div className="bg-gradient-to-br from-amber-500/20 to-amber-600/10 border border-amber-500/30 rounded-xl p-2.5">
-          <p className="text-amber-400 text-[11px] font-medium mb-0.5 flex items-center gap-1">
-            <Zap className="w-3 h-3" /> Szczyt mocy
-          </p>
-          <p className="text-lg font-bold text-white leading-none">
-            {summary?.peakW != null ? summary.peakW : '—'} <span className="text-xs font-medium text-slate-400">W</span>
           </p>
         </div>
       </div>
@@ -91,11 +91,11 @@ export const DeviceEnergyChart = ({ deviceId }) => {
           <p className="text-xs text-slate-400 py-8 text-center">Za mało pomiarów dla tego okresu.</p>
         ) : (
           <ResponsiveContainer width="100%" height={150}>
-            <AreaChart data={series} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+            <BarChart data={series} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               <defs>
                 <linearGradient id={`grad-${deviceId}`} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#818cf8" stopOpacity={0.6} />
-                  <stop offset="100%" stopColor="#818cf8" stopOpacity={0} />
+                  <stop offset="0%" stopColor="#818cf8" stopOpacity={0.95} />
+                  <stop offset="100%" stopColor="#818cf8" stopOpacity={0.35} />
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#3f3f6e" vertical={false} />
@@ -103,15 +103,16 @@ export const DeviceEnergyChart = ({ deviceId }) => {
                 dataKey="t" tickFormatter={(t) => formatTick(t, range)}
                 tick={{ fontSize: 10, fill: '#a5b4fc' }} stroke="#3f3f6e" minTickGap={24}
               />
-              <YAxis tick={{ fontSize: 10, fill: '#c7d2fe' }} stroke="#3f3f6e" width={44} unit=" W" tickFormatter={(v) => Math.round(v)} />
+              <YAxis tick={{ fontSize: 10, fill: '#c7d2fe' }} stroke="#3f3f6e" width={44} unit=" kWh" tickFormatter={fmtKwh} />
               <Tooltip
                 contentStyle={{ background: '#1e1b4b', border: '1px solid #4f46e5', borderRadius: 8, fontSize: 12 }}
                 labelStyle={{ color: '#c7d2fe' }}
+                cursor={{ fill: '#818cf820' }}
                 labelFormatter={(t) => new Date(t).toLocaleString('pl-PL', { timeZone: TZ })}
-                formatter={(v, name) => [`${v ?? '—'} W`, name === 'avgW' ? 'Śr. moc' : name]}
+                formatter={(v) => [`${fmtKwh(v)} kWh`, 'Zużycie']}
               />
-              <Area type="monotone" dataKey="avgW" stroke="#a78bfa" strokeWidth={2} fill={`url(#grad-${deviceId})`} />
-            </AreaChart>
+              <Bar dataKey="energyKwh" fill={`url(#grad-${deviceId})`} radius={[3, 3, 0, 0]} />
+            </BarChart>
           </ResponsiveContainer>
         )}
       </div>

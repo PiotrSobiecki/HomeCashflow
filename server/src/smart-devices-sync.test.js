@@ -4,13 +4,14 @@ vi.mock('./tuya/client.js', async () => {
   const actual = await vi.importActual('./tuya/client.js')
   return {
     getTuyaToken: vi.fn(),
-    getDeviceStatus: vi.fn(),
-    formatStatuses: actual.formatStatuses,
+    getDeviceProperties: vi.fn(),
+    getAddEleEvents: vi.fn(),
+    formatProperties: actual.formatProperties,
   }
 })
 
 import { collectEnergySnapshots } from './smart-devices-sync.js'
-import { getTuyaToken, getDeviceStatus } from './tuya/client.js'
+import { getTuyaToken, getDeviceProperties, getAddEleEvents } from './tuya/client.js'
 import { upsertUserAndHousehold } from './app.js'
 import { decodeFinanceDataKey, encryptField } from './finance-crypto.js'
 import { neon } from '@neondatabase/serverless'
@@ -47,7 +48,9 @@ async function insertDevice(householdId, tuyaDeviceId, isActive = true) {
 beforeEach(() => {
   createdUserIds = []
   vi.mocked(getTuyaToken).mockReset()
-  vi.mocked(getDeviceStatus).mockReset()
+  vi.mocked(getDeviceProperties).mockReset()
+  vi.mocked(getAddEleEvents).mockReset()
+  vi.mocked(getAddEleEvents).mockResolvedValue([]) // domyślnie brak paczek energii
 })
 
 afterEach(async () => {
@@ -55,24 +58,54 @@ afterEach(async () => {
 })
 
 describe('collectEnergySnapshots', () => {
-  it('records a snapshot for an active device', async () => {
+  it('writes a power snapshot and ingests add_ele log packets', async () => {
     const hh = await makeHousehold()
     await insertCreds(hh)
     const dev = await insertDevice(hh, `dev-${uniq()}`)
     vi.mocked(getTuyaToken).mockResolvedValue({ accessToken: 'tok', expireTime: 7200 })
-    vi.mocked(getDeviceStatus).mockResolvedValue([
-      { code: 'switch_1', value: true }, { code: 'cur_power', value: 155 }, { code: 'add_ele', value: 1234 },
+    vi.mocked(getDeviceProperties).mockResolvedValue({
+      properties: [{ code: 'switch_1', value: true }, { code: 'cur_power', value: 155 }],
+    })
+    // Dwie paczki o tej samej wartości (0.021) — muszą być policzone osobno.
+    const e1 = 1781120000000
+    const e2 = 1781121800000
+    vi.mocked(getAddEleEvents).mockResolvedValue([
+      { eventMs: e1, kwh: 0.021 },
+      { eventMs: e2, kwh: 0.021 },
     ])
 
     const res = await collectEnergySnapshots(sql, rawKey, { householdId: hh })
-    expect(res.inserted).toBe(1)
+    expect(res).toEqual({ inserted: 1, events: 2, skipped: 0 })
 
-    const rows = await sql`SELECT * FROM device_energy_snapshots WHERE device_id = ${dev.id}`
-    expect(rows).toHaveLength(1)
-    expect(Number(rows[0].power_w)).toBe(15.5)
-    expect(Number(rows[0].energy_kwh)).toBe(1.234)
-    expect(rows[0].switch_on).toBe(true)
-    expect(rows[0].is_online).toBe(true)
+    // Wiersz mocy (energy_reported_at NULL) + dwie paczki energii.
+    const power = await sql`SELECT * FROM device_energy_snapshots WHERE device_id = ${dev.id} AND energy_reported_at IS NULL`
+    expect(power).toHaveLength(1)
+    expect(Number(power[0].power_w)).toBe(15.5)
+    expect(power[0].switch_on).toBe(true)
+    expect(power[0].is_online).toBe(true)
+
+    const packets = await sql`SELECT * FROM device_energy_snapshots WHERE device_id = ${dev.id} AND energy_reported_at IS NOT NULL ORDER BY energy_reported_at`
+    expect(packets).toHaveLength(2)
+    expect(Number(packets[0].energy_kwh)).toBe(0.021)
+    expect(new Date(packets[0].energy_reported_at).getTime()).toBe(e1)
+    expect(new Date(packets[1].energy_reported_at).getTime()).toBe(e2)
+  })
+
+  it('does not re-insert a log packet already stored (idempotent ingest)', async () => {
+    const hh = await makeHousehold()
+    await insertCreds(hh)
+    const dev = await insertDevice(hh, `dev-${uniq()}`)
+    vi.mocked(getTuyaToken).mockResolvedValue({ accessToken: 'tok', expireTime: 7200 })
+    vi.mocked(getDeviceProperties).mockResolvedValue({ properties: [{ code: 'cur_power', value: 100 }] })
+    vi.mocked(getAddEleEvents).mockResolvedValue([{ eventMs: 1781120000000, kwh: 0.05 }])
+
+    const r1 = await collectEnergySnapshots(sql, rawKey, { householdId: hh })
+    expect(r1.events).toBe(1)
+    const r2 = await collectEnergySnapshots(sql, rawKey, { householdId: hh })
+    expect(r2.events).toBe(0) // ten sam event_time → ON CONFLICT DO NOTHING
+
+    const packets = await sql`SELECT * FROM device_energy_snapshots WHERE device_id = ${dev.id} AND energy_reported_at IS NOT NULL`
+    expect(packets).toHaveLength(1)
   })
 
   it('skips an offline device but keeps recording the rest', async () => {
@@ -83,13 +116,13 @@ describe('collectEnergySnapshots', () => {
     const a = await insertDevice(hh, idA)
     await insertDevice(hh, idB)
     vi.mocked(getTuyaToken).mockResolvedValue({ accessToken: 'tok', expireTime: 7200 })
-    vi.mocked(getDeviceStatus).mockImplementation(async (_ctx, deviceId) => {
+    vi.mocked(getDeviceProperties).mockImplementation(async (_ctx, deviceId) => {
       if (deviceId === idB) throw new Error('Tuya API: device offline')
-      return [{ code: 'cur_power', value: 100 }]
+      return { properties: [{ code: 'cur_power', value: 100 }] }
     })
 
     const res = await collectEnergySnapshots(sql, rawKey, { householdId: hh })
-    expect(res).toEqual({ inserted: 1, skipped: 1 })
+    expect(res).toEqual({ inserted: 1, events: 0, skipped: 1 })
 
     const rows = await sql`SELECT device_id FROM device_energy_snapshots WHERE device_id = ${a.id}`
     expect(rows).toHaveLength(1)
@@ -101,7 +134,7 @@ describe('collectEnergySnapshots', () => {
     await insertDevice(hh, `act-${uniq()}`, true)
     await insertDevice(hh, `inact-${uniq()}`, false)
     vi.mocked(getTuyaToken).mockResolvedValue({ accessToken: 'tok', expireTime: 7200 })
-    vi.mocked(getDeviceStatus).mockResolvedValue([{ code: 'cur_power', value: 50 }])
+    vi.mocked(getDeviceProperties).mockResolvedValue({ properties: [{ code: 'cur_power', value: 50 }] })
 
     const res = await collectEnergySnapshots(sql, rawKey, { householdId: hh })
     expect(res.inserted).toBe(1)
