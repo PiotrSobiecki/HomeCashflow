@@ -80,7 +80,7 @@ export const SmartDeviceCard = ({
           </div>
           {todayUptimeMin != null && (
             <p className="flex items-center gap-1 text-[11px] text-slate-500 mt-1.5">
-              <Clock className="w-3 h-3" /> Czas działania dziś: {fmtUptime(todayUptimeMin)}
+              <Clock className="w-3 h-3" /> Czas poboru mocy dziś: {fmtUptime(todayUptimeMin)}
             </p>
           )}
         </div>

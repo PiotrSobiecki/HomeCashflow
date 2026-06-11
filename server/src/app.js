@@ -1353,7 +1353,7 @@ const SNAPSHOT_INTERVAL_MIN = 15;
 /**
  * Statystyki dzisiejsze (od północy czasu warszawskiego) per urządzenie:
  *  - kwh: zużycie z DISTINCT paczek add_ele (ta sama logika co w /history),
- *  - uptimeMin: szacowany czas działania z próbek mocy (switch_on lub power_w > 0).
+ *  - uptimeMin: szacowany czas poboru mocy z próbek (tylko power_w > 0; włączone bez poboru nie liczy się).
  * Zwraca mapę device_id → { kwh, uptimeMin }.
  */
 async function getTodayStatsByDevice(sql, deviceIds) {
@@ -1373,7 +1373,7 @@ async function getTodayStatsByDevice(sql, deviceIds) {
     FROM device_energy_snapshots
     WHERE device_id = ANY(${deviceIds}) AND energy_reported_at IS NULL
       AND recorded_at >= date_trunc('day', NOW() AT TIME ZONE 'Europe/Warsaw') AT TIME ZONE 'Europe/Warsaw'
-      AND (switch_on = true OR power_w > 0)
+      AND power_w > 0
     GROUP BY device_id
   `;
   const stats = {};
