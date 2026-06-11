@@ -174,7 +174,9 @@ export const EnergyReportExport = ({ devices }) => {
                 <div className="flex items-center justify-between px-3 py-2 border-b border-slate-700">
                   <button
                     type="button"
-                    onClick={() => setSelected(new Set(devices.map((d) => d.id)))}
+                    onClick={() =>
+                      setSelected(new Set(devices.map((d) => d.id)))
+                    }
                     className="text-xs text-emerald-400 hover:text-emerald-300"
                   >
                     Zaznacz wszystkie
@@ -230,7 +232,7 @@ export const EnergyReportExport = ({ devices }) => {
           <p className="text-[11px] font-medium uppercase tracking-wider text-emerald-400 mb-3">
             Eksport
           </p>
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
               type="button"
               onClick={() => handleExport("download")}
