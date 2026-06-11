@@ -199,24 +199,6 @@ export const saveTuyaCredentials = async (body) => {
   return data;
 };
 
-/** PATCH ceny 1 kWh (zł) — bez ponownego wpisywania poświadczeń. */
-export const saveTuyaEnergyPrice = async (energyPricePln) => {
-  const res = await fetch(`${API_URL}/api/tuya/credentials`, {
-    method: 'PATCH',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({ energyPricePln }),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const err = new Error(data.error || `PATCH /api/tuya/credentials: ${res.status}`);
-    err.code = data.error;
-    err.status = res.status;
-    throw err;
-  }
-  return data;
-};
-
 export const deleteTuyaCredentials = async () => {
   const res = await fetch(`${API_URL}/api/tuya/credentials`, {
     method: 'DELETE',

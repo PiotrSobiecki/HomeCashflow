@@ -1157,6 +1157,11 @@ function validateTuyaCredentialsInput(body) {
   if (body.datacenter !== undefined && !TUYA_DATACENTERS.includes(body.datacenter)) {
     return "datacenter must be one of eu|us|cn|in";
   }
+  const price = body.energyPricePln;
+  if (price !== undefined && price !== null
+      && (typeof price !== "number" || !Number.isFinite(price) || price < 0 || price > 100)) {
+    return "energyPricePln must be a number 0-100 or null";
+  }
   return null;
 }
 
@@ -1204,25 +1209,28 @@ app.put("/api/tuya/credentials", authMiddleware, async (c) => {
   const clientIdEnc = await encryptField(body.clientId, rawKey);
   const clientSecretEnc = await encryptField(body.clientSecret, rawKey);
 
+  const energyPricePln = body.energyPricePln ?? null;
   const [row] = await sql`
     INSERT INTO tuya_credentials
-      (household_id, client_id_enc, client_secret_enc, datacenter, verified_at, created_by, updated_at)
+      (household_id, client_id_enc, client_secret_enc, datacenter, energy_price_pln, verified_at, created_by, updated_at)
     VALUES
       (${membership.household_id}, ${clientIdEnc}, ${clientSecretEnc},
-       ${datacenter}, NOW(), ${user.id}, NOW())
+       ${datacenter}, ${energyPricePln}, NOW(), ${user.id}, NOW())
     ON CONFLICT (household_id) DO UPDATE SET
       client_id_enc = EXCLUDED.client_id_enc,
       client_secret_enc = EXCLUDED.client_secret_enc,
       datacenter = EXCLUDED.datacenter,
+      energy_price_pln = EXCLUDED.energy_price_pln,
       verified_at = NOW(),
       updated_at = NOW()
-    RETURNING datacenter, verified_at
+    RETURNING datacenter, verified_at, energy_price_pln
   `;
 
   return c.json({
     configured: true,
     datacenter: row.datacenter,
     verifiedAt: toIso(row.verified_at),
+    energyPricePln: row.energy_price_pln == null ? null : Number(row.energy_price_pln),
   });
 });
 
@@ -1248,31 +1256,6 @@ app.get("/api/tuya/credentials", authMiddleware, async (c) => {
   });
 });
 
-// Cena 1 kWh w zł — edytowalna bez ponownego wpisywania poświadczeń (owner-only).
-app.patch("/api/tuya/credentials", authMiddleware, async (c) => {
-  const user = c.get("user");
-  const sql = getDb(c);
-
-  let body;
-  try { body = await c.req.json(); } catch { return c.json({ error: "Invalid JSON body" }, 400); }
-  const price = body?.energyPricePln;
-  if (price !== null && (typeof price !== "number" || !Number.isFinite(price) || price < 0 || price > 100)) {
-    return c.json({ error: "energyPricePln must be a number 0–100 or null" }, 400);
-  }
-
-  const membership = await getMembershipWithOwner(sql, user.id);
-  if (!membership) return c.json({ error: "No household" }, 400);
-  if (membership.owner_id !== user.id) return c.json({ error: "forbidden_owner_only" }, 403);
-
-  const [row] = await sql`
-    UPDATE tuya_credentials
-    SET energy_price_pln = ${price}, updated_at = NOW()
-    WHERE household_id = ${membership.household_id}
-    RETURNING energy_price_pln
-  `;
-  if (!row) return c.json({ error: "tuya_not_configured" }, 400);
-  return c.json({ energyPricePln: row.energy_price_pln == null ? null : Number(row.energy_price_pln) });
-});
 
 app.delete("/api/tuya/credentials", authMiddleware, async (c) => {
   const user = c.get("user");

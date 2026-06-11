@@ -3,7 +3,7 @@ import {
   Plug, Loader2, Check, X, Trash2, ChevronDown, ChevronRight, ExternalLink,
 } from 'lucide-react'
 import {
-  fetchTuyaCredentials, saveTuyaCredentials, deleteTuyaCredentials, saveTuyaEnergyPrice,
+  fetchTuyaCredentials, saveTuyaCredentials, deleteTuyaCredentials,
 } from '../lib/api'
 
 const DATACENTERS = [
@@ -13,7 +13,7 @@ const DATACENTERS = [
   { value: 'in', label: 'Indie (IN)' },
 ]
 
-const EMPTY_FORM = { clientId: '', clientSecret: '', datacenter: 'eu' }
+const EMPTY_FORM = { clientId: '', clientSecret: '', datacenter: 'eu', energyPrice: '' }
 
 function friendlyError(err) {
   if (err?.code === 'tuya_auth_failed') {
@@ -31,16 +31,12 @@ export const TuyaIntegration = () => {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [showGuide, setShowGuide] = useState(false)
-  const [price, setPrice] = useState('')
-  const [priceSaving, setPriceSaving] = useState(false)
-  const [priceSaved, setPriceSaved] = useState(false)
 
   const load = async () => {
     try {
       const data = await fetchTuyaCredentials()
       setStatus(data)
       setEditing(!data.configured)
-      setPrice(data.energyPricePln != null ? String(data.energyPricePln) : '')
     } catch (err) {
       if (err?.status === 403) setHidden(true)
       // inne błędy: zostaw panel w stanie "niepołączono", owner spróbuje zapisać
@@ -55,6 +51,12 @@ export const TuyaIntegration = () => {
 
   const handleSave = async (e) => {
     e.preventDefault()
+    const normalizedPrice = form.energyPrice.trim().replace(',', '.')
+    const energyPricePln = normalizedPrice === '' ? null : Number(normalizedPrice)
+    if (energyPricePln !== null && (!Number.isFinite(energyPricePln) || energyPricePln < 0 || energyPricePln > 100)) {
+      setError('Cena za 1 kWh musi być liczbą od 0 do 100 zł.')
+      return
+    }
     setSaving(true)
     setError('')
     try {
@@ -62,36 +64,15 @@ export const TuyaIntegration = () => {
         clientId: form.clientId.trim(),
         clientSecret: form.clientSecret.trim(),
         datacenter: form.datacenter,
+        energyPricePln,
       })
-      setStatus({ configured: true, datacenter: data.datacenter, verifiedAt: data.verifiedAt })
+      setStatus({ configured: true, datacenter: data.datacenter, verifiedAt: data.verifiedAt, energyPricePln: data.energyPricePln })
       setForm(EMPTY_FORM)
       setEditing(false)
     } catch (err) {
       setError(friendlyError(err))
     } finally {
       setSaving(false)
-    }
-  }
-
-  const handleSavePrice = async (e) => {
-    e.preventDefault()
-    const normalized = price.trim().replace(',', '.')
-    const value = normalized === '' ? null : Number(normalized)
-    if (value !== null && (!Number.isFinite(value) || value < 0 || value > 100)) {
-      setError('Cena musi być liczbą od 0 do 100 zł.')
-      return
-    }
-    setPriceSaving(true)
-    setError('')
-    try {
-      const data = await saveTuyaEnergyPrice(value)
-      setStatus((s) => ({ ...s, energyPricePln: data.energyPricePln }))
-      setPriceSaved(true)
-      setTimeout(() => setPriceSaved(false), 2000)
-    } catch {
-      setError('Nie udało się zapisać ceny. Spróbuj ponownie.')
-    } finally {
-      setPriceSaving(false)
     }
   }
 
@@ -155,34 +136,20 @@ export const TuyaIntegration = () => {
         </ol>
       )}
 
-      {/* Status połączenia */}
+      {/* Status połączenia — po zminimalizowaniu tylko przyciski, szczegóły w „Zmień dane" */}
       {configured && !editing && (
         <div className="space-y-3">
-          <div className="text-sm text-slate-300 bg-slate-900/40 rounded-xl p-3 space-y-1">
-            <p>Region: <span className="text-white">{DATACENTERS.find((d) => d.value === status.datacenter)?.label || status.datacenter}</span></p>
-          </div>
-          {/* Cena energii — do liczenia kosztu na kartach urządzeń */}
-          <form onSubmit={handleSavePrice} className="flex items-center gap-2 bg-slate-900/40 rounded-xl p-3">
-            <label htmlFor="tuya-energy-price" className="text-sm text-slate-300 shrink-0">Cena za 1 kWh:</label>
-            <input
-              id="tuya-energy-price"
-              type="text" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)}
-              placeholder="np. 1.20"
-              className="w-24 px-3 py-1.5 bg-slate-900/50 border border-slate-600 rounded-lg text-white text-sm placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
-            />
-            <span className="text-sm text-slate-400">zł</span>
-            <button
-              type="submit" disabled={priceSaving}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-500 hover:bg-indigo-600 text-white text-xs font-medium rounded-lg transition-colors disabled:opacity-50"
-            >
-              {priceSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : priceSaved ? <Check className="w-3.5 h-3.5" /> : null}
-              {priceSaved ? 'Zapisano' : 'Zapisz'}
-            </button>
-          </form>
           <div className="flex gap-2">
             <button
               type="button"
-              onClick={() => { setForm({ ...EMPTY_FORM, datacenter: status.datacenter }); setEditing(true) }}
+              onClick={() => {
+                setForm({
+                  ...EMPTY_FORM,
+                  datacenter: status.datacenter,
+                  energyPrice: status.energyPricePln != null ? String(status.energyPricePln) : '',
+                })
+                setEditing(true)
+              }}
               className="px-3 py-2 text-slate-300 hover:text-indigo-400 hover:bg-indigo-500/10 border border-slate-600 rounded-xl text-sm transition-all"
             >
               Zmień dane
@@ -217,6 +184,16 @@ export const TuyaIntegration = () => {
           >
             {DATACENTERS.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
           </select>
+          <div className="flex items-center gap-2">
+            <label htmlFor="tuya-energy-price" className="text-sm text-slate-300 shrink-0">Cena za 1 kWh:</label>
+            <input
+              id="tuya-energy-price"
+              type="text" inputMode="decimal" value={form.energyPrice} onChange={setField('energyPrice')}
+              placeholder="np. 1.20"
+              className="w-24 px-3 py-1.5 bg-slate-900/50 border border-slate-600 rounded-lg text-white text-sm placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
+            />
+            <span className="text-sm text-slate-400">zł (do liczenia kosztów; opcjonalna)</span>
+          </div>
           <div className="flex gap-2">
             <button
               type="submit" disabled={saving}
