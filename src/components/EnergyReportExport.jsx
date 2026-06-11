@@ -1,5 +1,13 @@
-import { useState } from "react";
-import { FileText, Download, Mail, Loader2, Check, X } from "lucide-react";
+import { useState, useRef, useEffect } from "react";
+import {
+  FileText,
+  Download,
+  Mail,
+  Loader2,
+  Check,
+  X,
+  ChevronDown,
+} from "lucide-react";
 import { fetchEnergyReport, emailEnergyReport } from "../lib/api";
 import { buildEnergyReportPdf, pdfToBase64 } from "../lib/energyReportPdf";
 
@@ -11,13 +19,6 @@ const toDateInput = (d) => {
   const off = d.getTimezoneOffset() * 60000;
   return new Date(d.getTime() - off).toISOString().slice(0, 10);
 };
-
-const PRESETS = [
-  { label: "7 dni", days: 7 },
-  { label: "30 dni", days: 30 },
-  { label: "90 dni", days: 90 },
-  { label: "1 rok", days: 365 },
-];
 
 /**
  * Eksport raportu energii: zakres dat (max rok), wybór urządzeń,
@@ -35,11 +36,20 @@ export const EnergyReportExport = ({ devices }) => {
   );
   const [busy, setBusy] = useState(""); // '' | 'download' | 'email'
   const [message, setMessage] = useState(null); // { ok: boolean, text: string }
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const pickerRef = useRef(null);
 
-  const applyPreset = (days) => {
-    setFrom(toDateInput(new Date(Date.now() - (days - 1) * DAY_MS)));
-    setTo(today);
-  };
+  // Zamknij listę urządzeń po kliknięciu poza nią
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const onClick = (e) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target)) {
+        setPickerOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [pickerOpen]);
 
   const toggleDevice = (id) => {
     setSelected((prev) => {
@@ -135,48 +145,83 @@ export const EnergyReportExport = ({ devices }) => {
               className="flex-1 min-w-0 px-3 py-2 bg-slate-900/50 border border-slate-600 rounded-xl text-white text-sm focus:outline-none focus:border-emerald-500 transition-colors [color-scheme:dark]"
             />
           </div>
-          <div className="flex flex-wrap gap-1.5">
-            {PRESETS.map((p) => (
-              <button
-                key={p.days}
-                type="button"
-                onClick={() => applyPreset(p.days)}
-                className="px-2.5 py-1 rounded-lg text-xs bg-slate-800/60 text-slate-400 hover:text-white hover:bg-emerald-500/20 border border-slate-700 transition-colors"
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
         </div>
 
-        {/* Urządzenia */}
+        {/* Urządzenia — lista rozwijana z checkboxami */}
         <div className="bg-slate-900/40 border border-slate-700/50 rounded-xl p-4">
           <p className="text-[11px] font-medium uppercase tracking-wider text-emerald-400 mb-3">
-            Urządzenia{" "}
-            <span className="text-slate-500 normal-case tracking-normal">
-              ({selected.size}/{devices.length})
-            </span>
+            Urządzenia
           </p>
-          <div className="flex flex-wrap gap-2">
-            {devices.map((d) => (
-              <label
-                key={d.id}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs cursor-pointer border transition-colors ${
-                  selected.has(d.id)
-                    ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300"
-                    : "bg-slate-800/60 border-slate-700 text-slate-400 hover:text-white"
-                }`}
-              >
-                <input
-                  type="checkbox"
-                  checked={selected.has(d.id)}
-                  onChange={() => toggleDevice(d.id)}
-                  className="sr-only"
-                />
-                {selected.has(d.id) && <Check className="w-3 h-3" />}
-                {d.displayName}
-              </label>
-            ))}
+          <div className="relative" ref={pickerRef}>
+            <button
+              type="button"
+              onClick={() => setPickerOpen((v) => !v)}
+              className="w-full flex items-center justify-between gap-2 px-3 py-2 bg-slate-900/50 border border-slate-600 rounded-xl text-sm text-white hover:border-emerald-500 transition-colors"
+            >
+              <span className="truncate">
+                {selected.size === devices.length
+                  ? `Wszystkie (${devices.length})`
+                  : selected.size === 0
+                    ? "Brak wybranych"
+                    : `Wybrano ${selected.size} z ${devices.length}`}
+              </span>
+              <ChevronDown
+                className={`w-4 h-4 text-slate-400 shrink-0 transition-transform ${pickerOpen ? "rotate-180" : ""}`}
+              />
+            </button>
+            {pickerOpen && (
+              <div className="absolute z-10 mt-1 w-full bg-slate-800 border border-slate-600 rounded-xl shadow-xl overflow-hidden">
+                <div className="flex items-center justify-between px-3 py-2 border-b border-slate-700">
+                  <button
+                    type="button"
+                    onClick={() => setSelected(new Set(devices.map((d) => d.id)))}
+                    className="text-xs text-emerald-400 hover:text-emerald-300"
+                  >
+                    Zaznacz wszystkie
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelected(new Set())}
+                    className="text-xs text-slate-400 hover:text-white"
+                  >
+                    Wyczyść
+                  </button>
+                </div>
+                <div className="max-h-48 overflow-y-auto">
+                  {devices.map((d) => (
+                    <label
+                      key={d.id}
+                      className="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-slate-700/50 transition-colors"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selected.has(d.id)}
+                        onChange={() => toggleDevice(d.id)}
+                        className="sr-only"
+                      />
+                      <span
+                        className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${
+                          selected.has(d.id)
+                            ? "bg-emerald-500 border-emerald-500"
+                            : "border-slate-500"
+                        }`}
+                      >
+                        {selected.has(d.id) && (
+                          <Check className="w-3 h-3 text-white" />
+                        )}
+                      </span>
+                      <span
+                        className={
+                          selected.has(d.id) ? "text-white" : "text-slate-400"
+                        }
+                      >
+                        {d.displayName}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
