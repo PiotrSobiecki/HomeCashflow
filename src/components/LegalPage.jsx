@@ -23,6 +23,8 @@ const TERMS_CONTENT = [
     items: [
       "Aplikacja umozliwia m.in. dodawanie i edycje danych finansowych, prowadzenie budzetu domowego i zapraszanie czlonkow gospodarstwa.",
       "W Aplikacji dostepny jest tez tryb goscia (bez konta).",
+      "Aplikacja oferuje integracje z urzadzeniami smart home (Tuya): podglad statusu, sterowanie i pomiary zuzycia energii.",
+      "Aplikacja umozliwia generowanie raportow zuzycia energii (PDF do pobrania lub wysylki na adres e-mail Uzytkownika).",
       "Funkcje moga byc rozwijane, zmieniane lub czasowo ograniczane.",
     ],
   },
@@ -51,7 +53,17 @@ const TERMS_CONTENT = [
     ],
   },
   {
-    title: "7. Zasady korzystania",
+    title: "7. Integracja z urzadzeniami smart home (Tuya)",
+    items: [
+      "Integracja jest opcjonalna i wymaga podania przez Wlasciciela gospodarstwa wlasnych poswiadczen API Tuya (Client ID i Client Secret z projektu na iot.tuya.com).",
+      "Poswiadczenia Tuya sa szyfrowane przed zapisem do bazy danych.",
+      "Sterowanie urzadzeniami i odczyt pomiarow odbywa sie za posrednictwem uslug chmurowych Tuya; Aplikacja nie odpowiada za ich dostepnosc ani dzialanie.",
+      "Pomiary zuzycia energii, czasu poboru mocy oraz wyliczane koszty maja charakter szacunkowy i zaleza od danych raportowanych przez urzadzenia.",
+      "Uzytkownik ponosi odpowiedzialnosc za skutki zdalnego sterowania urzadzeniami podlaczonymi do Aplikacji.",
+    ],
+  },
+  {
+    title: "8. Zasady korzystania",
     items: [
       "Zabronione jest korzystanie z Aplikacji w sposob sprzeczny z prawem.",
       "Zabronione jest podejmowanie dzialan zaklocajacych dzialanie Aplikacji.",
@@ -59,7 +71,7 @@ const TERMS_CONTENT = [
     ],
   },
   {
-    title: "8. Odpowiedzialnosc",
+    title: "9. Odpowiedzialnosc",
     items: [
       "Aplikacja ma charakter narzedzia wspierajacego planowanie finansow i nie stanowi porady finansowej, prawnej ani podatkowej.",
       "Dane finansowe sa dodatkowo szyfrowane przed zapisem do bazy danych.",
@@ -68,7 +80,7 @@ const TERMS_CONTENT = [
     ],
   },
   {
-    title: "9. Dostepnosc i zmiany",
+    title: "10. Dostepnosc i zmiany",
     items: [
       "Dokladany jest staranny wysilek, aby Aplikacja byla dostepna i bezpieczna.",
       "Moga wystepowac przerwy techniczne, aktualizacje i awarie niezalezne od tworcow.",
@@ -76,7 +88,7 @@ const TERMS_CONTENT = [
     ],
   },
   {
-    title: "10. Kontakt",
+    title: "11. Kontakt",
     items: [
       "W sprawach zwiazanych z korzystaniem z Aplikacji nalezy kontaktowac sie z administratorem instancji, na ktorej Aplikacja jest udostepniona.",
     ],
@@ -98,6 +110,8 @@ const PRIVACY_CONTENT = [
       "Dane finansowe wprowadzone przez uzytkownika (przychody, wydatki, cele, oszczednosci).",
       "Dane techniczne sesji i logowania wymagane do dzialania aplikacji.",
       "Dane zaproszen do gospodarstwa (adres e-mail, token zaproszenia, status, daty).",
+      "Poswiadczenia API Tuya podane przez wlasciciela gospodarstwa (przechowywane w postaci zaszyfrowanej) oraz dane urzadzen smart home (identyfikatory, nazwy, funkcje).",
+      "Dane telemetryczne urzadzen (np. moc, napiecie, zuzycie energii, stan wlacznika) zbierane cyklicznie na potrzeby wykresow i raportow.",
     ],
   },
   {
@@ -106,6 +120,8 @@ const PRIVACY_CONTENT = [
       "Swiadczenie uslugi i obsluga konta uzytkownika.",
       "Zapewnienie bezpieczenstwa, autoryzacji i stabilnosci systemu.",
       "Umozliwienie wspolpracy w ramach gospodarstwa domowego i zaproszen e-mail.",
+      "Obsluga integracji smart home: odczyt statusu urzadzen, sterowanie nimi i pomiary zuzycia energii.",
+      "Generowanie raportow zuzycia energii i ich wysylka na adres e-mail uzytkownika (na jego zadanie).",
     ],
   },
   {
@@ -118,7 +134,7 @@ const PRIVACY_CONTENT = [
   {
     title: "5. Odbiorcy danych i podmioty przetwarzajace",
     items: [
-      "W ramach dzialania Aplikacji dane moga byc powierzane dostawcom infrastruktury, np. Google, Neon, Cloudflare i Resend.",
+      "W ramach dzialania Aplikacji dane moga byc powierzane dostawcom infrastruktury, np. Google, Neon, Cloudflare, Resend (e-mail: zaproszenia i raporty) oraz Tuya (komunikacja z urzadzeniami smart home).",
       "Dane sa przekazywane tylko w zakresie niezbednym do realizacji celow opisanych w Polityce.",
     ],
   },
@@ -210,7 +226,7 @@ export const LegalPage = ({ type }) => {
             <div>
               <h1 className="text-2xl sm:text-3xl font-bold text-white">{title}</h1>
               <p className="text-slate-400 mt-1">{subtitle}</p>
-              <p className="text-xs text-slate-500 mt-2">Data aktualizacji: 2026-04-06</p>
+              <p className="text-xs text-slate-500 mt-2">Data aktualizacji: 2026-06-11</p>
             </div>
           </div>
 

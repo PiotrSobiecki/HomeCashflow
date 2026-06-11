@@ -11,6 +11,11 @@ Frontend: React + Vite, backend: Hono na Cloudflare Workers, baza: Neon PostgreS
 - Rozdzielenie wydatkow stalych i zmiennych
 - Cele oszczednosciowe i podsumowania miesieczne
 - Prognoza finansowa, poduszka bezpieczenstwa i wskazniki biegu finansowego
+- Inteligentne urzadzenia (zakladka "Urzadzenia"): integracja z Tuya Cloud,
+  status na zywo (moc, napiecie, zuzycie dzienne), sterowanie, wykresy zuzycia
+  energii z kosztami wg ustawionej ceny za 1 kWh
+- Raporty zuzycia energii do PDF: dowolny zakres dat (max rok), wybor urzadzen,
+  pobranie pliku lub wysylka na e-mail uzytkownika
 
 ## Stack
 
@@ -20,7 +25,8 @@ Frontend: React + Vite, backend: Hono na Cloudflare Workers, baza: Neon PostgreS
 | Backend | Hono | Cloudflare Workers |
 | Database | Neon PostgreSQL | - |
 | Auth | Google OAuth 2.0 (JWT httpOnly cookies) | - |
-| Emails | Resend | - |
+| Emails | Resend (zaproszenia + raporty PDF) | - |
+| Smart home | Tuya Cloud API (poswiadczenia per gospodarstwo, szyfrowane) | - |
 
 ## Start lokalny
 
@@ -32,13 +38,15 @@ Frontend: React + Vite, backend: Hono na Cloudflare Workers, baza: Neon PostgreS
 
 ### Instalacja
 
+Projekt uzywa **pnpm** (lockfile: `pnpm-lock.yaml`).
+
 ```bash
 # root (frontend)
-npm install
+pnpm install
 
 # backend
 cd server
-npm install
+pnpm install
 ```
 
 ### Zmienne srodowiskowe
@@ -61,6 +69,7 @@ FRONTEND_URL=http://localhost:5173
 GOOGLE_CLIENT_ID=twoj-google-client-id
 GOOGLE_CLIENT_SECRET=twoj-google-client-secret
 RESEND_API_KEY=twoj-resend-api-key
+FINANCE_DATA_KEY=64-znakowy-hex-klucz-aes256   # szyfrowanie danych finansowych i poswiadczen Tuya
 ```
 
 ### Uruchomienie
@@ -179,8 +188,12 @@ npx wrangler secret put NEXTAUTH_SECRET
 npx wrangler secret put GOOGLE_CLIENT_ID
 npx wrangler secret put GOOGLE_CLIENT_SECRET
 npx wrangler secret put RESEND_API_KEY
+npx wrangler secret put FINANCE_DATA_KEY
 npx wrangler deploy
 ```
+
+Backend ma tez cron (konfiguracja w `server/wrangler.toml`), ktory co 15 minut
+zbiera pomiary energii z urzadzen Tuya (`device_energy_snapshots`).
 
 ### Frontend (Pages)
 

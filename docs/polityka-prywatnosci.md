@@ -1,6 +1,6 @@
 # Polityka prywatnosci HomeCashflow
 
-Data wejscia w zycie: 2026-04-06
+Data wejscia w zycie: 2026-04-06 (ostatnia aktualizacja: 2026-06-11)
 
 ## 1. Informacje ogolne
 
@@ -14,7 +14,9 @@ W zaleznosci od sposobu korzystania z Aplikacji mozemy przetwarzac:
 1. dane konta Google: identyfikator Google, adres e-mail, nazwe profilu, avatar URL,
 2. dane techniczne sesji niezbedne do uwierzytelnienia (np. token sesji/JWT w cookie httpOnly),
 3. dane finansowe wprowadzone przez Uzytkownika (np. wydatki, przychody, cele, oszczednosci),
-4. dane dotyczace zaproszen do gospodarstwa (adres e-mail, token zaproszenia, status, daty).
+4. dane dotyczace zaproszen do gospodarstwa (adres e-mail, token zaproszenia, status, daty),
+5. poswiadczenia API Tuya podane przez Wlasciciela gospodarstwa (przechowywane w postaci zaszyfrowanej) oraz dane urzadzen smart home (identyfikatory, nazwy, funkcje),
+6. dane telemetryczne urzadzen (np. moc, napiecie, zuzycie energii, stan wlacznika) zbierane cyklicznie w celu prezentacji wykresow i raportow.
 
 ## 3. Cele i podstawy przetwarzania
 
@@ -24,7 +26,9 @@ Dane przetwarzamy w celu:
 2. obslugi logowania i bezpieczenstwa sesji,
 3. realizacji funkcji wspoldzielenia danych w gospodarstwie domowym,
 4. wysylki zaproszen e-mail do gospodarstwa,
-5. zapewnienia bezpieczenstwa i stabilnosci Aplikacji.
+5. obslugi integracji smart home: odczytu statusu urzadzen, sterowania nimi oraz pomiarow zuzycia energii,
+6. generowania raportow zuzycia energii i ich wysylki na adres e-mail Uzytkownika (na jego zadanie),
+7. zapewnienia bezpieczenstwa i stabilnosci Aplikacji.
 
 ## 4. Tryb goscia
 
@@ -38,7 +42,8 @@ W ramach dzialania Aplikacji dane moga byc powierzane dostawcom infrastruktury, 
 1. Google (uwierzytelnianie OAuth),
 2. Neon (baza danych PostgreSQL),
 3. Cloudflare (hosting frontendu i backendu),
-4. Resend (wysylka e-mail z zaproszeniami).
+4. Resend (wysylka e-mail: zaproszenia i raporty zuzycia energii),
+5. Tuya (komunikacja z urzadzeniami smart home w ramach opcjonalnej integracji).
 
 Dane sa przekazywane tylko w zakresie niezbednym do realizacji wskazanych celow.
 

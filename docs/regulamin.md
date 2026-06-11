@@ -1,6 +1,6 @@
 # Regulamin aplikacji HomeCashflow
 
-Data wejscia w zycie: 2026-04-06
+Data wejscia w zycie: 2026-04-06 (ostatnia aktualizacja: 2026-06-11)
 
 ## 1. Postanowienia ogolne
 
@@ -21,7 +21,11 @@ Data wejscia w zycie: 2026-04-06
    - dodawanie i edycje danych finansowych,
    - prowadzenie budzetu domowego,
    - zapraszanie czlonkow gospodarstwa,
-   - korzystanie z trybu goscia (bez konta).
+   - korzystanie z trybu goscia (bez konta),
+   - integracje z urzadzeniami smart home (Tuya): podglad statusu, sterowanie
+     i pomiary zuzycia energii,
+   - generowanie raportow zuzycia energii (PDF do pobrania lub wysylki na
+     adres e-mail Uzytkownika).
 2. Funkcje moga byc rozwijane, zmieniane lub czasowo ograniczane.
 
 ## 4. Konto i logowanie
@@ -42,25 +46,33 @@ Data wejscia w zycie: 2026-04-06
 2. Zaproszony Uzytkownik musi zalogowac sie adresem e-mail zgodnym z adresem zaproszenia.
 3. Wlasciciel moze usuwac czlonkow gospodarstwa zgodnie z dostepnymi funkcjami Aplikacji.
 
-## 7. Zasady korzystania
+## 7. Integracja z urzadzeniami smart home (Tuya)
+
+1. Integracja jest opcjonalna i wymaga podania przez Wlasciciela gospodarstwa wlasnych poswiadczen API Tuya (Client ID i Client Secret z projektu na iot.tuya.com).
+2. Poswiadczenia Tuya sa szyfrowane przed zapisem do bazy danych.
+3. Sterowanie urzadzeniami i odczyt pomiarow odbywa sie za posrednictwem uslug chmurowych Tuya; Aplikacja nie odpowiada za ich dostepnosc ani dzialanie.
+4. Pomiary zuzycia energii, czasu poboru mocy oraz wyliczane koszty maja charakter szacunkowy i zaleza od danych raportowanych przez urzadzenia.
+5. Uzytkownik ponosi odpowiedzialnosc za skutki zdalnego sterowania urzadzeniami podlaczonymi do Aplikacji.
+
+## 8. Zasady korzystania
 
 1. Zabronione jest korzystanie z Aplikacji w sposob sprzeczny z prawem.
 2. Zabronione jest podejmowanie dzialan zaklocajacych dzialanie Aplikacji.
 3. Uzytkownik ponosi odpowiedzialnosc za tresci i dane, ktore wprowadza do Aplikacji.
 
-## 8. Odpowiedzialnosc
+## 9. Odpowiedzialnosc
 
 1. Aplikacja ma charakter narzedzia wspierajacego planowanie finansow i nie stanowi porady finansowej, prawnej ani podatkowej.
 2. Dane finansowe sa dodatkowo szyfrowane przed zapisem do bazy danych.
 3. Dokladnosc analiz i podsumowan zalezy od danych wprowadzonych przez Uzytkownika.
 4. Tworca Aplikacji nie odpowiada za decyzje finansowe podjete na podstawie danych z Aplikacji.
 
-## 9. Dostepnosc i zmiany
+## 10. Dostepnosc i zmiany
 
 1. Dokladany jest staranny wysilek, aby Aplikacja byla dostepna i bezpieczna.
 2. Moga wystepowac przerwy techniczne, aktualizacje i awarie niezalezne od tworcow.
 3. Regulamin moze byc aktualizowany; zmiany obowiazuja od chwili publikacji nowej wersji.
 
-## 10. Kontakt
+## 11. Kontakt
 
 W sprawach zwiazanych z korzystaniem z Aplikacji nalezy kontaktowac sie z administratorem instancji, na ktorej Aplikacja jest udostepniona.
