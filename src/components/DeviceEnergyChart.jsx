@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
 } from 'recharts'
@@ -61,25 +61,33 @@ export const DeviceEnergyChart = ({ deviceId, refreshKey = 0 }) => {
     setRange(key)
     try { localStorage.setItem(rangeStorageKey(deviceId), key) } catch { /* np. tryb prywatny */ }
   }
-  const [data, setData] = useState(null)
+  // Cache per zakres: powrót do raz pobranego zakresu pokazuje dane od razu
+  // (bez spinnera), a fetch w tle tylko je odświeża.
+  const [cache, setCache] = useState({})
   const [loading, setLoading] = useState(true)
+  const data = cache[range] ?? null
 
-  // silent: odświeżenie w tle bez spinnera i bez kasowania danych przy błędzie
-  const load = useCallback(async ({ silent = false } = {}) => {
-    if (!silent) setLoading(true)
+  const deviceRef = useRef(deviceId)
+  if (deviceRef.current !== deviceId) {
+    deviceRef.current = deviceId
+    setCache({})
+  }
+
+  const load = useCallback(async () => {
+    setLoading(true)
     try {
-      setData(await fetchDeviceHistory(deviceId, range))
+      const fresh = await fetchDeviceHistory(deviceId, range)
+      setCache((prev) => ({ ...prev, [range]: fresh }))
     } catch {
-      if (!silent) setData(null)
+      // błąd: zostawiamy cache — stare dane lepsze niż pusty wykres
     } finally {
-      if (!silent) setLoading(false)
+      setLoading(false)
     }
   }, [deviceId, range])
 
   useEffect(() => { load() }, [load, refreshKey])
 
-  const silentReload = useCallback(() => load({ silent: true }), [load])
-  usePolling({ intervalMs: 600000, enabled: true, onTick: silentReload })
+  usePolling({ intervalMs: 600000, enabled: true, onTick: load })
 
   const series = data?.series || []
   const summary = data?.summary
@@ -132,7 +140,7 @@ export const DeviceEnergyChart = ({ deviceId, refreshKey = 0 }) => {
 
       {/* Wykres na gradientowym panelu */}
       <div className="bg-gradient-to-br from-indigo-500/15 to-purple-600/5 border border-indigo-500/25 rounded-xl p-2">
-        {loading ? (
+        {loading && !data ? (
           <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 text-indigo-400 animate-spin" /></div>
         ) : series.length === 0 ? (
           <p className="text-xs text-slate-400 py-8 text-center">Za mało pomiarów dla tego okresu.</p>
