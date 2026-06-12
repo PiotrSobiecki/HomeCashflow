@@ -30,6 +30,14 @@ const fmtKwh = (v) => {
   return n !== 0 && Math.abs(n) < 1 ? n.toFixed(3) : n.toFixed(2)
 }
 
+// Mobile: zawsze max 3 cyfry łącznie, żeby kafelek się mieścił (0.92, 11.1, 123).
+const fmtKwhMobile = (v) => {
+  const n = v ?? 0
+  if (Math.abs(n) >= 100) return n.toFixed(0)
+  if (Math.abs(n) >= 10) return n.toFixed(1)
+  return n.toFixed(2)
+}
+
 export const DeviceEnergyChart = ({ deviceId, refreshKey = 0 }) => {
   const [range, setRange] = useState('30d')
   const [data, setData] = useState(null)
@@ -78,7 +86,7 @@ export const DeviceEnergyChart = ({ deviceId, refreshKey = 0 }) => {
             <Activity className="w-3 h-3" /> Zużycie
           </p>
           <p className="text-lg font-bold text-white leading-none">
-            <span className="sm:hidden">{(summary?.energyKwh ?? 0).toFixed(2)}</span>
+            <span className="sm:hidden">{fmtKwhMobile(summary?.energyKwh)}</span>
             <span className="hidden sm:inline">{fmtKwh(summary?.energyKwh)}</span>{' '}
             <span className="text-xs font-medium text-slate-400">kWh</span>
           </p>
