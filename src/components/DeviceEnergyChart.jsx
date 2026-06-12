@@ -7,6 +7,7 @@ import { fetchDeviceHistory } from '../lib/api'
 import { usePolling } from '../hooks/usePolling'
 
 const RANGES = [
+  { key: '1d', label: '24h' },
   { key: '7d', label: '7 dni' },
   { key: '30d', label: '30 dni' },
   { key: '90d', label: '90 dni' },
@@ -18,10 +19,25 @@ const TZ = 'Europe/Warsaw'
 
 function formatTick(iso, range) {
   const d = new Date(iso)
+  if (range === '1d') {
+    return d.toLocaleTimeString('pl-PL', { timeZone: TZ, hour: '2-digit', minute: '2-digit' })
+  }
   if (range === '7d') {
     return d.toLocaleString('pl-PL', { timeZone: TZ, weekday: 'short', hour: '2-digit', minute: '2-digit' })
   }
   return d.toLocaleDateString('pl-PL', { timeZone: TZ, day: '2-digit', month: '2-digit' })
+}
+
+// Zakres pamiętany per urządzenie — każde może mieć inny wybrany okres.
+const rangeStorageKey = (deviceId) => `deviceChartRange:${deviceId}`
+
+const loadSavedRange = (deviceId) => {
+  try {
+    const saved = localStorage.getItem(rangeStorageKey(deviceId))
+    return RANGES.some((r) => r.key === saved) ? saved : '30d'
+  } catch {
+    return '30d'
+  }
 }
 
 // Małe zużycie (np. 0.021) potrzebuje 3 miejsc; przy większych 2 wystarczą.
@@ -39,7 +55,12 @@ const fmtKwhMobile = (v) => {
 }
 
 export const DeviceEnergyChart = ({ deviceId, refreshKey = 0 }) => {
-  const [range, setRange] = useState('30d')
+  const [range, setRange] = useState(() => loadSavedRange(deviceId))
+
+  const selectRange = (key) => {
+    setRange(key)
+    try { localStorage.setItem(rangeStorageKey(deviceId), key) } catch { /* np. tryb prywatny */ }
+  }
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
 
@@ -69,7 +90,7 @@ export const DeviceEnergyChart = ({ deviceId, refreshKey = 0 }) => {
       <div className="flex items-center gap-1 mb-3">
         {RANGES.map((r) => (
           <button
-            key={r.key} type="button" onClick={() => setRange(r.key)}
+            key={r.key} type="button" onClick={() => selectRange(r.key)}
             className={`px-2.5 py-1 rounded-lg text-xs transition-colors ${
               range === r.key ? 'bg-indigo-500 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
             }`}

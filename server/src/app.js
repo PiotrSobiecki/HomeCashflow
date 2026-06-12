@@ -1459,6 +1459,7 @@ app.get("/api/smart-devices/:id/status", authMiddleware, async (c) => {
 
 // Historia zużycia (member+). Agregacja po stronie DB, bucket rośnie z zakresem.
 const HISTORY_RANGES = {
+  "1d": { interval: "1 day", bucketSec: 900 },       // co 15 min (częstotliwość crona)
   "7d": { interval: "7 days", bucketSec: 3600 },     // godzinowo
   "30d": { interval: "30 days", bucketSec: 21600 },  // co 6h
   "90d": { interval: "90 days", bucketSec: 86400 },  // dziennie
