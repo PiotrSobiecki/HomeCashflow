@@ -83,7 +83,7 @@ export const DeviceEnergyChart = ({ deviceId, refreshKey = 0 }) => {
         </div>
         <div className="bg-gradient-to-br from-amber-500/20 to-amber-600/10 border border-amber-500/30 rounded-xl p-2.5">
           <p className="text-amber-400 text-[11px] font-medium mb-0.5 flex items-center gap-1">
-            <Zap className="w-3 h-3" /> Szczyt mocy
+            <Zap className="w-3 h-3" /> <span className="sm:hidden">Szczyt</span><span className="hidden sm:inline">Szczyt mocy</span>
           </p>
           <p className="text-lg font-bold text-white leading-none">
             {summary?.peakW != null ? summary.peakW : '—'} <span className="text-xs font-medium text-slate-400">W</span>
