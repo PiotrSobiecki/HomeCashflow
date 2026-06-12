@@ -1477,47 +1477,50 @@ app.get("/api/smart-devices/:id/history", authMiddleware, async (c) => {
   const result = await loadDeviceInHousehold(sql, user.id, id);
   if (result.error) return c.json(result.error.body, result.error.status);
 
-  // Wykres mocy: średnia/szczyt power_w per bucket (po recorded_at), wyrównany do
-  // czasu warszawskiego (granice na czyste lokalne godziny/północe), nie do epoki UTC.
-  const series = await sql`
-    SELECT (to_timestamp(floor(extract(epoch from (recorded_at AT TIME ZONE 'Europe/Warsaw')) / ${cfg.bucketSec}::float8) * ${cfg.bucketSec}::float8)
-              AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Warsaw') AS bucket,
-           avg(power_w)::float8 AS avg_w,
-           max(power_w)::float8 AS max_w
-    FROM device_energy_snapshots
-    WHERE device_id = ${id} AND power_w IS NOT NULL AND recorded_at >= NOW() - ${cfg.interval}::interval
-    GROUP BY bucket
-    ORDER BY bucket ASC
-  `;
-
-  // Energia z DISTINCT paczek add_ele (po energy_reported_at = event_time z logów),
-  // każda raz. Zużycie w wybranym zakresie + w ostatniej godzinie (niezależne od zakresu).
-  const [rangeEnergy] = await sql`
-    SELECT COALESCE(SUM(energy_kwh), 0)::float8 AS kwh FROM (
-      SELECT DISTINCT ON (energy_reported_at) energy_kwh
+  // Zapytania są od siebie niezależne — lecą równolegle (sterownik HTTP Neona,
+  // każde to osobny request; sekwencyjnie sumowały się round-tripy).
+  const [series, [rangeEnergy], [lastHour], [peak], [priceRow]] = await Promise.all([
+    // Wykres mocy: średnia/szczyt power_w per bucket (po recorded_at), wyrównany do
+    // czasu warszawskiego (granice na czyste lokalne godziny/północe), nie do epoki UTC.
+    sql`
+      SELECT (to_timestamp(floor(extract(epoch from (recorded_at AT TIME ZONE 'Europe/Warsaw')) / ${cfg.bucketSec}::float8) * ${cfg.bucketSec}::float8)
+                AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Warsaw') AS bucket,
+             avg(power_w)::float8 AS avg_w,
+             max(power_w)::float8 AS max_w
       FROM device_energy_snapshots
-      WHERE device_id = ${id} AND energy_reported_at IS NOT NULL
-        AND energy_reported_at >= NOW() - ${cfg.interval}::interval
-      ORDER BY energy_reported_at, recorded_at
-    ) s
-  `;
-  const [lastHour] = await sql`
-    SELECT COALESCE(SUM(energy_kwh), 0)::float8 AS kwh FROM (
-      SELECT DISTINCT ON (energy_reported_at) energy_kwh
+      WHERE device_id = ${id} AND power_w IS NOT NULL AND recorded_at >= NOW() - ${cfg.interval}::interval
+      GROUP BY bucket
+      ORDER BY bucket ASC
+    `,
+    // Energia z DISTINCT paczek add_ele (po energy_reported_at = event_time z logów),
+    // każda raz. Zużycie w wybranym zakresie + w ostatniej godzinie (niezależne od zakresu).
+    sql`
+      SELECT COALESCE(SUM(energy_kwh), 0)::float8 AS kwh FROM (
+        SELECT DISTINCT ON (energy_reported_at) energy_kwh
+        FROM device_energy_snapshots
+        WHERE device_id = ${id} AND energy_reported_at IS NOT NULL
+          AND energy_reported_at >= NOW() - ${cfg.interval}::interval
+        ORDER BY energy_reported_at, recorded_at
+      ) s
+    `,
+    sql`
+      SELECT COALESCE(SUM(energy_kwh), 0)::float8 AS kwh FROM (
+        SELECT DISTINCT ON (energy_reported_at) energy_kwh
+        FROM device_energy_snapshots
+        WHERE device_id = ${id} AND energy_reported_at IS NOT NULL
+          AND energy_reported_at >= NOW() - interval '1 hour'
+        ORDER BY energy_reported_at, recorded_at
+      ) s
+    `,
+    sql`
+      SELECT max(power_w)::float8 AS peak_w
       FROM device_energy_snapshots
-      WHERE device_id = ${id} AND energy_reported_at IS NOT NULL
-        AND energy_reported_at >= NOW() - interval '1 hour'
-      ORDER BY energy_reported_at, recorded_at
-    ) s
-  `;
-  const [peak] = await sql`
-    SELECT max(power_w)::float8 AS peak_w
-    FROM device_energy_snapshots
-    WHERE device_id = ${id} AND recorded_at >= NOW() - ${cfg.interval}::interval
-  `;
-  const [priceRow] = await sql`
-    SELECT energy_price_pln FROM tuya_credentials WHERE household_id = ${result.row.household_id}
-  `;
+      WHERE device_id = ${id} AND recorded_at >= NOW() - ${cfg.interval}::interval
+    `,
+    sql`
+      SELECT energy_price_pln FROM tuya_credentials WHERE household_id = ${result.row.household_id}
+    `,
+  ]);
   const pricePln = priceRow?.energy_price_pln == null ? null : Number(priceRow.energy_price_pln);
 
   const energyKwh = rangeEnergy?.kwh == null ? 0 : Number(rangeEnergy.kwh);
