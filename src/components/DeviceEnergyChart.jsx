@@ -78,7 +78,9 @@ export const DeviceEnergyChart = ({ deviceId, refreshKey = 0 }) => {
             <Activity className="w-3 h-3" /> Zużycie
           </p>
           <p className="text-lg font-bold text-white leading-none">
-            {fmtKwh(summary?.energyKwh)} <span className="text-xs font-medium text-slate-400">kWh</span>
+            <span className="sm:hidden">{(summary?.energyKwh ?? 0).toFixed(2)}</span>
+            <span className="hidden sm:inline">{fmtKwh(summary?.energyKwh)}</span>{' '}
+            <span className="text-xs font-medium text-slate-400">kWh</span>
           </p>
         </div>
         <div className="bg-gradient-to-br from-amber-500/20 to-amber-600/10 border border-amber-500/30 rounded-xl p-2.5">
