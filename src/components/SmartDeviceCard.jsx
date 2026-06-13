@@ -18,6 +18,7 @@ export const SmartDeviceCard = ({
   const [cmdError, setCmdError] = useState('')
   const [showChart, setShowChart] = useState(true)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [refreshing, setRefreshing] = useState(false)
 
   const online = status?.ok && status?.online
   const hasReading = status?.ok
@@ -35,6 +36,13 @@ export const SmartDeviceCard = ({
     } catch {
       setCmdError('Nie udało się wysłać polecenia — stan bez zmian.')
     }
+  }
+
+  const handleRefresh = async () => {
+    if (refreshing) return
+    setRefreshing(true)
+    setRefreshKey((k) => k + 1) // przeładuj wykres (ma własny cache, więc fetch leci w tle)
+    try { await onRefresh(device.id) } finally { setRefreshing(false) }
   }
 
   const saveName = async () => {
@@ -113,10 +121,11 @@ export const SmartDeviceCard = ({
       <div className="flex items-center justify-between mt-2">
         <button
           type="button"
-          onClick={() => { setRefreshKey((k) => k + 1); onRefresh(device.id) }}
-          className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-indigo-400 transition-colors"
+          onClick={handleRefresh}
+          disabled={refreshing}
+          className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-indigo-400 transition-colors disabled:opacity-60"
         >
-          <RefreshCw className="w-3.5 h-3.5" /> Odśwież
+          <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} /> Odśwież
         </button>
 
         {isOwner && (

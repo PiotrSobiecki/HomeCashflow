@@ -114,7 +114,7 @@ export const DeviceEnergyChart = ({ deviceId, refreshKey = 0 }) => {
           <p className="text-emerald-400 text-[11px] font-medium mb-0.5 flex items-center gap-1">
             <Activity className="w-3 h-3" /> Zużycie
           </p>
-          <p className="text-lg font-bold text-white leading-none">
+          <p className="text-lg font-bold text-white leading-none whitespace-nowrap">
             <span className="sm:hidden">{fmtKwhMobile(summary?.energyKwh)}</span>
             <span className="hidden sm:inline">{fmtKwh(summary?.energyKwh)}</span>{' '}
             <span className="text-xs font-medium text-slate-400">kWh</span>
@@ -124,7 +124,7 @@ export const DeviceEnergyChart = ({ deviceId, refreshKey = 0 }) => {
           <p className="text-amber-400 text-[11px] font-medium mb-0.5 flex items-center gap-1">
             <Zap className="w-3 h-3" /> <span className="sm:hidden">Szczyt</span><span className="hidden sm:inline">Szczyt mocy</span>
           </p>
-          <p className="text-lg font-bold text-white leading-none">
+          <p className="text-lg font-bold text-white leading-none whitespace-nowrap">
             {summary?.peakW != null ? summary.peakW : '—'} <span className="text-xs font-medium text-slate-400">W</span>
           </p>
         </div>
@@ -132,7 +132,7 @@ export const DeviceEnergyChart = ({ deviceId, refreshKey = 0 }) => {
           <p className="text-sky-400 text-[11px] font-medium mb-0.5 flex items-center gap-1">
             <Banknote className="w-3 h-3" /> Koszt
           </p>
-          <p className="text-lg font-bold text-white leading-none">
+          <p className="text-lg font-bold text-white leading-none whitespace-nowrap">
             {summary?.costPln != null ? summary.costPln.toFixed(2) : '—'} <span className="text-xs font-medium text-slate-400">zł</span>
           </p>
         </div>
