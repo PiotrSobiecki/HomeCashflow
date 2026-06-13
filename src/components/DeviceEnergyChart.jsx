@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   ResponsiveContainer,
   AreaChart,
@@ -65,6 +65,22 @@ const fmtKwh = (v) => {
   return n !== 0 && Math.abs(n) < 1 ? n.toFixed(3) : n.toFixed(2);
 };
 
+/** Górna granica osi Y z ~12% zapasem — Recharts „nice ticks” potrafi uciąć szczyt (np. 380 W → max 360). */
+function computePowerYMax(series, peakW) {
+  let max = 0;
+  for (const p of series) {
+    if (p.avgW != null && p.avgW > max) max = p.avgW;
+    if (p.maxW != null && p.maxW > max) max = p.maxW;
+  }
+  if (peakW != null && peakW > max) max = peakW;
+  if (max <= 0) return 100;
+  const target = max * 1.12 + 10;
+  if (target <= 100) return Math.ceil(target / 10) * 10;
+  if (target <= 500) return Math.ceil(target / 50) * 50;
+  if (target <= 2500) return Math.ceil(target / 100) * 100;
+  return Math.ceil(target / 500) * 500;
+}
+
 // Mobile: zawsze max 3 cyfry łącznie, żeby kafelek się mieścił (0.92, 11.1, 123).
 const fmtKwhMobile = (v) => {
   const n = v ?? 0;
@@ -116,6 +132,10 @@ export const DeviceEnergyChart = ({ deviceId, refreshKey = 0 }) => {
 
   const series = data?.series || [];
   const summary = data?.summary;
+  const powerYMax = useMemo(
+    () => computePowerYMax(series, summary?.peakW),
+    [series, summary?.peakW],
+  );
 
   return (
     <div className="mt-3 pt-3 border-t border-slate-700/50">
@@ -216,6 +236,7 @@ export const DeviceEnergyChart = ({ deviceId, refreshKey = 0 }) => {
                 minTickGap={24}
               />
               <YAxis
+                domain={[0, powerYMax]}
                 tick={{ fontSize: 10, fill: "#c7d2fe" }}
                 stroke="#3f3f6e"
                 width={48}
