@@ -233,12 +233,21 @@ export const fetchSmartDevices = async () => {
 };
 
 export const fetchSmartDevicesStatus = async () => {
-  const res = await fetch(`${API_URL}/api/smart-devices/status`, {
-    credentials: 'include',
-    headers: { Accept: 'application/json' },
-  });
-  const data = await jsonOrThrow(res, 'GET /api/smart-devices/status');
-  return Array.isArray(data.statuses) ? data.statuses : [];
+  // Timeout, żeby na mobile (uśpiona karta / flaky sieć) request nie wisiał
+  // w nieskończoność — bez tego kółko "Odśwież" kręciłoby się bez końca.
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 15000);
+  try {
+    const res = await fetch(`${API_URL}/api/smart-devices/status`, {
+      credentials: 'include',
+      headers: { Accept: 'application/json' },
+      signal: ctrl.signal,
+    });
+    const data = await jsonOrThrow(res, 'GET /api/smart-devices/status');
+    return Array.isArray(data.statuses) ? data.statuses : [];
+  } finally {
+    clearTimeout(t);
+  }
 };
 
 /** Dane do raportu PDF: zakres dat (max rok) + opcjonalny filtr urządzeń. */
