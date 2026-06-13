@@ -158,7 +158,7 @@ export const DeviceEnergyChart = ({ deviceId, refreshKey = 0 }) => {
                 dataKey="t" tickFormatter={(t) => formatTick(t, range)}
                 tick={{ fontSize: 10, fill: '#a5b4fc' }} stroke="#3f3f6e" minTickGap={24}
               />
-              <YAxis tick={{ fontSize: 10, fill: '#c7d2fe' }} stroke="#3f3f6e" width={44} unit=" W" tickFormatter={(v) => Math.round(v)} />
+              <YAxis tick={{ fontSize: 10, fill: '#c7d2fe' }} stroke="#3f3f6e" width={56} tickFormatter={(v) => `${Math.round(v)} W`} />
               <Tooltip
                 contentStyle={{ background: '#1e1b4b', border: '1px solid #4f46e5', borderRadius: 8, fontSize: 12 }}
                 labelStyle={{ color: '#c7d2fe' }}
