@@ -65,14 +65,13 @@ const fmtKwh = (v) => {
   return n !== 0 && Math.abs(n) < 1 ? n.toFixed(3) : n.toFixed(2);
 };
 
-/** Górna granica osi Y z ~12% zapasem — Recharts „nice ticks” potrafi uciąć szczyt (np. 380 W → max 360). */
-function computePowerYMax(series, peakW) {
+/** Górna granica osi Y z ~12% zapasem — tylko z punktów wykresu (nie z kafelka „Szczyt”). */
+function computePowerYMax(series) {
   let max = 0;
   for (const p of series) {
-    if (p.avgW != null && p.avgW > max) max = p.avgW;
-    if (p.maxW != null && p.maxW > max) max = p.maxW;
+    const v = p.maxW ?? p.avgW;
+    if (v != null && v > max) max = v;
   }
-  if (peakW != null && peakW > max) max = peakW;
   if (max <= 0) return 100;
   const target = max * 1.12 + 10;
   if (target <= 100) return Math.ceil(target / 10) * 10;
@@ -132,10 +131,7 @@ export const DeviceEnergyChart = ({ deviceId, refreshKey = 0 }) => {
 
   const series = data?.series || [];
   const summary = data?.summary;
-  const powerYMax = useMemo(
-    () => computePowerYMax(series, summary?.peakW),
-    [series, summary?.peakW],
-  );
+  const powerYMax = useMemo(() => computePowerYMax(series), [series]);
 
   return (
     <div className="mt-3 pt-3 border-t border-slate-700/50">
@@ -208,6 +204,7 @@ export const DeviceEnergyChart = ({ deviceId, refreshKey = 0 }) => {
         ) : (
           <ResponsiveContainer width="100%" height={150}>
             <AreaChart
+              key={`${deviceId}-${range}-${powerYMax}`}
               data={series}
               margin={{ top: 4, right: 8, left: 0, bottom: 0 }}
             >
@@ -239,7 +236,7 @@ export const DeviceEnergyChart = ({ deviceId, refreshKey = 0 }) => {
                 domain={[0, powerYMax]}
                 tick={{ fontSize: 10, fill: "#c7d2fe" }}
                 stroke="#3f3f6e"
-                width={48}
+                width={50}
                 tickFormatter={(v) => `${Math.round(v)} W`}
               />
               <Tooltip
@@ -253,14 +250,14 @@ export const DeviceEnergyChart = ({ deviceId, refreshKey = 0 }) => {
                 labelFormatter={(t) =>
                   new Date(t).toLocaleString("pl-PL", { timeZone: TZ })
                 }
-                formatter={(v, name) => [
-                  `${v ?? "—"} W`,
-                  name === "avgW" ? "Śr. moc" : name,
+                formatter={(v) => [
+                  v != null ? `${Math.round(v * 10) / 10} W` : "—",
+                  "Moc (max w przedziale)",
                 ]}
               />
               <Area
                 type="monotone"
-                dataKey="avgW"
+                dataKey="maxW"
                 stroke="#a78bfa"
                 strokeWidth={2}
                 fill={`url(#grad-${deviceId})`}
