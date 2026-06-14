@@ -65,12 +65,11 @@ const fmtKwh = (v) => {
   return n !== 0 && Math.abs(n) < 1 ? n.toFixed(3) : n.toFixed(2);
 };
 
-/** Górna granica osi Y z ~12% zapasem — tylko z punktów wykresu (nie z kafelka „Szczyt”). */
+/** Górna granica osi Y z ~12% zapasem — z avgW na wykresie (bez kafelka „Szczyt”). */
 function computePowerYMax(series) {
   let max = 0;
   for (const p of series) {
-    const v = p.maxW ?? p.avgW;
-    if (v != null && v > max) max = v;
+    if (p.avgW != null && p.avgW > max) max = p.avgW;
   }
   if (max <= 0) return 100;
   const target = max * 1.12 + 10;
@@ -131,7 +130,10 @@ export const DeviceEnergyChart = ({ deviceId, refreshKey = 0 }) => {
 
   const series = data?.series || [];
   const summary = data?.summary;
-  const powerYMax = useMemo(() => computePowerYMax(series), [series]);
+  const powerYMax = useMemo(
+    () => computePowerYMax(series),
+    [series, range],
+  );
 
   return (
     <div className="mt-3 pt-3 border-t border-slate-700/50">
@@ -252,12 +254,12 @@ export const DeviceEnergyChart = ({ deviceId, refreshKey = 0 }) => {
                 }
                 formatter={(v) => [
                   v != null ? `${Math.round(v * 10) / 10} W` : "—",
-                  "Moc (max w przedziale)",
+                  "Śr. moc",
                 ]}
               />
               <Area
                 type="monotone"
-                dataKey="maxW"
+                dataKey="avgW"
                 stroke="#a78bfa"
                 strokeWidth={2}
                 fill={`url(#grad-${deviceId})`}
