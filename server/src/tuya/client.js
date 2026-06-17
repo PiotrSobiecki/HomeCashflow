@@ -208,6 +208,55 @@ export function sendCommands(ctx, deviceId, commands) {
   return tuyaFetchWithToken(ctx, 'POST', `/v1.0/iot-03/devices/${deviceId}/commands`, { commands })
 }
 
+// ====== Infrared (Smart IR) — sterowanie klimą na podczerwień ======
+//
+// Klima pod blasterem Smart IR nie ma sterowalnych DP — chodzi osobnym API:
+//   infraredId = id blastera Smart IR (gateway), remoteId = id pilota (sub-urządzenie).
+// @see https://developer.tuya.com/en/docs/cloud/infrared-air-conditioner-apis
+
+/** Odczyt stanu klimy IR. Zwraca { power, mode, temp, wind } jako stringi. */
+export function getAcStatus(ctx, infraredId, remoteId) {
+  return tuyaFetchWithToken(ctx, 'GET', `/v2.0/infrareds/${infraredId}/remotes/${remoteId}/ac/status`)
+}
+
+/** Wysyła pojedynczą komendę do klimy IR. `value` to liczba (power 0/1, temp 16-30, itd.). */
+export function sendAcCommand(ctx, infraredId, remoteId, code, value) {
+  return tuyaFetchWithToken(
+    ctx,
+    'POST',
+    `/v2.0/infrareds/${infraredId}/air-conditioners/${remoteId}/command`,
+    { code, value },
+  )
+}
+
+/**
+ * Lista przycisków pilota IR (TV/STB/itp.). Zwraca { category_id, key_list: [{key, key_id, key_name}] }.
+ * Pilot IR jest bezstanowy — nie ma odczytu stanu, tylko wysyłka przycisków.
+ */
+export function getRemoteKeys(ctx, infraredId, remoteId) {
+  return tuyaFetchWithToken(ctx, 'GET', `/v2.0/infrareds/${infraredId}/remotes/${remoteId}/keys`)
+}
+
+/** Wysyła pojedynczy przycisk pilota IR. `categoryId` z listy przycisków. */
+export function sendRemoteKey(ctx, infraredId, remoteId, { categoryId, key, keyId }) {
+  return tuyaFetchWithToken(
+    ctx,
+    'POST',
+    `/v2.0/infrareds/${infraredId}/remotes/${remoteId}/raw/command`,
+    { category_id: categoryId, key, key_id: keyId },
+  )
+}
+
+/** Stan klimy IR znormalizowany do liczb (Tuya zwraca stringi). */
+export function formatAcStatus(result) {
+  return {
+    power: num(result?.power),
+    mode: num(result?.mode),
+    temp: num(result?.temp),
+    wind: num(result?.wind),
+  }
+}
+
 function round(n, decimals) {
   const f = 10 ** decimals
   return Math.round(n * f) / f

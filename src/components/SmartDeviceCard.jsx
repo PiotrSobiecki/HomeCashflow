@@ -1,9 +1,21 @@
 import { useState } from 'react'
 import {
-  Power, Wifi, WifiOff, Zap, Activity, Gauge, RefreshCw, Clock,
+  Wifi, WifiOff, Zap, Activity, Gauge, RefreshCw, Clock,
   Pencil, Trash2, Check, X, Eye, EyeOff, BarChart3, ChevronDown,
+  AirVent, Tv, Plug, Cpu,
 } from 'lucide-react'
+
+// Tożsamość typu urządzenia w nagłówku — spójna dla wszystkich kart. Nowy typ?
+// dopisz wpis; brak wpisu → fallback (nazwa producenta / „Urządzenie").
+const TYPE_META = {
+  ir_ac: { label: 'Klimatyzacja', Icon: AirVent },
+  ir_remote: { label: 'Pilot', Icon: Tv },
+  plug: { label: 'Gniazdko', Icon: Plug },
+}
 import { DeviceControls } from './DeviceControls'
+import { AcControls } from './AcControls'
+import { RemoteControls } from './RemoteControls'
+import { DeviceTimer } from './DeviceTimer'
 import { DeviceEnergyChart } from './DeviceEnergyChart'
 
 /**
@@ -22,6 +34,11 @@ export const SmartDeviceCard = ({
 
   const online = status?.ok && status?.online
   const hasReading = status?.ok
+  const isIrAc = device.deviceType === 'ir_ac'
+  const isIrRemote = device.deviceType === 'ir_remote'
+  const isIr = isIrAc || isIrRemote
+  const typeMeta = TYPE_META[device.deviceType] || { label: device.productName || 'Urządzenie', Icon: Cpu }
+  const TypeIcon = typeMeta.Icon
 
   // Statystyki dzisiejsze (od północy czasu warszawskiego) — liczone w backendzie
   const todayKwh = status?.todayKwh ?? null
@@ -54,8 +71,16 @@ export const SmartDeviceCard = ({
   return (
     <div className={`bg-slate-800/50 border rounded-2xl p-4 ${device.isActive ? 'border-slate-700/50' : 'border-slate-800 opacity-60'}`}>
       <div className="flex items-start justify-between gap-2 mb-3">
-        <div className="flex items-center gap-2 min-w-0">
-          <Power className={`w-5 h-5 shrink-0 ${status?.switchOn ? 'text-emerald-400' : 'text-slate-500'}`} />
+        <div className="flex items-center gap-2.5 min-w-0">
+          {/* Ikona typu. Stan on/off pokazujemy TYLKO gdy go znamy (gniazdko/klima);
+              pilot IR jest bezstanowy → neutralna, żeby nie sugerować włączenia. */}
+          <div className={`shrink-0 w-9 h-9 rounded-lg flex items-center justify-center ${
+            isIrRemote ? 'bg-slate-700/40 text-slate-300'
+            : status?.switchOn ? 'bg-emerald-500/15 text-emerald-400'
+            : 'bg-slate-700/40 text-slate-400'
+          }`}>
+            <TypeIcon className="w-5 h-5" />
+          </div>
           {editing ? (
             <div className="flex items-center gap-1">
               <input
@@ -69,7 +94,10 @@ export const SmartDeviceCard = ({
               <button onClick={() => setEditing(false)} className="p-1 text-slate-400 hover:bg-slate-600 rounded"><X className="w-4 h-4" /></button>
             </div>
           ) : (
-            <h4 className="text-white font-medium truncate">{device.displayName}</h4>
+            <div className="min-w-0">
+              <h4 className="text-white font-medium truncate leading-tight">{device.displayName}</h4>
+              <p className="text-[11px] text-slate-500 truncate">{typeMeta.label}</p>
+            </div>
           )}
         </div>
         <span className={`flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs shrink-0 ${online ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-700/50 text-slate-400'}`}>
@@ -78,8 +106,8 @@ export const SmartDeviceCard = ({
         </span>
       </div>
 
-      {/* Pomiary */}
-      {hasReading ? (
+      {/* Pomiary (gniazdka — urządzenia IR to piloty, bez pomiaru energii) */}
+      {!isIr && (hasReading ? (
         <div className="mb-3">
           <div className="grid grid-cols-3 gap-2">
             <Metric icon={Zap} label="Moc" value={status.powerW != null ? `${status.powerW} W` : '—'} />
@@ -94,29 +122,42 @@ export const SmartDeviceCard = ({
         </div>
       ) : (
         <p className="text-xs text-slate-500 mb-3">Nie udało się odświeżyć statusu.</p>
-      )}
+      ))}
 
-      {/* Sterowanie — generowane z zapisywalnych DP */}
-      <DeviceControls
-        functionsJson={device.functionsJson}
-        raw={status?.raw}
-        onSend={handleSend}
-        disabled={!online}
-      />
+      {/* Sterowanie — klima IR: panel AC; pilot IR: siatka przycisków; reszta: DP urządzenia */}
+      {isIrAc ? (
+        <AcControls ac={status?.ac} onSend={handleSend} disabled={!online} />
+      ) : isIrRemote ? (
+        <RemoteControls deviceId={device.id} disabled={!online} />
+      ) : (
+        <DeviceControls
+          functionsJson={device.functionsJson}
+          raw={status?.raw}
+          onSend={handleSend}
+          disabled={!online}
+        />
+      )}
 
       {cmdError && <p className="text-xs text-rose-400 mb-2">{cmdError}</p>}
 
-      {/* Wykres zużycia (rozwijany — montowany dopiero po otwarciu) */}
-      <button
-        type="button"
-        onClick={() => setShowChart((v) => !v)}
-        className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-indigo-400 transition-colors mb-1"
-      >
-        <BarChart3 className="w-3.5 h-3.5" />
-        Zużycie
-        <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showChart ? 'rotate-180' : ''}`} />
-      </button>
-      {showChart && <DeviceEnergyChart deviceId={device.id} refreshKey={refreshKey} />}
+      {/* Wyłącznik czasowy — urządzenia IR (gniazdka mają natywny countdown w DP) */}
+      {isIr && <DeviceTimer deviceId={device.id} disabled={!online} />}
+
+      {/* Wykres zużycia (rozwijany — montowany dopiero po otwarciu); urządzenia IR bez pomiaru */}
+      {!isIr && (
+        <>
+          <button
+            type="button"
+            onClick={() => setShowChart((v) => !v)}
+            className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-indigo-400 transition-colors mb-1"
+          >
+            <BarChart3 className="w-3.5 h-3.5" />
+            Zużycie
+            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showChart ? 'rotate-180' : ''}`} />
+          </button>
+          {showChart && <DeviceEnergyChart deviceId={device.id} refreshKey={refreshKey} />}
+        </>
+      )}
 
       <div className="flex items-center justify-between mt-2">
         <button

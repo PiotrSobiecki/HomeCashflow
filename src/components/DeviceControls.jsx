@@ -68,7 +68,7 @@ export const DeviceControls = ({ functionsJson, raw = {}, onSend, disabled }) =>
   }
 
   return (
-    <div className="space-y-2.5 mb-3">
+    <div className="bg-slate-900/50 border border-slate-700/50 rounded-2xl p-3 sm:p-4 mb-3 space-y-2.5">
       {fns.map((fn) => {
         const type = String(fn.type).toLowerCase()
         const current = raw[fn.code]

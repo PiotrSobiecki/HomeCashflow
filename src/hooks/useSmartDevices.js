@@ -87,9 +87,13 @@ export function useSmartDevices() {
       const s = prev[deviceId]
       if (!s) return prev
       const raw = { ...(s.raw || {}) }
-      for (const cmd of commands) raw[cmd.code] = cmd.value
-      const switchOn = raw.switch_1 ?? raw.switch ?? raw.switch_led ?? s.switchOn
-      return { ...prev, [deviceId]: { ...s, raw, switchOn } }
+      const ac = s.ac ? { ...s.ac } : null
+      for (const cmd of commands) {
+        raw[cmd.code] = cmd.value
+        if (ac && cmd.code in ac) ac[cmd.code] = cmd.value
+      }
+      const switchOn = ac ? ac.power === 1 : (raw.switch_1 ?? raw.switch ?? raw.switch_led ?? s.switchOn)
+      return { ...prev, [deviceId]: { ...s, raw, ...(ac ? { ac } : {}), switchOn } }
     })
     setTimeout(refreshStatus, 1200)
   }, [refreshStatus])

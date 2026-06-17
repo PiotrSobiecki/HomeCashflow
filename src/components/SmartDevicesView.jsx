@@ -34,6 +34,9 @@ export const SmartDevicesView = () => {
 
   const refreshOne = async () => { await refreshStatus() }
 
+  // Urządzenia na podczerwień (Smart IR) to piloty — bez poboru mocy, wykresów i kosztów.
+  const energyDevices = devices.filter((d) => !String(d.deviceType || '').startsWith('ir_'))
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800">
       <AppHeader activeView="urzadzenia" />
@@ -91,10 +94,10 @@ export const SmartDevicesView = () => {
           {error && <p className="mt-3 text-sm text-rose-400">{error}</p>}
         </div>
 
-        {/* Raport zużycia — na dole, pełna szerokość */}
-        {devices.length > 0 && (
+        {/* Raport zużycia — tylko gniazdka z pomiarem (klima IR to pilot, bez poboru/kosztów) */}
+        {energyDevices.length > 0 && (
           <div className="mt-6">
-            <EnergyReportExport key={devices.map((d) => d.id).join(',')} devices={devices} />
+            <EnergyReportExport key={energyDevices.map((d) => d.id).join(',')} devices={energyDevices} />
           </div>
         )}
       </main>

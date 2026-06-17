@@ -52,3 +52,32 @@ export function validateCommands(functionsJson, commands) {
 
   return null
 }
+
+// ====== Klima na podczerwień (Smart IR) ======
+//
+// IR AC chodzi osobnym API i przyjmuje wartości liczbowe (nie boolean/enum jak DP).
+// Zakresy wg standardowego zestawu instrukcji Tuya (potwierdzone w panelu urządzenia):
+//   power 0/1, mode 0–4, temp 16–30, wind 0–3.
+export const AC_CODES = {
+  power: { min: 0, max: 1 },
+  mode: { min: 0, max: 4 },
+  temp: { min: 16, max: 30 },
+  wind: { min: 0, max: 3 },
+}
+
+/**
+ * Walidacja komend klimy IR względem stałego modelu AC.
+ * @returns {string | null} null = ok, inaczej kod błędu
+ */
+export function validateAcCommands(commands) {
+  if (!Array.isArray(commands) || commands.length === 0) return 'commands_required'
+  for (const cmd of commands) {
+    if (!cmd || typeof cmd.code !== 'string') return 'command_not_allowed'
+    const spec = AC_CODES[cmd.code]
+    if (!spec) return 'command_not_allowed'
+    const value = cmd.value
+    if (typeof value !== 'number' || !Number.isFinite(value)) return 'invalid_value'
+    if (value < spec.min || value > spec.max) return 'invalid_value'
+  }
+  return null
+}
