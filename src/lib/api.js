@@ -324,6 +324,28 @@ export const addSmartDevice = async (tuyaDeviceId) => {
   return jsonOrThrow(res, 'POST /api/smart-devices');
 };
 
+// ===== Urządzenia SmartThings (Faza 2) =====
+
+/** Lista urządzeń z połączonego konta SmartThings (już dodane odfiltrowane). */
+export const discoverSmartThingsDevices = async () => {
+  const res = await fetch(`${API_URL}/api/smart-devices/discover-smartthings`, {
+    credentials: 'include',
+    headers: { Accept: 'application/json' },
+  });
+  const data = await jsonOrThrow(res, 'GET /api/smart-devices/discover-smartthings');
+  return Array.isArray(data.devices) ? data.devices : [];
+};
+
+export const addSmartThingsDevice = async (externalDeviceId, displayName) => {
+  const res = await fetch(`${API_URL}/api/smart-devices/smartthings`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ externalDeviceId, displayName }),
+  });
+  return jsonOrThrow(res, 'POST /api/smart-devices/smartthings');
+};
+
 export const patchSmartDevice = async (id, body) => {
   const res = await fetch(`${API_URL}/api/smart-devices/${id}`, {
     method: 'PATCH',

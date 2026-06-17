@@ -107,7 +107,12 @@ export const SmartDeviceCard = ({
             </div>
           ) : (
             <div className="min-w-0">
-              <h4 className="text-white font-medium truncate leading-tight">{device.displayName}</h4>
+              <div className="flex items-center gap-1.5 min-w-0">
+                <h4 className="text-white font-medium truncate leading-tight">{device.displayName}</h4>
+                {device.provider === 'smartthings' && (
+                  <span className="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300">SmartThings</span>
+                )}
+              </div>
               <p className="text-[11px] text-slate-500 truncate">{isGroup ? `${typeMeta.label} · zestaw` : typeMeta.label}</p>
             </div>
           )}

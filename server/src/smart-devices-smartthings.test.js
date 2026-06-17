@@ -1,0 +1,294 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+
+// Granice (zewnętrzne API): klient Tuya i klient SmartThings. Mockujemy wrappery —
+// nie global fetch (Neon też go używa). Pure helpery (summarizeDevices) zostają realne.
+vi.mock('./tuya/client.js', async () => {
+  const actual = await vi.importActual('./tuya/client.js')
+  return {
+    getTuyaToken: vi.fn(),
+    getDeviceInfo: vi.fn(),
+    getDeviceFunctions: vi.fn(),
+    getDeviceStatus: vi.fn(),
+    listProjectDevices: vi.fn(),
+    sendCommands: vi.fn(),
+    formatStatuses: actual.formatStatuses,
+  }
+})
+vi.mock('./smartthings/client.js', () => ({
+  getStDevices: vi.fn(),
+  getStDevice: vi.fn(),
+}))
+
+import { app, upsertUserAndHousehold } from './app.js'
+import { getTuyaToken, getDeviceInfo, getDeviceFunctions } from './tuya/client.js'
+import { getStDevices, getStDevice } from './smartthings/client.js'
+import { saveTokens } from './smartthings/credentials.js'
+import { decodeFinanceDataKey } from './finance-crypto.js'
+import { neon } from '@neondatabase/serverless'
+import { SignJWT } from 'jose'
+
+const sql = neon(process.env.DATABASE_URL)
+const JWT_SECRET = new TextEncoder().encode(process.env.NEXTAUTH_SECRET || 'test-secret')
+const rawKey = decodeFinanceDataKey(process.env.FINANCE_DATA_KEY)
+
+let createdUserIds = []
+const uniq = () => Math.random().toString(36).slice(2, 10)
+
+async function createUser(googleId, email, name) {
+  const db = neon(process.env.DATABASE_URL)
+  const user = await upsertUserAndHousehold(db, { sub: googleId, email, name })
+  createdUserIds.push(user.id)
+  const token = await new SignJWT({ userId: user.id })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setExpirationTime('1h')
+    .sign(JWT_SECRET)
+  return { user, token }
+}
+
+async function addMemberToHousehold(ownerToken) {
+  const email = `mem-${uniq()}@test.com`
+  const invRes = await app.request('/api/household/invite', {
+    method: 'POST',
+    headers: { cookie: `token=${ownerToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  })
+  const { invitation } = await invRes.json()
+  const member = await createUser(`g-mem-${uniq()}`, email, 'Member')
+  await app.request(`/api/household/invite/${invitation.token}/accept`, {
+    method: 'POST',
+    headers: { cookie: `token=${member.token}` },
+  })
+  return member
+}
+
+/** Owner z zapisanymi (zweryfikowanymi) poświadczeniami Tuya. */
+async function createTuyaOwner() {
+  const owner = await createUser(`g-own-${uniq()}`, `own-${uniq()}@test.com`, 'Owner')
+  vi.mocked(getTuyaToken).mockResolvedValue({ accessToken: 'tok', expireTime: 7200 })
+  await app.request('/api/tuya/credentials', {
+    method: 'PUT',
+    headers: { cookie: `token=${owner.token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ clientId: 'cid', clientSecret: 'sec', datacenter: 'eu' }),
+  })
+  return owner
+}
+
+/** Dodaje urządzenie Tuya (gniazdko) i zwraca utworzony wiersz. */
+async function addTuyaDevice(ownerToken, id = 'tuya-dev-1', name = 'Salon') {
+  vi.mocked(getDeviceInfo).mockResolvedValue({ name, online: true })
+  vi.mocked(getDeviceFunctions).mockResolvedValue({ functions: [] })
+  const res = await app.request('/api/smart-devices', {
+    method: 'POST',
+    headers: { cookie: `token=${ownerToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tuyaDeviceId: id }),
+  })
+  return res.json()
+}
+
+function listDevices(token) {
+  return app.request('/api/smart-devices', { headers: { cookie: `token=${token}` } })
+}
+
+/** Seeduje poświadczenia SmartThings (zaszyfrowany token, ważny) dla gospodarstwa ownera. */
+async function connectSmartthings(owner) {
+  const [m] = await sql`SELECT household_id FROM household_members WHERE user_id = ${owner.user.id}`
+  await saveTokens(sql, {
+    householdId: m.household_id,
+    tokens: {
+      accessToken: 'st-access',
+      refreshToken: 'st-refresh',
+      expiresAt: Date.now() + 3600 * 1000,
+    },
+    scopes: 'r:devices:* x:devices:*',
+    createdBy: owner.user.id,
+    rawKey,
+  })
+  return m.household_id
+}
+
+beforeEach(() => {
+  createdUserIds = []
+  vi.mocked(getTuyaToken).mockReset()
+  vi.mocked(getDeviceInfo).mockReset()
+  vi.mocked(getDeviceFunctions).mockReset()
+  vi.mocked(getStDevices).mockReset()
+  vi.mocked(getStDevice).mockReset()
+})
+
+afterEach(async () => {
+  if (createdUserIds.length) {
+    await sql`DELETE FROM users WHERE id = ANY(${createdUserIds})`
+  }
+})
+
+/** Surowy obiekt urządzenia ST (jak z GET /v1/devices), z capability cyklu. */
+function stDevice(deviceId, label, cycleCapability = 'washerOperatingState') {
+  return {
+    deviceId,
+    label,
+    components: [{ id: 'main', capabilities: [{ id: 'switch' }, { id: cycleCapability }] }],
+  }
+}
+
+function discoverSt(token) {
+  return app.request('/api/smart-devices/discover-smartthings', { headers: { cookie: `token=${token}` } })
+}
+
+function addStDevice(token, externalDeviceId, displayName) {
+  return app.request('/api/smart-devices/smartthings', {
+    method: 'POST',
+    headers: { cookie: `token=${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ externalDeviceId, displayName }),
+  })
+}
+
+describe('smart_devices provider column (regression: Tuya)', () => {
+  it('reports provider=tuya and externalDeviceId for an existing Tuya device', async () => {
+    const owner = await createTuyaOwner()
+    await addTuyaDevice(owner.token, 'tuya-dev-1', 'Salon')
+
+    const { devices } = await (await listDevices(owner.token)).json()
+    expect(devices).toHaveLength(1)
+    expect(devices[0]).toMatchObject({
+      tuyaDeviceId: 'tuya-dev-1',
+      provider: 'tuya',
+      externalDeviceId: 'tuya-dev-1',
+    })
+  })
+})
+
+describe('GET /api/smart-devices/discover-smartthings', () => {
+  it('owner gets devices from the connected ST account with inferred type', async () => {
+    const owner = await createTuyaOwner()
+    await connectSmartthings(owner)
+    vi.mocked(getStDevices).mockResolvedValue([
+      stDevice('st-washer', 'Pralka', 'washerOperatingState'),
+      stDevice('st-dryer', 'Suszarka', 'dryerOperatingState'),
+    ])
+
+    const res = await discoverSt(owner.token)
+    expect(res.status).toBe(200)
+    const { devices } = await res.json()
+    expect(devices).toEqual([
+      { deviceId: 'st-washer', label: 'Pralka', type: 'washer' },
+      { deviceId: 'st-dryer', label: 'Suszarka', type: 'dryer' },
+    ])
+  })
+
+  it('filters out devices already added to this household', async () => {
+    const owner = await createTuyaOwner()
+    await connectSmartthings(owner)
+    // Pralka już dodana wcześniej.
+    vi.mocked(getStDevice).mockResolvedValue(stDevice('st-washer', 'Pralka'))
+    expect((await addStDevice(owner.token, 'st-washer', 'Pralka')).status).toBe(201)
+
+    vi.mocked(getStDevices).mockResolvedValue([
+      stDevice('st-washer', 'Pralka'),
+      stDevice('st-dryer', 'Suszarka', 'dryerOperatingState'),
+    ])
+    const { devices } = await (await discoverSt(owner.token)).json()
+    expect(devices.map((d) => d.deviceId)).toEqual(['st-dryer'])
+  })
+
+  it('returns 400 when ST account is not connected', async () => {
+    const owner = await createTuyaOwner()
+    const res = await discoverSt(owner.token)
+    expect(res.status).toBe(400)
+  })
+
+  it('returns 403 for a member', async () => {
+    const owner = await createTuyaOwner()
+    await connectSmartthings(owner)
+    const member = await addMemberToHousehold(owner.token)
+    const res = await discoverSt(member.token)
+    expect(res.status).toBe(403)
+  })
+})
+
+describe('POST /api/smart-devices/smartthings', () => {
+  it('adds a device as provider=smartthings with a saved capabilities snapshot', async () => {
+    const owner = await createTuyaOwner()
+    await connectSmartthings(owner)
+    vi.mocked(getStDevice).mockResolvedValue(stDevice('st-washer', 'Pralka'))
+
+    const res = await addStDevice(owner.token, 'st-washer', 'Pralka kuchnia')
+    expect(res.status).toBe(201)
+    const created = await res.json()
+    expect(created).toMatchObject({
+      provider: 'smartthings',
+      externalDeviceId: 'st-washer',
+      displayName: 'Pralka kuchnia',
+      deviceType: 'washer',
+      tuyaDeviceId: null,
+    })
+    expect(created.capabilitiesJson).toBeTruthy()
+
+    const { devices } = await (await listDevices(owner.token)).json()
+    const stRow = devices.find((d) => d.externalDeviceId === 'st-washer')
+    expect(stRow).toMatchObject({ provider: 'smartthings', deviceType: 'washer' })
+    // Snapshot zawiera capability cyklu (do mappera w Fazie 3).
+    const capIds = stRow.capabilitiesJson[0].capabilities.map((cap) => cap.id)
+    expect(capIds).toContain('washerOperatingState')
+  })
+
+  it('falls back to the ST label when no displayName is given', async () => {
+    const owner = await createTuyaOwner()
+    await connectSmartthings(owner)
+    vi.mocked(getStDevice).mockResolvedValue(stDevice('st-dryer', 'Suszarka Samsung', 'dryerOperatingState'))
+
+    const res = await addStDevice(owner.token, 'st-dryer')
+    const created = await res.json()
+    expect(created).toMatchObject({ displayName: 'Suszarka Samsung', deviceType: 'dryer' })
+  })
+
+  it('returns 409 when the device is already linked to another household', async () => {
+    const owner1 = await createTuyaOwner()
+    await connectSmartthings(owner1)
+    vi.mocked(getStDevice).mockResolvedValue(stDevice('shared-st', 'Pralka'))
+    expect((await addStDevice(owner1.token, 'shared-st', 'Pralka')).status).toBe(201)
+
+    const owner2 = await createTuyaOwner()
+    await connectSmartthings(owner2)
+    const res = await addStDevice(owner2.token, 'shared-st', 'Pralka 2')
+    expect(res.status).toBe(409)
+    expect((await res.json()).error).toBe('device_already_linked')
+  })
+
+  it('returns 400 when ST account is not connected', async () => {
+    const owner = await createTuyaOwner()
+    const res = await addStDevice(owner.token, 'st-washer', 'Pralka')
+    expect(res.status).toBe(400)
+  })
+
+  it('returns 403 for a member', async () => {
+    const owner = await createTuyaOwner()
+    await connectSmartthings(owner)
+    const member = await addMemberToHousehold(owner.token)
+    const res = await addStDevice(member.token, 'st-washer', 'Pralka')
+    expect(res.status).toBe(403)
+  })
+})
+
+describe('DELETE /api/smartthings/disconnect (cascade to ST devices)', () => {
+  it('removes ST credentials and ST devices, leaving Tuya devices intact', async () => {
+    const owner = await createTuyaOwner()
+    const householdId = await connectSmartthings(owner)
+    await addTuyaDevice(owner.token, 'tuya-keep', 'Gniazdko')
+    vi.mocked(getStDevice).mockResolvedValue(stDevice('st-gone', 'Pralka'))
+    await addStDevice(owner.token, 'st-gone', 'Pralka')
+
+    const res = await app.request('/api/smartthings/disconnect', {
+      method: 'DELETE', headers: { cookie: `token=${owner.token}` },
+    })
+    expect(res.status).toBe(204)
+
+    // Poświadczenia ST skasowane.
+    const [cred] = await sql`SELECT 1 FROM smartthings_credentials WHERE household_id = ${householdId}`
+    expect(cred).toBeUndefined()
+
+    // Urządzenie ST zniknęło, Tuya zostało.
+    const { devices } = await (await listDevices(owner.token)).json()
+    expect(devices.map((d) => d.externalDeviceId)).toEqual(['tuya-keep'])
+    expect(devices.every((d) => d.provider === 'tuya')).toBe(true)
+  })
+})

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   fetchSmartDevices, fetchSmartDevicesStatus,
-  addSmartDevice, patchSmartDevice, deleteSmartDevice, sendDeviceCommands,
+  addSmartDevice, addSmartThingsDevice, patchSmartDevice, deleteSmartDevice, sendDeviceCommands,
 } from '../lib/api'
 import { usePolling } from './usePolling'
 
@@ -65,6 +65,11 @@ export function useSmartDevices() {
     await reload()
   }, [reload])
 
+  const addSt = useCallback(async (externalDeviceId, displayName) => {
+    await addSmartThingsDevice(externalDeviceId, displayName)
+    await reload()
+  }, [reload])
+
   const rename = useCallback(async (id, displayName) => {
     const updated = await patchSmartDevice(id, { displayName })
     setDevices((prev) => prev.map((d) => (d.id === id ? updated : d)))
@@ -105,5 +110,5 @@ export function useSmartDevices() {
     setTimeout(refreshStatus, 1200)
   }, [refreshStatus])
 
-  return { devices, statusById, loading, error, reload, refreshStatus, add, rename, setActive, linkPlug, remove, sendCommand }
+  return { devices, statusById, loading, error, reload, refreshStatus, add, addSt, rename, setActive, linkPlug, remove, sendCommand }
 }

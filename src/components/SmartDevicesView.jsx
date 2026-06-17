@@ -30,7 +30,7 @@ export const SmartDevicesView = () => {
   const [isOwner, setIsOwner] = useState(false)
   const {
     devices, statusById, loading, error,
-    refreshStatus, add, rename, setActive, linkPlug, remove, sendCommand,
+    refreshStatus, add, addSt, rename, setActive, linkPlug, remove, sendCommand,
   } = useSmartDevices()
   const [showAdd, setShowAdd] = useState(false)
   const [removeTarget, setRemoveTarget] = useState(null)
@@ -186,7 +186,7 @@ export const SmartDevicesView = () => {
       <AppFooter />
 
       {showAdd && (
-        <AddSmartDeviceModal onClose={() => setShowAdd(false)} onAdd={add} />
+        <AddSmartDeviceModal onClose={() => setShowAdd(false)} onAdd={add} onAddSt={addSt} />
       )}
 
       <ConfirmDialog

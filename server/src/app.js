@@ -12,7 +12,9 @@ import {
 } from "./tuya/client.js";
 import { validateCommands, validateAcCommands } from "./tuya/commands.js";
 import { buildAuthorizeUrl, exchangeCodeForTokens } from "./smartthings/oauth.js";
-import { saveTokens } from "./smartthings/credentials.js";
+import { saveTokens, getFreshAccessToken } from "./smartthings/credentials.js";
+import { getStDevices, getStDevice } from "./smartthings/client.js";
+import { summarizeDevices, inferDeviceType } from "./smartthings/devices.js";
 import {
   readFinanceFromRelational,
   writeFinanceToRelational,
@@ -1365,6 +1367,9 @@ app.delete("/api/smartthings/disconnect", authMiddleware, async (c) => {
   const membership = await getMembershipWithOwner(sql, user.id);
   if (!membership) return c.json({ error: "No household" }, 400);
   if (membership.owner_id !== user.id) return c.json({ error: "forbidden_owner_only" }, 403);
+  // Rozłączenie kasuje też urządzenia ST (RODO + nie zostawiamy martwych kart bez tokenów).
+  // Urządzenia Tuya zostają nietknięte.
+  await sql`DELETE FROM smart_devices WHERE household_id = ${membership.household_id} AND provider = 'smartthings'`;
   await sql`DELETE FROM smartthings_credentials WHERE household_id = ${membership.household_id}`;
   return c.body(null, 204);
 });
@@ -1391,7 +1396,10 @@ async function loadTuyaContext(c, sql, householdId) {
 function mapDevice(row) {
   return {
     id: row.id,
-    tuyaDeviceId: row.tuya_device_id,
+    provider: row.provider ?? "tuya",
+    externalDeviceId: row.external_device_id ?? row.tuya_device_id ?? null,
+    tuyaDeviceId: row.tuya_device_id ?? null,
+    capabilitiesJson: row.capabilities_json ?? null,
     displayName: row.display_name,
     productName: row.product_name ?? null,
     productId: row.product_id ?? null,
@@ -1520,6 +1528,105 @@ app.get("/api/smart-devices/discover", authMiddleware, async (c) => {
     online: d.online ?? d.isOnline ?? false,
   }));
   return c.json({ devices });
+});
+
+// ============ SMART DEVICES (SmartThings — Faza 2) ============
+//
+// Osobne endpointy od Tuya (rozdzielona logika providerów; Tuya bez zmian). Tokeny ST
+// trzymane per gospodarstwo w smartthings_credentials (Faza 1). Import owner-only.
+
+/** Ważny access token ST dla gospodarstwa → ctx do wywołań klienta. Null gdy nie połączono. */
+async function loadStContext(c, sql, householdId) {
+  const accessToken = await getFreshAccessToken(sql, {
+    householdId,
+    clientId: getEnv(c, "SMARTTHINGS_CLIENT_ID"),
+    clientSecret: getEnv(c, "SMARTTHINGS_CLIENT_SECRET"),
+    rawKey: getFinanceDataKey(c),
+  });
+  if (!accessToken) return null;
+  return { accessToken };
+}
+
+// Discover ST: urządzenia z połączonego konta (owner-only). Już dodane w tym
+// gospodarstwie odfiltrowane. Statyczna ścieżka — bez kolizji z /:id (brak GET /:id).
+app.get("/api/smart-devices/discover-smartthings", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+  const membership = await getMembershipWithOwner(sql, user.id);
+  if (!membership) return c.json({ error: "No household" }, 400);
+  if (membership.owner_id !== user.id) return c.json({ error: "forbidden_owner_only" }, 403);
+
+  const ctx = await loadStContext(c, sql, membership.household_id);
+  if (!ctx) return c.json({ error: "smartthings_not_connected" }, 400);
+
+  let raw;
+  try {
+    raw = await getStDevices(ctx);
+  } catch (err) {
+    console.error("[smart-devices] ST discover failed", err);
+    if (err?.status === 401) return c.json({ error: "reconnect" }, 400);
+    return c.json({ error: "smartthings_unavailable" }, 502);
+  }
+
+  const added = await sql`
+    SELECT external_device_id FROM smart_devices
+    WHERE household_id = ${membership.household_id} AND provider = 'smartthings'
+  `;
+  const addedIds = new Set(added.map((r) => r.external_device_id));
+  const devices = summarizeDevices({ items: raw }).filter((d) => !addedIds.has(d.deviceId));
+  return c.json({ devices });
+});
+
+// Dodanie urządzenia ST (owner-only): profil + snapshot capabilities → karta provider=smartthings.
+app.post("/api/smart-devices/smartthings", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+
+  let body;
+  try { body = await c.req.json(); } catch { return c.json({ error: "Invalid JSON body" }, 400); }
+  if (typeof body?.externalDeviceId !== "string" || !body.externalDeviceId.trim()) {
+    return c.json({ error: "externalDeviceId is required" }, 400);
+  }
+  const externalDeviceId = body.externalDeviceId.trim();
+
+  const membership = await getMembershipWithOwner(sql, user.id);
+  if (!membership) return c.json({ error: "No household" }, 400);
+  if (membership.owner_id !== user.id) return c.json({ error: "forbidden_owner_only" }, 403);
+
+  // Duplikat (UNIQUE(provider, external_device_id)) — to samo urządzenie w jakimkolwiek gospodarstwie.
+  const [dupe] = await sql`
+    SELECT 1 FROM smart_devices WHERE provider = 'smartthings' AND external_device_id = ${externalDeviceId}
+  `;
+  if (dupe) return c.json({ error: "device_already_linked" }, 409);
+
+  const ctx = await loadStContext(c, sql, membership.household_id);
+  if (!ctx) return c.json({ error: "smartthings_not_connected" }, 400);
+
+  let device;
+  try {
+    device = await getStDevice(ctx, externalDeviceId);
+  } catch (err) {
+    console.error("[smart-devices] ST getDevice failed", err);
+    return c.json({ error: "device_not_found_in_smartthings" }, 404);
+  }
+
+  const displayName =
+    typeof body.displayName === "string" && body.displayName.trim()
+      ? body.displayName.trim()
+      : device?.label || device?.name || externalDeviceId;
+  const deviceType = inferDeviceType(device);
+
+  const [row] = await sql`
+    INSERT INTO smart_devices
+      (household_id, provider, external_device_id, display_name, product_name,
+       device_type, capabilities_json, created_by)
+    VALUES
+      (${membership.household_id}, 'smartthings', ${externalDeviceId}, ${displayName},
+       ${device?.deviceManufacturerCode ?? device?.manufacturerName ?? null},
+       ${deviceType}, ${JSON.stringify(device?.components ?? [])}, ${user.id})
+    RETURNING *
+  `;
+  return c.json(mapDevice(row), 201);
 });
 
 // Batch status wszystkich aktywnych urządzeń (member+). Jeden błąd nie wywala reszty.
@@ -1876,10 +1983,10 @@ app.post("/api/smart-devices", authMiddleware, async (c) => {
 
   const [row] = await sql`
     INSERT INTO smart_devices
-      (household_id, tuya_device_id, display_name, product_name, product_id,
+      (household_id, provider, external_device_id, tuya_device_id, display_name, product_name, product_id,
        device_type, ir_parent_id, functions_json, created_by)
     VALUES
-      (${membership.household_id}, ${tuyaDeviceId}, ${displayName},
+      (${membership.household_id}, 'tuya', ${tuyaDeviceId}, ${tuyaDeviceId}, ${displayName},
        ${info?.product_name ?? null}, ${info?.product_id ?? null},
        ${deviceType}, ${irParentId},
        ${functions == null ? null : JSON.stringify(functions)}, ${user.id})

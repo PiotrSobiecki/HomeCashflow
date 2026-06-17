@@ -228,7 +228,17 @@ export const smartthingsCredentials = pgTable('smartthings_credentials', {
 export const smartDevices = pgTable('smart_devices', {
   id: uuid('id').defaultRandom().primaryKey(),
   householdId: uuid('household_id').notNull().references(() => households.id, { onDelete: 'cascade' }),
-  tuyaDeviceId: text('tuya_device_id').notNull().unique(),
+  // Provider integracji. 'tuya' = wiersze sprzed Fazy 2 SmartThings (backfill). Urządzenia
+  // ST mają tuya_device_id = NULL (nie chodzą przez Tuya API), identyfikator w external_device_id.
+  provider: text('provider').notNull().default('tuya'),
+  // Id urządzenia u dostawcy (Tuya device_id lub SmartThings deviceId). Dla Tuya = tuya_device_id
+  // (backfill). UNIQUE(provider, external_device_id): jedno fizyczne urządzenie w jednym gospodarstwie.
+  externalDeviceId: text('external_device_id'),
+  // Tuya-only (NULL dla ST). Zostaje, żeby kod Tuya czytający tuya_device_id był bez zmian.
+  tuyaDeviceId: text('tuya_device_id').unique(),
+  // Snapshot capabilities SmartThings (komponenty + capabilities z profilu urządzenia),
+  // pobrany przy dodaniu. Ziarno mappera stanu (Faza 3). NULL dla Tuya (tam functions_json).
+  capabilitiesJson: jsonb('capabilities_json'),
   displayName: text('display_name').notNull(),
   productName: text('product_name'),
   productId: text('product_id'),
@@ -248,6 +258,8 @@ export const smartDevices = pgTable('smart_devices', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 }, (t) => ({
   byHousehold: index('idx_smart_devices_household').on(t.householdId),
+  providerCheck: check('smart_devices_provider_check', sql`${t.provider} IN ('tuya', 'smartthings')`),
+  uniqProviderExternal: uniqueIndex('uniq_smart_devices_provider_external').on(t.provider, t.externalDeviceId),
 }))
 
 // ====== Audyt sterowania urządzeniami (Slice 3) ======
