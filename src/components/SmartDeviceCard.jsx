@@ -16,13 +16,14 @@ import { DeviceControls } from './DeviceControls'
 import { AcControls } from './AcControls'
 import { RemoteControls } from './RemoteControls'
 import { DeviceTimer } from './DeviceTimer'
+import { PlugLinkPicker } from './PlugLinkPicker'
 import { DeviceEnergyChart } from './DeviceEnergyChart'
 
 /**
  * Karta pojedynczego urządzenia: status na żywo + sterowanie (Slice 3).
  */
 export const SmartDeviceCard = ({
-  device, status, isOwner, onRefresh, onRename, onToggleActive, onRemove, onSend,
+  device, status, isOwner, plugs = [], onRefresh, onRename, onToggleActive, onLinkPlug, onRemove, onSend,
 }) => {
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(device.displayName)
@@ -39,6 +40,8 @@ export const SmartDeviceCard = ({
   const isIr = isIrAc || isIrRemote
   const typeMeta = TYPE_META[device.deviceType] || { label: device.productName || 'Urządzenie', Icon: Cpu }
   const TypeIcon = typeMeta.Icon
+  // Stan on/off znamy dla gniazdka/klimy zawsze; dla pilota tylko gdy powiązany z gniazdkiem.
+  const stateKnown = !isIrRemote || !!status?.linked
 
   // Statystyki dzisiejsze (od północy czasu warszawskiego) — liczone w backendzie
   const todayKwh = status?.todayKwh ?? null
@@ -75,7 +78,7 @@ export const SmartDeviceCard = ({
           {/* Ikona typu. Stan on/off pokazujemy TYLKO gdy go znamy (gniazdko/klima);
               pilot IR jest bezstanowy → neutralna, żeby nie sugerować włączenia. */}
           <div className={`shrink-0 w-9 h-9 rounded-lg flex items-center justify-center ${
-            isIrRemote ? 'bg-slate-700/40 text-slate-300'
+            !stateKnown ? 'bg-slate-700/40 text-slate-300'
             : status?.switchOn ? 'bg-emerald-500/15 text-emerald-400'
             : 'bg-slate-700/40 text-slate-400'
           }`}>
@@ -124,11 +127,21 @@ export const SmartDeviceCard = ({
         <p className="text-xs text-slate-500 mb-3">Nie udało się odświeżyć statusu.</p>
       ))}
 
+      {/* Powiązanie pilota z gniazdkiem — realny stan zestawu (owner) */}
+      {isIrRemote && isOwner && (
+        <PlugLinkPicker device={device} plugs={plugs} onLinkPlug={onLinkPlug} />
+      )}
+
       {/* Sterowanie — klima IR: panel AC; pilot IR: siatka przycisków; reszta: DP urządzenia */}
       {isIrAc ? (
         <AcControls ac={status?.ac} onSend={handleSend} disabled={!online} />
       ) : isIrRemote ? (
-        <RemoteControls deviceId={device.id} disabled={!online} />
+        <RemoteControls
+          deviceId={device.id}
+          disabled={!online}
+          powerOn={status?.linked ? status?.switchOn : null}
+          plugW={status?.linked ? status?.plugW : null}
+        />
       ) : (
         <DeviceControls
           functionsJson={device.functionsJson}

@@ -1299,6 +1299,7 @@ function mapDevice(row) {
     productId: row.product_id ?? null,
     deviceType: row.device_type ?? null,
     irParentId: row.ir_parent_id ?? null,
+    linkedPlugId: row.linked_plug_id ?? null,
     functionsJson: row.functions_json ?? null,
     isActive: row.is_active,
     createdBy: row.created_by ?? null,
@@ -1337,13 +1338,24 @@ function deviceStatusPayload(row, formatted) {
  * Klima IR nie ma DP — jej stan idzie z AC API i ląduje w polu `ac` { power, mode, temp, wind }.
  * @returns {Promise<object>} payload statusu (bez statystyk dziennych — dokłada caller)
  */
-async function readDeviceStatus(ctx, row) {
+// Próg powyżej którego uznajemy zestaw na gniazdku za włączony (ponad standby).
+const IR_PLUG_STANDBY_W = 10;
+
+async function readDeviceStatus(ctx, row, sql) {
   if (row.device_type === "ir_ac") {
     const ac = formatAcStatus(await getAcStatus(ctx, row.ir_parent_id, row.tuya_device_id));
     return { ...deviceStatusPayload(row, { ac, switchOn: ac.power === 1 }) };
   }
   if (row.device_type === "ir_remote") {
-    // Pilot IR jest bezstanowy (blaster nie zna stanu TV) — raportujemy online, bez metryk.
+    // Pilot IR jest bezstanowy. Jeśli powiązany z gniazdkiem — realny stan zestawu z poboru mocy.
+    if (row.linked_plug_id && sql) {
+      const [plug] = await sql`SELECT tuya_device_id FROM smart_devices WHERE id = ${row.linked_plug_id}`;
+      if (plug) {
+        const f = formatStatuses(await getDeviceStatus(ctx, plug.tuya_device_id));
+        const w = f.powerW ?? 0;
+        return deviceStatusPayload(row, { plugW: w, switchOn: w > IR_PLUG_STANDBY_W, linked: true });
+      }
+    }
     return deviceStatusPayload(row, {});
   }
   return deviceStatusPayload(row, formatStatuses(await getDeviceStatus(ctx, row.tuya_device_id)));
@@ -1437,7 +1449,7 @@ app.get("/api/smart-devices/status", authMiddleware, async (c) => {
       try {
         const today = todayByDevice[r.id] ?? { kwh: 0, uptimeMin: 0 };
         return {
-          ...(await readDeviceStatus(ctx, r)),
+          ...(await readDeviceStatus(ctx, r, sql)),
           todayKwh: today.kwh,
           todayUptimeMin: today.uptimeMin,
         };
@@ -1465,7 +1477,7 @@ app.get("/api/smart-devices/:id/status", authMiddleware, async (c) => {
     const todayByDevice = await getTodayStatsByDevice(sql, [result.row.id]);
     const today = todayByDevice[result.row.id] ?? { kwh: 0, uptimeMin: 0 };
     return c.json({
-      ...(await readDeviceStatus(ctx, result.row)),
+      ...(await readDeviceStatus(ctx, result.row, sql)),
       todayKwh: today.kwh,
       todayUptimeMin: today.uptimeMin,
     });
@@ -1812,9 +1824,28 @@ app.patch("/api/smart-devices/:id", authMiddleware, async (c) => {
       : result.row.display_name;
   const nextActive = typeof body.isActive === "boolean" ? body.isActive : result.row.is_active;
 
+  // Powiązanie z gniazdkiem (tylko urządzenia IR; gniazdko musi być w tym samym
+  // gospodarstwie i być gniazdkiem). `linkedPlugId: null` rozłącza. Pominięte = bez zmian.
+  let nextPlug = result.row.linked_plug_id;
+  if ("linkedPlugId" in body) {
+    if (!IR_TIMER_TYPES.has(result.row.device_type)) return c.json({ error: "link_not_supported" }, 400);
+    if (body.linkedPlugId == null) {
+      nextPlug = null;
+    } else {
+      const [plug] = await sql`
+        SELECT id, device_type FROM smart_devices
+        WHERE id = ${body.linkedPlugId} AND household_id = ${result.row.household_id}
+      `;
+      if (!plug) return c.json({ error: "plug_not_found" }, 400);
+      if (plug.device_type && plug.device_type !== "plug") return c.json({ error: "not_a_plug" }, 400);
+      nextPlug = plug.id;
+    }
+  }
+
   const [row] = await sql`
     UPDATE smart_devices
-    SET display_name = ${nextName}, is_active = ${nextActive}, updated_at = NOW()
+    SET display_name = ${nextName}, is_active = ${nextActive},
+        linked_plug_id = ${nextPlug}, updated_at = NOW()
     WHERE id = ${id}
     RETURNING *
   `;

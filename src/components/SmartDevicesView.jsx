@@ -20,7 +20,7 @@ export const SmartDevicesView = () => {
   const [isOwner, setIsOwner] = useState(false)
   const {
     devices, statusById, loading, error,
-    refreshStatus, add, rename, setActive, remove, sendCommand,
+    refreshStatus, add, rename, setActive, linkPlug, remove, sendCommand,
   } = useSmartDevices()
   const [showAdd, setShowAdd] = useState(false)
   const [removeTarget, setRemoveTarget] = useState(null)
@@ -36,6 +36,8 @@ export const SmartDevicesView = () => {
 
   // Urządzenia na podczerwień (Smart IR) to piloty — bez poboru mocy, wykresów i kosztów.
   const energyDevices = devices.filter((d) => !String(d.deviceType || '').startsWith('ir_'))
+  // Gniazdka (do powiązania z pilotami IR — realny stan zestawu z poboru mocy).
+  const plugs = devices.filter((d) => !d.deviceType || d.deviceType === 'plug')
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800">
@@ -80,9 +82,11 @@ export const SmartDevicesView = () => {
                     device={device}
                     status={statusById[device.id]}
                     isOwner={isOwner}
+                    plugs={plugs}
                     onRefresh={refreshOne}
                     onRename={rename}
                     onToggleActive={setActive}
+                    onLinkPlug={linkPlug}
                     onRemove={setRemoveTarget}
                     onSend={sendCommand}
                   />
