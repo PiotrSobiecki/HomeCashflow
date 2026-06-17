@@ -251,6 +251,7 @@ const jsonOrThrow = async (res, label) => {
     const err = new Error(data.error || `${label}: ${res.status}`);
     err.code = data.error;
     err.status = res.status;
+    err.serverMessage = data.message; // czytelny komunikat PL z backendu (jeśli jest)
     throw err;
   }
   return data;
@@ -375,6 +376,17 @@ export const sendDeviceCommands = async (id, commands) => {
     body: JSON.stringify({ commands }),
   });
   return jsonOrThrow(res, 'POST /api/smart-devices/commands');
+};
+
+/** Komenda sterująca urządzenia SmartThings: action = 'start' | 'pause' | 'stop'. */
+export const sendStCommand = async (id, action) => {
+  const res = await fetch(`${API_URL}/api/smart-devices/${id}/commands`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ action }),
+  });
+  return jsonOrThrow(res, 'POST /api/smart-devices/commands (ST)');
 };
 
 export const fetchIrKeys = async (id) => {

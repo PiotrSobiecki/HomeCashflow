@@ -90,7 +90,27 @@ function mapTv(status) {
   }
 }
 
+/**
+ * Natywny pomiar mocy/energii urządzenia ST (powerConsumptionReport — pralki Samsung
+ * wystawiają go same). Pozwala pokazać pobór bez wiązania z gniazdkiem Tuya (Faza 5).
+ * energy jest skumulowane w Wh → przeliczamy na kWh.
+ */
+function nativePower(status) {
+  const pcr = attr(status, 'powerConsumptionReport', 'powerConsumption')
+  if (!pcr || typeof pcr !== 'object') return null
+  return {
+    ...(pcr.power != null ? { nativeW: pcr.power } : {}),
+    ...(pcr.energy != null ? { nativeEnergyKwh: pcr.energy / 1000 } : {}),
+  }
+}
+
 export function mapStStatus(status, deviceType) {
+  const base = mapStType(status, deviceType)
+  const native = nativePower(status)
+  return native ? { ...base, ...native } : base
+}
+
+function mapStType(status, deviceType) {
   if (CYCLE_CAPABILITY[deviceType]) {
     return mapCycleDevice(status, deviceType)
   }

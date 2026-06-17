@@ -27,11 +27,12 @@ vi.mock('./smartthings/client.js', () => ({
   getStDevices: vi.fn(),
   getStDevice: vi.fn(),
   getStDeviceStatus: vi.fn(),
+  sendStCommand: vi.fn(),
 }))
 
 import { app, upsertUserAndHousehold } from './app.js'
 import { getTuyaToken, getDeviceInfo, getDeviceFunctions, getDeviceStatus } from './tuya/client.js'
-import { getStDevices, getStDevice, getStDeviceStatus } from './smartthings/client.js'
+import { getStDevices, getStDevice, getStDeviceStatus, sendStCommand } from './smartthings/client.js'
 import { saveTokens } from './smartthings/credentials.js'
 import { decodeFinanceDataKey } from './finance-crypto.js'
 import { neon } from '@neondatabase/serverless'
@@ -125,6 +126,7 @@ beforeEach(() => {
   vi.mocked(getStDevices).mockReset()
   vi.mocked(getStDevice).mockReset()
   vi.mocked(getStDeviceStatus).mockReset()
+  vi.mocked(sendStCommand).mockReset()
 })
 
 afterEach(async () => {
@@ -381,6 +383,106 @@ describe('PATCH /api/smart-devices/:id — link ST device to a Tuya plug (cost)'
     expect(st.linked).toBeFalsy()
     expect(st.plugW).toBeUndefined()
     expect(st.todayKwh).toBeUndefined()
+  })
+})
+
+describe('POST /api/smart-devices/:id/commands — SmartThings control', () => {
+  function washerStatusJson(machineState, remote = 'true') {
+    return { components: { main: {
+      washerOperatingState: { machineState: { value: machineState } },
+      remoteControlStatus: { remoteControlEnabled: { value: remote } },
+    } } }
+  }
+  function command(token, id, action) {
+    return app.request(`/api/smart-devices/${id}/commands`, {
+      method: 'POST',
+      headers: { cookie: `token=${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action }),
+    })
+  }
+  async function logCount(deviceId) {
+    const [r] = await sql`SELECT count(*)::int n FROM device_command_log WHERE device_id = ${deviceId}`
+    return r.n
+  }
+  async function addWasher(owner) {
+    vi.mocked(getStDevice).mockResolvedValue(stDevice('st-washer', 'Pralka'))
+    return (await addStDevice(owner.token, 'st-washer', 'Pralka')).json()
+  }
+
+  it('member starts a washer with remote control enabled → command sent and logged', async () => {
+    const owner = await createTuyaOwner()
+    await connectSmartthings(owner)
+    const washer = await addWasher(owner)
+    const member = await addMemberToHousehold(owner.token)
+    vi.mocked(getStDeviceStatus).mockResolvedValue(washerStatusJson('stop', 'true'))
+    vi.mocked(sendStCommand).mockResolvedValue({})
+
+    const res = await command(member.token, washer.id, 'start')
+    expect(res.status).toBe(200)
+    expect(vi.mocked(sendStCommand)).toHaveBeenCalledWith(
+      expect.anything(), 'st-washer',
+      { component: 'main', capability: 'washerOperatingState', command: 'setMachineState', arguments: ['run'] },
+    )
+    expect(await logCount(washer.id)).toBe(1)
+  })
+
+  it('rejects an action the device capability does not support (no ST call, no log)', async () => {
+    const owner = await createTuyaOwner()
+    await connectSmartthings(owner)
+    vi.mocked(getStDevice).mockResolvedValue({ deviceId: 'st-fridge', label: 'Lodówka', components: [{ id: 'main', capabilities: [{ id: 'refrigeration' }] }] })
+    const fridge = await (await addStDevice(owner.token, 'st-fridge', 'Lodówka')).json()
+
+    const res = await command(owner.token, fridge.id, 'start')
+    expect(res.status).toBe(400)
+    expect(vi.mocked(sendStCommand)).not.toHaveBeenCalled()
+    expect(await logCount(fridge.id)).toBe(0)
+  })
+
+  it('blocks the command with a Polish message when remote control is disabled', async () => {
+    const owner = await createTuyaOwner()
+    await connectSmartthings(owner)
+    const washer = await addWasher(owner)
+    vi.mocked(getStDeviceStatus).mockResolvedValue(washerStatusJson('run', 'false'))
+
+    const res = await command(owner.token, washer.id, 'pause')
+    expect(res.status).toBe(409)
+    const body = await res.json()
+    expect(body.error).toBe('remote_control_disabled')
+    expect(body.message).toMatch(/zdalne sterowanie/i)
+    expect(vi.mocked(sendStCommand)).not.toHaveBeenCalled()
+    expect(await logCount(washer.id)).toBe(0)
+  })
+
+  it('returns a Polish message and does not log when SmartThings rejects the command', async () => {
+    const owner = await createTuyaOwner()
+    await connectSmartthings(owner)
+    const washer = await addWasher(owner)
+    vi.mocked(getStDeviceStatus).mockResolvedValue(washerStatusJson('stop', 'true'))
+    vi.mocked(sendStCommand).mockRejectedValue(Object.assign(new Error('conflict'), { status: 409 }))
+
+    const res = await command(owner.token, washer.id, 'start')
+    expect(res.status).toBeGreaterThanOrEqual(409)
+    expect((await res.json()).message).toBeTruthy()
+    expect(await logCount(washer.id)).toBe(0)
+  })
+
+  it('returns 401 without auth', async () => {
+    const res = await app.request('/api/smart-devices/whatever/commands', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'start' }),
+    })
+    expect(res.status).toBe(401)
+  })
+
+  it('status exposes available controls so the UI can render only supported buttons', async () => {
+    const owner = await createTuyaOwner()
+    await connectSmartthings(owner)
+    const washer = await addWasher(owner)
+    vi.mocked(getStDeviceStatus).mockResolvedValue(washerStatusJson('run', 'true'))
+
+    const res = await app.request(`/api/smart-devices/${washer.id}/status`, { headers: { cookie: `token=${owner.token}` } })
+    const body = await res.json()
+    expect(body.controls).toEqual({ remoteControlEnabled: true, actions: ['pause', 'stop'] })
   })
 })
 

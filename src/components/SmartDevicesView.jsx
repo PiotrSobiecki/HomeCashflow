@@ -30,7 +30,7 @@ export const SmartDevicesView = () => {
   const [isOwner, setIsOwner] = useState(false)
   const {
     devices, statusById, loading, error,
-    refreshStatus, add, addSt, rename, setActive, linkPlug, remove, sendCommand,
+    refreshStatus, add, addSt, rename, setActive, linkPlug, remove, sendCommand, sendSt,
   } = useSmartDevices()
   const [showAdd, setShowAdd] = useState(false)
   const [removeTarget, setRemoveTarget] = useState(null)
@@ -168,6 +168,7 @@ export const SmartDevicesView = () => {
                       onLinkPlug={linkPlug}
                       onRemove={setRemoveTarget}
                       onSend={sendCommand}
+                      onSendSt={sendSt}
                     />
                   </ErrorBoundary>
                 </div>

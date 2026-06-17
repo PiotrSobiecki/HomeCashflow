@@ -2,7 +2,7 @@ import { useState } from 'react'
 import {
   Wifi, WifiOff, Zap, Activity, Gauge, RefreshCw, Clock,
   Pencil, Trash2, Check, X, Eye, EyeOff, BarChart3, ChevronDown,
-  AirVent, Tv, Plug, Cpu,
+  AirVent, Tv, Plug, Cpu, WashingMachine, Refrigerator, Play, Pause, Square, Loader2,
 } from 'lucide-react'
 
 // Tożsamość typu urządzenia w nagłówku — spójna dla wszystkich kart. Nowy typ?
@@ -11,12 +11,64 @@ const TYPE_META = {
   ir_ac: { label: 'Klimatyzacja', Icon: AirVent },
   ir_remote: { label: 'Pilot', Icon: Tv },
   plug: { label: 'Gniazdko', Icon: Plug },
-  washer: { label: 'Pralka', Icon: Cpu },
-  dryer: { label: 'Suszarka', Icon: Cpu },
-  dishwasher: { label: 'Zmywarka', Icon: Cpu },
-  fridge: { label: 'Lodówka', Icon: Cpu },
+  washer: { label: 'Pralka', Icon: WashingMachine },
+  dryer: { label: 'Suszarka', Icon: WashingMachine },
+  dishwasher: { label: 'Zmywarka', Icon: WashingMachine },
+  fridge: { label: 'Lodówka', Icon: Refrigerator },
   ac: { label: 'Klimatyzacja', Icon: AirVent },
   tv: { label: 'Telewizor', Icon: Tv },
+}
+
+const ST_ACTION_META = {
+  start: { label: 'Start', Icon: Play, tone: 'bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30' },
+  pause: { label: 'Pauza', Icon: Pause, tone: 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30' },
+  stop: { label: 'Stop', Icon: Square, tone: 'bg-rose-500/20 text-rose-300 hover:bg-rose-500/30' },
+}
+
+/** Przyciski start/pauza/stop dla urządzenia ST — tylko akcje dozwolone teraz (z controls). */
+function StControls({ deviceId, controls, disabled, onSendSt }) {
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  if (!controls) return null
+
+  const send = async (action) => {
+    setErr(''); setBusy(true)
+    try { await onSendSt(deviceId, action) }
+    catch (e) { setErr(e?.serverMessage || 'Nie udało się wysłać komendy.') }
+    finally { setBusy(false) }
+  }
+
+  // Bramka Samsung: zdalne sterowanie musi być fizycznie włączone na urządzeniu.
+  if (!controls.remoteControlEnabled) {
+    return (
+      <p className="text-[11px] text-amber-300/90 bg-amber-500/10 border border-amber-500/20 rounded-lg px-2.5 py-1.5 mb-3">
+        Włącz „zdalne sterowanie" na pralce, aby sterować nią z aplikacji.
+      </p>
+    )
+  }
+  if (!controls.actions?.length) return null
+
+  return (
+    <div className="mb-3">
+      <div className="flex gap-2">
+        {controls.actions.map((action) => {
+          const meta = ST_ACTION_META[action]
+          if (!meta) return null
+          const ActIcon = meta.Icon
+          return (
+            <button
+              key={action} type="button" onClick={() => send(action)} disabled={busy || disabled}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 ${meta.tone}`}
+            >
+              {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ActIcon className="w-3.5 h-3.5" />}
+              {meta.label}
+            </button>
+          )
+        })}
+      </div>
+      {err && <p className="text-[11px] text-rose-400 mt-1.5">{err}</p>}
+    </div>
+  )
 }
 
 // Kolor „pigułki" stanu wg state z mappera ST (status.js).
@@ -51,13 +103,18 @@ function StDeviceBody({ status, online }) {
       )}
       {status.tempC != null && <p className="text-[11px] text-slate-400">Temperatura: {status.tempC}°C{status.targetTempC != null ? ` · zadana ${status.targetTempC}°C` : ''}</p>}
       {status.volume != null && <p className="text-[11px] text-slate-400">Głośność: {status.volume}%</p>}
-      {/* Pobór z powiązanego gniazdka Tuya (Faza 5) — sekcja tylko gdy powiązane. */}
-      {status.linked && (
+      {/* Pobór mocy: z powiązanego gniazdka Tuya, a gdy brak powiązania — natywnie
+          z SmartThings (powerConsumptionReport), jeśli urządzenie sam go wystawia. */}
+      {status.linked ? (
         <div className="grid grid-cols-2 gap-2 pt-1">
           <Metric icon={Zap} label="Moc" value={status.plugW != null ? `${status.plugW} W` : '—'} />
           <Metric icon={Activity} label="Zużycie dziś" value={status.todayKwh != null ? `${Number(status.todayKwh).toFixed(2)} kWh` : '—'} />
         </div>
-      )}
+      ) : status.nativeW != null ? (
+        <div className="pt-1">
+          <Metric icon={Zap} label="Moc (SmartThings)" value={`${status.nativeW} W`} />
+        </div>
+      ) : null}
       {!online && <p className="text-[11px] text-slate-500">Brak połączenia z urządzeniem.</p>}
     </div>
   )
@@ -74,7 +131,7 @@ import { DeviceEnergyChart } from './DeviceEnergyChart'
  */
 export const SmartDeviceCard = ({
   device, status, isOwner, plugs = [], linkedRemotes = [],
-  onRefresh, onRename, onToggleActive, onLinkPlug, onRemove, onSend,
+  onRefresh, onRename, onToggleActive, onLinkPlug, onRemove, onSend, onSendSt,
 }) => {
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(device.displayName)
@@ -177,7 +234,10 @@ export const SmartDeviceCard = ({
       {isSt ? (
         <>
           <StDeviceBody status={status} online={online} />
-          {/* Powiązanie z gniazdkiem Tuya = koszt cyklu (pralka ST nie mierzy kWh sama). */}
+          {/* Sterowanie start/pauza/stop — tylko akcje dozwolone teraz (z controls). */}
+          <StControls deviceId={device.id} controls={status?.controls} disabled={!online} onSendSt={onSendSt} />
+          {/* Powiązanie z gniazdkiem Tuya = koszt z gniazdka; bez powiązania pobór czytany
+              natywnie z SmartThings (jeśli urządzenie go wystawia). */}
           {isOwner && <PlugLinkPicker device={device} plugs={plugs} onLinkPlug={onLinkPlug} />}
         </>
       ) : (<>

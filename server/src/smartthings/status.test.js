@@ -50,6 +50,19 @@ describe('mapStStatus — washer', () => {
     const ui = mapStStatus(fixture('washer-status.json'), 'washer')
     expect(ui).toMatchObject({ type: 'washer', state: 'idle', label: 'Bezczynna' })
   })
+
+  it('exposes native power/energy from powerConsumptionReport (when device measures it itself)', () => {
+    const s = status({
+      washerOperatingState: { machineState: { value: 'run' } },
+      powerConsumptionReport: { powerConsumption: { value: { power: 250, energy: 1229000 } } },
+    })
+    expect(mapStStatus(s, 'washer')).toMatchObject({ nativeW: 250, nativeEnergyKwh: 1229 })
+  })
+
+  it('omits native power fields when the device has no powerConsumptionReport', () => {
+    const ui = mapStStatus(status({ washerOperatingState: { machineState: { value: 'run' } } }), 'washer')
+    expect(ui.nativeW).toBeUndefined()
+  })
 })
 
 describe('mapStStatus — dryer & dishwasher', () => {

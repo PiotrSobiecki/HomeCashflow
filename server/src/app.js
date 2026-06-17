@@ -13,9 +13,10 @@ import {
 import { validateCommands, validateAcCommands } from "./tuya/commands.js";
 import { buildAuthorizeUrl, exchangeCodeForTokens } from "./smartthings/oauth.js";
 import { saveTokens, getFreshAccessToken } from "./smartthings/credentials.js";
-import { getStDevices, getStDevice, getStDeviceStatus } from "./smartthings/client.js";
+import { getStDevices, getStDevice, getStDeviceStatus, sendStCommand } from "./smartthings/client.js";
 import { summarizeDevices, inferDeviceType } from "./smartthings/devices.js";
 import { mapStStatus } from "./smartthings/status.js";
+import { buildStCommand, allowedStActions } from "./smartthings/commands.js";
 import {
   readFinanceFromRelational,
   writeFinanceToRelational,
@@ -1558,6 +1559,8 @@ async function readStStatus(stCtx, row) {
     ok: true,
     online: true,
     ...mapStStatus(status, row.device_type),
+    // Dozwolone akcje sterowania (Faza 4) — UI rysuje tylko wspierane przyciski.
+    controls: allowedStActions(row.device_type, status),
     updatedAt: new Date().toISOString(),
   };
 }
@@ -1583,6 +1586,61 @@ async function enrichStWithPlug(base, row, tuyaCtx, sql) {
     console.error("[smart-devices] ST plug read failed", plug.tuya_device_id, err);
     return base;
   }
+}
+
+/**
+ * Sterowanie urządzeniem ST (Faza 4) — member+. Waliduje względem capabilities (snapshot)
+ * i bramki zdalnego sterowania PRZED wysłaniem; loguje udaną komendę. Komunikaty PL.
+ */
+async function runStCommand(c, sql, user, row) {
+  let body;
+  try { body = await c.req.json(); } catch { return c.json({ error: "Invalid JSON body" }, 400); }
+  const action = body?.action;
+
+  // Walidacja względem capabilities (typ + akcja) — spoza zakresu nie idzie do ST.
+  const cmd = buildStCommand(row.device_type, action);
+  if (!cmd) {
+    return c.json({ error: "command_not_supported", message: "Tej akcji nie można wykonać na tym urządzeniu." }, 400);
+  }
+
+  const ctx = await loadStContext(c, sql, row.household_id);
+  if (!ctx) return c.json({ error: "smartthings_not_connected", message: "Konto SmartThings nie jest połączone." }, 400);
+
+  let status;
+  try {
+    status = await getStDeviceStatus(ctx, row.external_device_id);
+  } catch (err) {
+    console.error("[smart-devices] ST status before command failed", err);
+    return c.json({ error: "device_unreachable", message: "Urządzenie nie odpowiada (offline)." }, 502);
+  }
+
+  // Bramka Samsung: bez fizycznie włączonego zdalnego sterowania ST odrzuca komendy.
+  const allowed = allowedStActions(row.device_type, status);
+  if (!allowed.remoteControlEnabled) {
+    return c.json({ error: "remote_control_disabled", message: "Włącz zdalne sterowanie na pralce, aby sterować nią z aplikacji." }, 409);
+  }
+  if (!allowed.actions.includes(action)) {
+    return c.json({ error: "action_not_available", message: "Nie można teraz wykonać tej akcji (sprawdź stan urządzenia)." }, 409);
+  }
+
+  try {
+    await sendStCommand(ctx, row.external_device_id, cmd);
+  } catch (err) {
+    console.error("[smart-devices] ST command failed", err);
+    return c.json({ error: "command_failed", message: "Urządzenie nie przyjęło komendy (zajęte lub offline). Spróbuj ponownie." }, 502);
+  }
+
+  // Audyt po udanym wysłaniu (kto/kiedy/co). Błąd logu nie wywala akcji.
+  try {
+    await sql`
+      INSERT INTO device_command_log (household_id, device_id, actor_id, code, value)
+      VALUES (${row.household_id}, ${row.id}, ${user.id}, ${action}, ${JSON.stringify(cmd)})
+    `;
+  } catch (err) {
+    console.error("[device-command-log] ST insert failed", err);
+  }
+
+  return c.json({ ok: true });
 }
 
 // Discover ST: urządzenia z połączonego konta (owner-only). Już dodane w tym
@@ -2155,11 +2213,16 @@ app.post("/api/smart-devices/:id/commands", authMiddleware, async (c) => {
   const sql = getDb(c);
   const id = c.req.param("id");
 
-  let body;
-  try { body = await c.req.json(); } catch { return c.json({ error: "Invalid JSON body" }, 400); }
-
   const result = await loadDeviceInHousehold(sql, user.id, id);
   if (result.error) return c.json(result.error.body, result.error.status);
+
+  // SmartThings: osobny kontrakt (action: start/pauza/stop) + bramka zdalnego sterowania.
+  if (result.row.provider === "smartthings") {
+    return runStCommand(c, sql, user, result.row);
+  }
+
+  let body;
+  try { body = await c.req.json(); } catch { return c.json({ error: "Invalid JSON body" }, 400); }
 
   const commands = body?.commands;
   const isIrAc = result.row.device_type === "ir_ac";

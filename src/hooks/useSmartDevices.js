@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   fetchSmartDevices, fetchSmartDevicesStatus,
-  addSmartDevice, addSmartThingsDevice, patchSmartDevice, deleteSmartDevice, sendDeviceCommands,
+  addSmartDevice, addSmartThingsDevice, patchSmartDevice, deleteSmartDevice, sendDeviceCommands, sendStCommand,
 } from '../lib/api'
 import { usePolling } from './usePolling'
 
@@ -110,5 +110,12 @@ export function useSmartDevices() {
     setTimeout(refreshStatus, 1200)
   }, [refreshStatus])
 
-  return { devices, statusById, loading, error, reload, refreshStatus, add, addSt, rename, setActive, linkPlug, remove, sendCommand }
+  // Sterowanie urządzeniem SmartThings (start/pauza/stop). Po wysłaniu odśwież status
+  // (ST aktualizuje machineState z opóźnieniem — dajemy mu chwilę).
+  const sendSt = useCallback(async (deviceId, action) => {
+    await sendStCommand(deviceId, action)
+    setTimeout(refreshStatus, 1500)
+  }, [refreshStatus])
+
+  return { devices, statusById, loading, error, reload, refreshStatus, add, addSt, rename, setActive, linkPlug, remove, sendCommand, sendSt }
 }

@@ -36,3 +36,23 @@ export async function getStDevice(ctx, deviceId) {
 export async function getStDeviceStatus(ctx, deviceId) {
   return stGet(ctx, `/devices/${deviceId}/status`)
 }
+
+/** Wysyła komendę (start/pauza/stop itd.) do urządzenia. Rzuca z `.status` przy błędzie. */
+export async function sendStCommand(ctx, deviceId, command) {
+  const res = await fetch(`${SMARTTHINGS_API_BASE}/devices/${deviceId}/commands`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${ctx.accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ commands: [command] }),
+  })
+  if (!res.ok) {
+    const body = await res.text()
+    const err = new Error(`SmartThings command → ${res.status} ${res.statusText}`)
+    err.status = res.status
+    err.body = body
+    throw err
+  }
+  return res.json().catch(() => ({}))
+}
