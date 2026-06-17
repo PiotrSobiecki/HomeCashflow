@@ -14,6 +14,15 @@ vi.mock('./tuya/client.js', async () => {
     formatStatuses: actual.formatStatuses,
   }
 })
+
+/** Wstawia snapshot energii gniazdka (idempotentnie jak realny sync). */
+async function insertEnergySnapshot(sql, deviceId, { at, energyKwh }) {
+  await sql`
+    INSERT INTO device_energy_snapshots (device_id, recorded_at, energy_kwh, energy_reported_at)
+    VALUES (${deviceId}, ${at}, ${energyKwh}, ${at})
+    ON CONFLICT (device_id, energy_reported_at) WHERE energy_reported_at IS NOT NULL DO NOTHING
+  `
+}
 vi.mock('./smartthings/client.js', () => ({
   getStDevices: vi.fn(),
   getStDevice: vi.fn(),
@@ -21,7 +30,7 @@ vi.mock('./smartthings/client.js', () => ({
 }))
 
 import { app, upsertUserAndHousehold } from './app.js'
-import { getTuyaToken, getDeviceInfo, getDeviceFunctions } from './tuya/client.js'
+import { getTuyaToken, getDeviceInfo, getDeviceFunctions, getDeviceStatus } from './tuya/client.js'
 import { getStDevices, getStDevice, getStDeviceStatus } from './smartthings/client.js'
 import { saveTokens } from './smartthings/credentials.js'
 import { decodeFinanceDataKey } from './finance-crypto.js'
@@ -112,6 +121,7 @@ beforeEach(() => {
   vi.mocked(getTuyaToken).mockReset()
   vi.mocked(getDeviceInfo).mockReset()
   vi.mocked(getDeviceFunctions).mockReset()
+  vi.mocked(getDeviceStatus).mockReset()
   vi.mocked(getStDevices).mockReset()
   vi.mocked(getStDevice).mockReset()
   vi.mocked(getStDeviceStatus).mockReset()
@@ -307,6 +317,70 @@ describe('GET /api/smart-devices/status — SmartThings devices', () => {
     const { statuses } = await (await app.request('/api/smart-devices/status', { headers: { cookie: `token=${owner.token}` } })).json()
     const st = statuses.find((s) => s.externalDeviceId === 'st-washer')
     expect(st).toMatchObject({ provider: 'smartthings', ok: false, online: false })
+  })
+})
+
+describe('PATCH /api/smart-devices/:id — link ST device to a Tuya plug (cost)', () => {
+  async function setup() {
+    const owner = await createTuyaOwner()
+    await connectSmartthings(owner)
+    const plug = await addTuyaDevice(owner.token, 'tuya-plug-1', 'Gniazdko pralki')
+    vi.mocked(getStDevice).mockResolvedValue(stDevice('st-washer', 'Pralka'))
+    const washer = await (await addStDevice(owner.token, 'st-washer', 'Pralka')).json()
+    return { owner, plug, washer }
+  }
+
+  function patch(token, id, body) {
+    return app.request(`/api/smart-devices/${id}`, {
+      method: 'PATCH',
+      headers: { cookie: `token=${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+  }
+
+  it('owner links the ST washer to a Tuya plug', async () => {
+    const { owner, plug, washer } = await setup()
+    const res = await patch(owner.token, washer.id, { linkedPlugId: plug.id })
+    expect(res.status).toBe(200)
+    expect((await res.json()).linkedPlugId).toBe(plug.id)
+  })
+
+  it('owner unlinks the plug (linkedPlugId: null)', async () => {
+    const { owner, plug, washer } = await setup()
+    await patch(owner.token, washer.id, { linkedPlugId: plug.id })
+    const res = await patch(owner.token, washer.id, { linkedPlugId: null })
+    expect(res.status).toBe(200)
+    expect((await res.json()).linkedPlugId).toBeNull()
+  })
+
+  it('status of a linked ST washer shows plug power and today kWh', async () => {
+    const { owner, plug, washer } = await setup()
+    await patch(owner.token, washer.id, { linkedPlugId: plug.id })
+
+    // kWh dziś z gniazdka (snapshot energii „teraz" — w bieżącej dobie warszawskiej),
+    // moc bieżąca z odczytu Tuya.
+    await insertEnergySnapshot(sql, plug.id, { at: new Date().toISOString(), energyKwh: 1.25 })
+    vi.mocked(getStDeviceStatus).mockResolvedValue({
+      components: { main: { washerOperatingState: { machineState: { value: 'run' } } } },
+    })
+    vi.mocked(getDeviceStatus).mockResolvedValue([{ code: 'cur_power', value: 1500 }]) // 150 W
+
+    const { statuses } = await (await app.request('/api/smart-devices/status', { headers: { cookie: `token=${owner.token}` } })).json()
+    const st = statuses.find((s) => s.externalDeviceId === 'st-washer')
+    expect(st).toMatchObject({ provider: 'smartthings', state: 'running', linked: true, plugW: 150, todayKwh: 1.25 })
+  })
+
+  it('status of an unlinked ST washer has no consumption section', async () => {
+    const { owner, washer } = await setup()
+    vi.mocked(getStDeviceStatus).mockResolvedValue({
+      components: { main: { washerOperatingState: { machineState: { value: 'stop' } } } },
+    })
+
+    const { statuses } = await (await app.request('/api/smart-devices/status', { headers: { cookie: `token=${owner.token}` } })).json()
+    const st = statuses.find((s) => s.externalDeviceId === 'st-washer')
+    expect(st.linked).toBeFalsy()
+    expect(st.plugW).toBeUndefined()
+    expect(st.todayKwh).toBeUndefined()
   })
 })
 

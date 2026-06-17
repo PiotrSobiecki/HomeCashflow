@@ -1567,6 +1567,24 @@ function stOfflinePayload(row) {
   return { id: row.id, provider: "smartthings", externalDeviceId: row.external_device_id, ok: false, online: false };
 }
 
+/**
+ * Koszt cyklu (Faza 5): pralka ST nie mierzy kWh sama — gdy powiązana z gniazdkiem Tuya,
+ * dokładamy bieżącą moc + zużycie dziś z tego gniazdka. Błąd gniazdka = stan ST bez poboru.
+ */
+async function enrichStWithPlug(base, row, tuyaCtx, sql) {
+  if (!row.linked_plug_id || !tuyaCtx) return base;
+  const [plug] = await sql`SELECT id, tuya_device_id FROM smart_devices WHERE id = ${row.linked_plug_id}`;
+  if (!plug) return base;
+  try {
+    const f = formatStatuses(await getDeviceStatus(tuyaCtx, plug.tuya_device_id));
+    const today = await getTodayStatsByDevice(sql, [plug.id]);
+    return { ...base, linked: true, plugW: f.powerW ?? 0, todayKwh: today[plug.id]?.kwh ?? 0 };
+  } catch (err) {
+    console.error("[smart-devices] ST plug read failed", plug.tuya_device_id, err);
+    return base;
+  }
+}
+
 // Discover ST: urządzenia z połączonego konta (owner-only). Już dodane w tym
 // gospodarstwie odfiltrowane. Statyczna ścieżka — bez kolizji z /:id (brak GET /:id).
 app.get("/api/smart-devices/discover-smartthings", authMiddleware, async (c) => {
@@ -1659,7 +1677,7 @@ app.get("/api/smart-devices/status", authMiddleware, async (c) => {
   if (!membership) return c.json({ statuses: [] });
 
   const rows = await sql`
-    SELECT id, provider, external_device_id, tuya_device_id, device_type, ir_parent_id FROM smart_devices
+    SELECT id, provider, external_device_id, tuya_device_id, device_type, ir_parent_id, linked_plug_id FROM smart_devices
     WHERE household_id = ${membership.household_id} AND is_active = true
     ORDER BY created_at ASC
   `;
@@ -1669,22 +1687,27 @@ app.get("/api/smart-devices/status", authMiddleware, async (c) => {
   const stRows = rows.filter((r) => r.provider === "smartthings");
 
   // Tuya: jeden kontekst + statystyki energii (jak dotąd). 400 tylko gdy są urządzenia Tuya.
+  // Kontekst Tuya współdzielony z odczytem gniazdek powiązanych z urządzeniami ST (koszt).
+  let tuyaCtx = null;
   let tuyaStatuses = [];
   if (tuyaRows.length > 0) {
-    const ctx = await loadTuyaContext(c, sql, membership.household_id);
-    if (!ctx) return c.json({ error: "tuya_not_configured" }, 400);
+    tuyaCtx = await loadTuyaContext(c, sql, membership.household_id);
+    if (!tuyaCtx) return c.json({ error: "tuya_not_configured" }, 400);
     const todayByDevice = await getTodayStatsByDevice(sql, tuyaRows.map((r) => r.id));
     tuyaStatuses = await Promise.all(
       tuyaRows.map(async (r) => {
         try {
           const today = todayByDevice[r.id] ?? { kwh: 0, uptimeMin: 0 };
-          return { ...(await readDeviceStatus(ctx, r, sql)), todayKwh: today.kwh, todayUptimeMin: today.uptimeMin };
+          return { ...(await readDeviceStatus(tuyaCtx, r, sql)), todayKwh: today.kwh, todayUptimeMin: today.uptimeMin };
         } catch (err) {
           console.error("[smart-devices] status failed", r.tuya_device_id, err);
           return { id: r.id, tuyaDeviceId: r.tuya_device_id, ok: false, online: false };
         }
       }),
     );
+  } else if (stRows.some((r) => r.linked_plug_id)) {
+    // Brak własnych urządzeń Tuya, ale ST powiązane z gniazdkiem → potrzebny kontekst Tuya.
+    tuyaCtx = await loadTuyaContext(c, sql, membership.household_id);
   }
 
   // SmartThings: jeden kontekst, mapper per urządzenie; błąd jednego = offline, nie wywala reszty.
@@ -1695,7 +1718,7 @@ app.get("/api/smart-devices/status", authMiddleware, async (c) => {
       stRows.map(async (r) => {
         if (!stCtx) return stOfflinePayload(r);
         try {
-          return await readStStatus(stCtx, r);
+          return await enrichStWithPlug(await readStStatus(stCtx, r), r, tuyaCtx, sql);
         } catch (err) {
           console.error("[smart-devices] ST status failed", r.external_device_id, err);
           return stOfflinePayload(r);
@@ -1719,7 +1742,8 @@ app.get("/api/smart-devices/:id/status", authMiddleware, async (c) => {
     const stCtx = await loadStContext(c, sql, result.row.household_id);
     if (!stCtx) return c.json({ error: "smartthings_not_connected" }, 400);
     try {
-      return c.json(await readStStatus(stCtx, result.row));
+      const tuyaCtx = result.row.linked_plug_id ? await loadTuyaContext(c, sql, result.row.household_id) : null;
+      return c.json(await enrichStWithPlug(await readStStatus(stCtx, result.row), result.row, tuyaCtx, sql));
     } catch (err) {
       console.error("[smart-devices] single ST status failed", err);
       return c.json(stOfflinePayload(result.row));
@@ -2080,11 +2104,13 @@ app.patch("/api/smart-devices/:id", authMiddleware, async (c) => {
       : result.row.display_name;
   const nextActive = typeof body.isActive === "boolean" ? body.isActive : result.row.is_active;
 
-  // Powiązanie z gniazdkiem (tylko urządzenia IR; gniazdko musi być w tym samym
-  // gospodarstwie i być gniazdkiem). `linkedPlugId: null` rozłącza. Pominięte = bez zmian.
+  // Powiązanie z gniazdkiem: piloty IR (realny stan zestawu z poboru) oraz urządzenia
+  // SmartThings (koszt cyklu — pralka ST nie mierzy kWh sama, dane z gniazdka Tuya).
+  // Gniazdko musi być w tym samym gospodarstwie i być gniazdkiem. `null` rozłącza.
   let nextPlug = result.row.linked_plug_id;
   if ("linkedPlugId" in body) {
-    if (!IR_TIMER_TYPES.has(result.row.device_type)) return c.json({ error: "link_not_supported" }, 400);
+    const canLink = IR_TIMER_TYPES.has(result.row.device_type) || result.row.provider === "smartthings";
+    if (!canLink) return c.json({ error: "link_not_supported" }, 400);
     if (body.linkedPlugId == null) {
       nextPlug = null;
     } else {

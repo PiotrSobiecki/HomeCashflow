@@ -51,6 +51,13 @@ function StDeviceBody({ status, online }) {
       )}
       {status.tempC != null && <p className="text-[11px] text-slate-400">Temperatura: {status.tempC}°C{status.targetTempC != null ? ` · zadana ${status.targetTempC}°C` : ''}</p>}
       {status.volume != null && <p className="text-[11px] text-slate-400">Głośność: {status.volume}%</p>}
+      {/* Pobór z powiązanego gniazdka Tuya (Faza 5) — sekcja tylko gdy powiązane. */}
+      {status.linked && (
+        <div className="grid grid-cols-2 gap-2 pt-1">
+          <Metric icon={Zap} label="Moc" value={status.plugW != null ? `${status.plugW} W` : '—'} />
+          <Metric icon={Activity} label="Zużycie dziś" value={status.todayKwh != null ? `${Number(status.todayKwh).toFixed(2)} kWh` : '—'} />
+        </div>
+      )}
       {!online && <p className="text-[11px] text-slate-500">Brak połączenia z urządzeniem.</p>}
     </div>
   )
@@ -168,7 +175,11 @@ export const SmartDeviceCard = ({
       </div>
 
       {isSt ? (
-        <StDeviceBody status={status} online={online} />
+        <>
+          <StDeviceBody status={status} online={online} />
+          {/* Powiązanie z gniazdkiem Tuya = koszt cyklu (pralka ST nie mierzy kWh sama). */}
+          {isOwner && <PlugLinkPicker device={device} plugs={plugs} onLinkPlug={onLinkPlug} />}
+        </>
       ) : (<>
       {/* Pomiary (gniazdka — urządzenia IR to piloty, bez pomiaru energii) */}
       {!isIr && (hasReading ? (
