@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { ChevronDown, SlidersHorizontal } from 'lucide-react'
 
 // Przyjazne etykiety dla typowych DP (fallback = surowy code).
 const LABELS = {
@@ -58,6 +59,7 @@ const COUNTDOWN_MAX_H = 24
  */
 export const DeviceControls = ({ functionsJson, raw = {}, onSend, disabled }) => {
   const [busyCode, setBusyCode] = useState(null)
+  const [open, setOpen] = useState(false)
 
   const fns = (functionsJson?.functions || []).filter((f) => isWritableType(f.type))
   if (fns.length === 0) return null
@@ -68,7 +70,18 @@ export const DeviceControls = ({ functionsJson, raw = {}, onSend, disabled }) =>
   }
 
   return (
-    <div className="bg-slate-900/50 border border-slate-700/50 rounded-2xl p-3 sm:p-4 mb-3 space-y-2.5">
+    <div className="mb-3">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-indigo-400 transition-colors mb-1"
+      >
+        <SlidersHorizontal className="w-3.5 h-3.5" />
+        Sterowanie
+        <ChevronDown className={`w-3.5 h-3.5 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+    <div className="bg-slate-900/50 border border-slate-700/50 rounded-2xl p-3 sm:p-4 space-y-2.5">
       {fns.map((fn) => {
         const type = String(fn.type).toLowerCase()
         const current = raw[fn.code]
@@ -131,6 +144,8 @@ export const DeviceControls = ({ functionsJson, raw = {}, onSend, disabled }) =>
           </Row>
         )
       })}
+    </div>
+      )}
     </div>
   )
 }

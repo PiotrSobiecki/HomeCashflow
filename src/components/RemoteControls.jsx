@@ -28,11 +28,15 @@ const ALIASES = {
 const norm = (s) => String(s || '').toLowerCase().replace(/[\s_]/g, '')
 
 /**
- * Pilot IR (TV/STB/itp.): zasilanie, głośność, kanały, nawigacja, menu. Bezstanowy.
+ * Pilot IR (TV/STB/itp.): zasilanie, głośność, kanały, nawigacja, menu.
+ * Sam pilot jest bezstanowy; gdy powiązany z gniazdkiem, `powerOn`/`plugW` dają realny
+ * stan zestawu (etykieta Włącz/Wyłącz + pobór).
  * @param {string} deviceId
  * @param {boolean} disabled
+ * @param {boolean|null} powerOn — realny stan zestawu z gniazdka (null = nieznany)
+ * @param {number|null} plugW — pobór zestawu w W (gdy powiązane)
  */
-export const RemoteControls = ({ deviceId, disabled }) => {
+export const RemoteControls = ({ deviceId, disabled, powerOn = null, plugW = null, children }) => {
   const [keys, setKeys] = useState(null)
   const [categoryId, setCategoryId] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -100,9 +104,19 @@ export const RemoteControls = ({ deviceId, disabled }) => {
 
   return (
     <div className="bg-slate-900/50 border border-slate-700/50 rounded-2xl p-3 sm:p-4 mb-3 space-y-3 overflow-hidden max-w-full">
+      {/* Realny stan zestawu z powiązanego gniazdka */}
+      {powerOn != null && (
+        <p className="flex items-center gap-1.5 text-[11px]">
+          <span className={`w-2 h-2 rounded-full ${powerOn ? 'bg-emerald-400' : 'bg-slate-500'}`} />
+          <span className={powerOn ? 'text-emerald-400' : 'text-slate-400'}>
+            {powerOn ? 'Włączony' : 'Uśpiony'}
+          </span>
+          {plugW != null && <span className="text-slate-500">· {plugW} W</span>}
+        </p>
+      )}
       {/* Zasilanie / źródło / wycisz */}
       <div className="grid grid-cols-3 gap-2">
-        <IconBtn k={slot.power} icon={Power} label="Zasilanie" tone="danger" onPress={press} off={off} busy={busy} />
+        <IconBtn k={slot.power} icon={Power} label={powerOn === true ? 'Wyłącz' : powerOn === false ? 'Włącz' : 'Zasilanie'} tone={powerOn === false ? 'on' : 'danger'} onPress={press} off={off} busy={busy} />
         <IconBtn k={slot.source} icon={Tv} label="Źródło" onPress={press} off={off} busy={busy} />
         <IconBtn k={slot.mute} icon={VolumeX} label="Wycisz" onPress={press} off={off} busy={busy} />
       </div>
@@ -169,12 +183,16 @@ export const RemoteControls = ({ deviceId, disabled }) => {
           <IconBtn k={slot.back} icon={CornerUpLeft} label="Wstecz" onPress={press} off={off} busy={busy} />
         </div>
       )}
+
+      {/* Slot na wyłącznik czasowy — wewnątrz panelu sterowania */}
+      {children}
     </div>
   )
 }
 
 const toneCls = (tone, active) => {
   if (active) return 'bg-indigo-500 text-white'
+  if (tone === 'on') return 'bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30'
   if (tone === 'danger') return 'bg-rose-500/20 text-rose-300 hover:bg-rose-500/30'
   return 'bg-slate-700/50 text-slate-200 hover:bg-slate-600'
 }

@@ -1,5 +1,14 @@
-import { useState, useEffect } from 'react'
-import { Plus, Loader2, Cpu } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { Plus, Loader2, Cpu, GripHorizontal } from 'lucide-react'
+
+const ORDER_KEY = 'hc:deviceOrder'
+const loadOrder = () => { try { return JSON.parse(localStorage.getItem(ORDER_KEY)) || [] } catch { return [] } }
+
+// Sortuje urządzenia wg zapisanej kolejności id; nieznane (nowe) lądują na końcu (sort stabilny).
+function applyOrder(items, order) {
+  const pos = new Map(order.map((id, i) => [id, i]))
+  return [...items].sort((a, b) => (pos.has(a.id) ? pos.get(a.id) : Infinity) - (pos.has(b.id) ? pos.get(b.id) : Infinity))
+}
 import { AppHeader } from './AppHeader'
 import { AppFooter } from './AppFooter'
 import { TuyaIntegration } from './TuyaIntegration'
@@ -20,10 +29,22 @@ export const SmartDevicesView = () => {
   const [isOwner, setIsOwner] = useState(false)
   const {
     devices, statusById, loading, error,
-    refreshStatus, add, rename, setActive, remove, sendCommand,
+    refreshStatus, add, rename, setActive, linkPlug, remove, sendCommand,
   } = useSmartDevices()
   const [showAdd, setShowAdd] = useState(false)
   const [removeTarget, setRemoveTarget] = useState(null)
+  const [order, setOrder] = useState(loadOrder)
+  const [isDesktop, setIsDesktop] = useState(() => typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches)
+  const dragId = useRef(null)
+  const [draggingId, setDraggingId] = useState(null)
+
+  // Przeciąganie kafelków tylko na desktopie (na touch HTML5 DnD i tak nie działa).
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 1024px)')
+    const on = () => setIsDesktop(mq.matches)
+    mq.addEventListener('change', on)
+    return () => mq.removeEventListener('change', on)
+  }, [])
 
   useEffect(() => {
     fetch(`${getApiUrl()}/api/household`, { credentials: 'include' })
@@ -36,6 +57,34 @@ export const SmartDevicesView = () => {
 
   // Urządzenia na podczerwień (Smart IR) to piloty — bez poboru mocy, wykresów i kosztów.
   const energyDevices = devices.filter((d) => !String(d.deviceType || '').startsWith('ir_'))
+  // Gniazdka (do powiązania z pilotami IR — realny stan zestawu z poboru mocy).
+  const plugs = devices.filter((d) => !d.deviceType || d.deviceType === 'plug')
+
+  // „Zestaw": piloty IR powiązane z gniazdkiem chowamy z płaskiej listy i wyświetlamy
+  // zagnieżdżone w kaflu gniazdka. Powiązanie liczy się tylko gdy gniazdko istnieje na liście.
+  const plugIds = new Set(plugs.map((p) => p.id))
+  const remotesByPlug = {}
+  for (const d of devices) {
+    if (String(d.deviceType || '').startsWith('ir_') && d.linkedPlugId && plugIds.has(d.linkedPlugId)) {
+      (remotesByPlug[d.linkedPlugId] ||= []).push(d)
+    }
+  }
+  const nestedIds = new Set(Object.values(remotesByPlug).flat().map((d) => d.id))
+  const topLevel = applyOrder(devices.filter((d) => !nestedIds.has(d.id)), order)
+
+  const handleDrop = (targetId) => {
+    const dragged = dragId.current
+    dragId.current = null
+    setDraggingId(null)
+    if (!dragged || dragged === targetId) return
+    const ids = topLevel.map((d) => d.id)
+    const from = ids.indexOf(dragged)
+    const to = ids.indexOf(targetId)
+    if (from < 0 || to < 0) return
+    ids.splice(to, 0, ids.splice(from, 1)[0])
+    setOrder(ids)
+    try { localStorage.setItem(ORDER_KEY, JSON.stringify(ids)) } catch { /* brak miejsca — trudno */ }
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800">
@@ -74,20 +123,49 @@ export const SmartDevicesView = () => {
             </p>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {devices.map((device) => (
-                <ErrorBoundary key={device.id}>
-                  <SmartDeviceCard
-                    device={device}
-                    status={statusById[device.id]}
-                    isOwner={isOwner}
-                    onRefresh={refreshOne}
-                    onRename={rename}
-                    onToggleActive={setActive}
-                    onRemove={setRemoveTarget}
-                    onSend={sendCommand}
-                  />
-                </ErrorBoundary>
-              ))}
+              {topLevel.map((device) => {
+                const groupSize = (remotesByPlug[device.id] || []).length
+                // Szerokość kafla zestawu = liczba elementów (gniazdko + piloty): 2 lub 3 kolumny.
+                const span = groupSize === 0 ? ''
+                  : groupSize === 1 ? 'sm:col-span-2 lg:col-span-2'
+                  : 'sm:col-span-2 lg:col-span-3'
+                return (
+                <div
+                  key={device.id}
+                  onDragOver={isDesktop ? (e) => e.preventDefault() : undefined}
+                  onDrop={isDesktop ? (e) => { e.preventDefault(); handleDrop(device.id) } : undefined}
+                  className={`${span} ${draggingId === device.id ? 'opacity-50' : ''}`}
+                >
+                  {/* Uchwyt przeciągania — tylko desktop (nie koliduje z suwakami/przyciskami w kaflu) */}
+                  {isDesktop && (
+                    <div
+                      draggable
+                      onDragStart={(e) => { dragId.current = device.id; setDraggingId(device.id); e.dataTransfer.effectAllowed = 'move' }}
+                      onDragEnd={() => { dragId.current = null; setDraggingId(null) }}
+                      title="Przeciągnij, aby zmienić kolejność"
+                      className="flex justify-center -mb-1 text-slate-600 hover:text-indigo-400 cursor-move"
+                    >
+                      <GripHorizontal className="w-5 h-4" />
+                    </div>
+                  )}
+                  <ErrorBoundary>
+                    <SmartDeviceCard
+                      device={device}
+                      status={statusById[device.id]}
+                      isOwner={isOwner}
+                      plugs={plugs}
+                      linkedRemotes={(remotesByPlug[device.id] || []).map((rd) => ({ device: rd, status: statusById[rd.id] }))}
+                      onRefresh={refreshOne}
+                      onRename={rename}
+                      onToggleActive={setActive}
+                      onLinkPlug={linkPlug}
+                      onRemove={setRemoveTarget}
+                      onSend={sendCommand}
+                    />
+                  </ErrorBoundary>
+                </div>
+                )
+              })}
             </div>
           )}
 

@@ -16,13 +16,15 @@ import { DeviceControls } from './DeviceControls'
 import { AcControls } from './AcControls'
 import { RemoteControls } from './RemoteControls'
 import { DeviceTimer } from './DeviceTimer'
+import { PlugLinkPicker } from './PlugLinkPicker'
 import { DeviceEnergyChart } from './DeviceEnergyChart'
 
 /**
  * Karta pojedynczego urządzenia: status na żywo + sterowanie (Slice 3).
  */
 export const SmartDeviceCard = ({
-  device, status, isOwner, onRefresh, onRename, onToggleActive, onRemove, onSend,
+  device, status, isOwner, plugs = [], linkedRemotes = [],
+  onRefresh, onRename, onToggleActive, onLinkPlug, onRemove, onSend,
 }) => {
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(device.displayName)
@@ -39,6 +41,11 @@ export const SmartDeviceCard = ({
   const isIr = isIrAc || isIrRemote
   const typeMeta = TYPE_META[device.deviceType] || { label: device.productName || 'Urządzenie', Icon: Cpu }
   const TypeIcon = typeMeta.Icon
+  // Stan on/off znamy dla gniazdka/klimy zawsze; dla pilota tylko gdy powiązany z gniazdkiem.
+  const stateKnown = !isIrRemote || !!status?.linked
+  // To gniazdko z zagnieżdżonymi pilotami = „zestaw". setOn: czy zestaw pobiera prąd (>20 W).
+  const isGroup = linkedRemotes.length > 0
+  const setOn = (status?.powerW ?? 0) > 20
 
   // Statystyki dzisiejsze (od północy czasu warszawskiego) — liczone w backendzie
   const todayKwh = status?.todayKwh ?? null
@@ -70,12 +77,17 @@ export const SmartDeviceCard = ({
 
   return (
     <div className={`bg-slate-800/50 border rounded-2xl p-4 ${device.isActive ? 'border-slate-700/50' : 'border-slate-800 opacity-60'}`}>
+      {/* Zestaw poziomo na desktopie: gniazdko po lewej, urządzenia po prawo (mobile: pion).
+          Nagłówek gniazdka jest pierwszy w kolumnie → w jednym rzędzie z nagłówkami pilotów. */}
+      <div className={isGroup ? 'lg:flex lg:gap-4 lg:items-start' : undefined}>
+        <div className={isGroup ? 'lg:flex-1 min-w-0' : undefined}>
+
       <div className="flex items-start justify-between gap-2 mb-3">
         <div className="flex items-center gap-2.5 min-w-0">
           {/* Ikona typu. Stan on/off pokazujemy TYLKO gdy go znamy (gniazdko/klima);
               pilot IR jest bezstanowy → neutralna, żeby nie sugerować włączenia. */}
           <div className={`shrink-0 w-9 h-9 rounded-lg flex items-center justify-center ${
-            isIrRemote ? 'bg-slate-700/40 text-slate-300'
+            !stateKnown ? 'bg-slate-700/40 text-slate-300'
             : status?.switchOn ? 'bg-emerald-500/15 text-emerald-400'
             : 'bg-slate-700/40 text-slate-400'
           }`}>
@@ -96,13 +108,13 @@ export const SmartDeviceCard = ({
           ) : (
             <div className="min-w-0">
               <h4 className="text-white font-medium truncate leading-tight">{device.displayName}</h4>
-              <p className="text-[11px] text-slate-500 truncate">{typeMeta.label}</p>
+              <p className="text-[11px] text-slate-500 truncate">{isGroup ? `${typeMeta.label} · zestaw` : typeMeta.label}</p>
             </div>
           )}
         </div>
-        <span className={`flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs shrink-0 ${online ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-700/50 text-slate-400'}`}>
-          {online ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
-          {online ? 'Połączone' : 'Brak połączenia'}
+        {/* Połączenie — sama ikonka, bez napisu (nie wszystko musi być „połączone") */}
+        <span title={online ? 'Połączone' : 'Brak połączenia'} className={`shrink-0 ${online ? 'text-emerald-400' : 'text-slate-500'}`}>
+          {online ? <Wifi className="w-4 h-4" /> : <WifiOff className="w-4 h-4" />}
         </span>
       </div>
 
@@ -124,11 +136,26 @@ export const SmartDeviceCard = ({
         <p className="text-xs text-slate-500 mb-3">Nie udało się odświeżyć statusu.</p>
       ))}
 
-      {/* Sterowanie — klima IR: panel AC; pilot IR: siatka przycisków; reszta: DP urządzenia */}
+      {/* Powiązanie pilota z gniazdkiem — realny stan zestawu (owner) */}
+      {isIrRemote && isOwner && (
+        <PlugLinkPicker device={device} plugs={plugs} onLinkPlug={onLinkPlug} />
+      )}
+
+      {/* Sterowanie — klima IR: panel AC; pilot IR: siatka przycisków; reszta: DP urządzenia.
+          Wyłącznik czasowy IR jest zintegrowany w kaflu sterowania (children). */}
       {isIrAc ? (
-        <AcControls ac={status?.ac} onSend={handleSend} disabled={!online} />
+        <AcControls ac={status?.ac} onSend={handleSend} disabled={!online}>
+          <DeviceTimer deviceId={device.id} disabled={!online} />
+        </AcControls>
       ) : isIrRemote ? (
-        <RemoteControls deviceId={device.id} disabled={!online} />
+        <RemoteControls
+          deviceId={device.id}
+          disabled={!online}
+          powerOn={status?.linked ? status?.switchOn : null}
+          plugW={status?.linked ? status?.plugW : null}
+        >
+          <DeviceTimer deviceId={device.id} disabled={!online} />
+        </RemoteControls>
       ) : (
         <DeviceControls
           functionsJson={device.functionsJson}
@@ -139,9 +166,6 @@ export const SmartDeviceCard = ({
       )}
 
       {cmdError && <p className="text-xs text-rose-400 mb-2">{cmdError}</p>}
-
-      {/* Wyłącznik czasowy — urządzenia IR (gniazdka mają natywny countdown w DP) */}
-      {isIr && <DeviceTimer deviceId={device.id} disabled={!online} />}
 
       {/* Wykres zużycia (rozwijany — montowany dopiero po otwarciu); urządzenia IR bez pomiaru */}
       {!isIr && (
@@ -158,6 +182,50 @@ export const SmartDeviceCard = ({
           {showChart && <DeviceEnergyChart deviceId={device.id} refreshKey={refreshKey} />}
         </>
       )}
+        </div>
+
+        {/* Podpięte urządzenia — kolumny po prawo (desktop) / pod spodem (mobile) */}
+        {linkedRemotes.map(({ device: rd, status: rs }) => {
+          const RIcon = (TYPE_META[rd.deviceType] || {}).Icon || Cpu
+          const sendRd = async (cmds) => { try { await onSend(rd.id, cmds) } catch { /* cicho */ } }
+          return (
+            <div key={rd.id} className="lg:flex-1 min-w-0 mt-3 lg:mt-0 pt-3 lg:pt-0 border-t lg:border-t-0 lg:border-l border-slate-700/50 lg:pl-4">
+                {/* Nagłówek jak w gniazdkach: kafelek ikony (zielony gdy włączone) + nazwa + typ */}
+                <div className="flex items-start justify-between gap-2 mb-3">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className={`shrink-0 w-9 h-9 rounded-lg flex items-center justify-center ${
+                      setOn ? 'bg-emerald-500/15 text-emerald-400' : 'bg-slate-700/40 text-slate-400'
+                    }`}>
+                      <RIcon className="w-5 h-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <h4 className="text-white font-medium truncate leading-tight">{rd.displayName}</h4>
+                      <p className="text-[11px] text-slate-500 truncate">{(TYPE_META[rd.deviceType] || {}).label || 'Pilot'}</p>
+                    </div>
+                  </div>
+                  {isOwner && (
+                    <button
+                      type="button" onClick={() => onLinkPlug(rd.id, null)}
+                      title="Odepnij od gniazdka"
+                      className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg shrink-0"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+                {rd.deviceType === 'ir_ac' ? (
+                  <AcControls ac={rs?.ac} onSend={sendRd} disabled={!online}>
+                    <DeviceTimer deviceId={rd.id} disabled={!online} />
+                  </AcControls>
+                ) : (
+                  <RemoteControls deviceId={rd.id} disabled={!online} powerOn={setOn} plugW={status?.powerW}>
+                    <DeviceTimer deviceId={rd.id} disabled={!online} />
+                  </RemoteControls>
+                )}
+              </div>
+            )
+          })}
+      </div>
 
       <div className="flex items-center justify-between mt-2">
         <button

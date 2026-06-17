@@ -1,0 +1,2 @@
+ALTER TABLE "smart_devices" ADD COLUMN "linked_plug_id" uuid;--> statement-breakpoint
+ALTER TABLE "smart_devices" ADD CONSTRAINT "smart_devices_linked_plug_id_smart_devices_id_fk" FOREIGN KEY ("linked_plug_id") REFERENCES "public"."smart_devices"("id") ON DELETE set null ON UPDATE no action;

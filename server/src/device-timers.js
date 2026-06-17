@@ -7,7 +7,13 @@
  *  • pilot (`ir_remote`) → klawisz „Power" (TOGGLE — wyłączy włączone, ale włączy wyłączone).
  */
 import { decryptField } from './finance-crypto.js'
-import { getTuyaToken, sendAcCommand, getRemoteKeys, sendRemoteKey } from './tuya/client.js'
+import {
+  getTuyaToken, sendAcCommand, getRemoteKeys, sendRemoteKey,
+  getDeviceStatus, formatStatuses,
+} from './tuya/client.js'
+
+// Próg standby — pilot powiązany z gniazdkiem nie wyśle „off", gdy pobór poniżej (zestaw już zgaszony).
+const IR_PLUG_STANDBY_W = 20
 
 /** Znajduje klawisz zasilania w liście pilota (po `key`/`key_name`). */
 function findPowerKey(keyList) {
@@ -23,10 +29,12 @@ function findPowerKey(keyList) {
 export async function fireDueTimers(sql, rawKey) {
   const due = await sql`
     SELECT t.id, t.device_id, t.household_id,
-           sd.tuya_device_id, sd.device_type, sd.ir_parent_id,
+           sd.tuya_device_id, sd.device_type, sd.ir_parent_id, sd.linked_plug_id,
+           plug.tuya_device_id AS plug_tuya_id,
            tc.client_id_enc, tc.client_secret_enc, tc.datacenter
     FROM device_timers t
     JOIN smart_devices sd ON sd.id = t.device_id
+    LEFT JOIN smart_devices plug ON plug.id = sd.linked_plug_id
     JOIN tuya_credentials tc ON tc.household_id = t.household_id
     WHERE t.status = 'pending' AND t.fire_at <= NOW()
     ORDER BY t.fire_at ASC
@@ -50,6 +58,16 @@ export async function fireDueTimers(sql, rawKey) {
       if (d.device_type === 'ir_ac') {
         await sendAcCommand(ctx, d.ir_parent_id, d.tuya_device_id, 'power', 0)
       } else if (d.device_type === 'ir_remote') {
+        // Bezpieczny toggle: jeśli pilot powiązany z gniazdkiem i pobór ≤ standby,
+        // zestaw jest już zgaszony — nie wysyłamy „power" (toggle by go WŁĄCZYŁ).
+        if (d.plug_tuya_id) {
+          const f = formatStatuses(await getDeviceStatus(ctx, d.plug_tuya_id))
+          if ((f.powerW ?? 0) <= IR_PLUG_STANDBY_W) {
+            await sql`UPDATE device_timers SET status = 'done' WHERE id = ${d.id}`
+            fired++
+            continue
+          }
+        }
         const r = await getRemoteKeys(ctx, d.ir_parent_id, d.tuya_device_id)
         const powerKey = findPowerKey(r?.key_list)
         if (!powerKey) throw new Error('no power key on remote')

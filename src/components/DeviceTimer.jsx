@@ -67,7 +67,7 @@ export const DeviceTimer = ({ deviceId, disabled }) => {
     : null
 
   return (
-    <div className="bg-slate-900/50 border border-slate-700/50 rounded-2xl p-3 sm:p-4 mb-3">
+    <div className="pt-3 mt-1 border-t border-slate-700/40">
       <div className="flex items-center justify-between mb-1.5">
         <span className="flex items-center gap-1.5 text-xs text-slate-300">
           <Power className="w-3.5 h-3.5" /> Wyłącz za
