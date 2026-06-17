@@ -113,6 +113,10 @@ export const SmartDeviceCard = ({
         </span>
       </div>
 
+      {/* Zestaw poziomo na desktopie: gniazdko po lewej, urządzenia po prawo (mobile: pion) */}
+      <div className={isGroup ? 'lg:flex lg:gap-4 lg:items-start' : undefined}>
+        <div className={isGroup ? 'lg:flex-1 min-w-0' : undefined}>
+
       {/* Pomiary (gniazdka — urządzenia IR to piloty, bez pomiaru energii) */}
       {!isIr && (hasReading ? (
         <div className="mb-3">
@@ -177,15 +181,14 @@ export const SmartDeviceCard = ({
           {showChart && <DeviceEnergyChart deviceId={device.id} refreshKey={refreshKey} />}
         </>
       )}
+        </div>
 
-      {/* Zestaw: piloty IR podpięte do tego gniazdka — zintegrowane w jednym kaflu */}
-      {linkedRemotes.length > 0 && (
-        <div className="mt-3 space-y-3">
-          {linkedRemotes.map(({ device: rd, status: rs }) => {
-            const RIcon = (TYPE_META[rd.deviceType] || {}).Icon || Cpu
-            const sendRd = async (cmds) => { try { await onSend(rd.id, cmds) } catch { /* cicho */ } }
-            return (
-              <div key={rd.id} className="pt-3 border-t border-slate-700/50">
+        {/* Podpięte urządzenia — kolumny po prawo (desktop) / pod spodem (mobile) */}
+        {linkedRemotes.map(({ device: rd, status: rs }) => {
+          const RIcon = (TYPE_META[rd.deviceType] || {}).Icon || Cpu
+          const sendRd = async (cmds) => { try { await onSend(rd.id, cmds) } catch { /* cicho */ } }
+          return (
+            <div key={rd.id} className="lg:flex-1 min-w-0 mt-3 lg:mt-0 pt-3 lg:pt-0 border-t lg:border-t-0 lg:border-l border-slate-700/50 lg:pl-4">
                 <div className="flex items-center justify-between gap-2 mb-2">
                   <span className="flex items-center gap-2 min-w-0 text-sm text-white">
                     <RIcon className="w-4 h-4 text-slate-400 shrink-0" />
@@ -218,8 +221,7 @@ export const SmartDeviceCard = ({
               </div>
             )
           })}
-        </div>
-      )}
+      </div>
 
       <div className="flex items-center justify-between mt-2">
         <button

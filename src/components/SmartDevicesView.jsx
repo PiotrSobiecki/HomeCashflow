@@ -123,12 +123,14 @@ export const SmartDevicesView = () => {
             </p>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {topLevel.map((device) => (
+              {topLevel.map((device) => {
+                const isGroupCard = (remotesByPlug[device.id] || []).length > 0
+                return (
                 <div
                   key={device.id}
                   onDragOver={isDesktop ? (e) => e.preventDefault() : undefined}
                   onDrop={isDesktop ? (e) => { e.preventDefault(); handleDrop(device.id) } : undefined}
-                  className={draggingId === device.id ? 'opacity-50' : ''}
+                  className={`${isGroupCard ? 'sm:col-span-2 lg:col-span-3' : ''} ${draggingId === device.id ? 'opacity-50' : ''}`}
                 >
                   {/* Uchwyt przeciągania — tylko desktop (nie koliduje z suwakami/przyciskami w kaflu) */}
                   {isDesktop && (
@@ -158,7 +160,8 @@ export const SmartDevicesView = () => {
                     />
                   </ErrorBoundary>
                 </div>
-              ))}
+                )
+              })}
             </div>
           )}
 
