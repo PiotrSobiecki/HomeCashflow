@@ -1,0 +1,107 @@
+/**
+ * Deep module: surowy status SmartThings (GET /v1/devices/{id}/status) → jednolity
+ * UI-model stanu. Czysta funkcja (testowalna na fixture'ach, bez sieci).
+ * Sterowanie/komendy NIE tutaj — to Faza 4.
+ *
+ * @see https://developer.smartthings.com/docs/api/public#operation/getDeviceStatus
+ */
+
+/** Wartość atrybutu capability z komponentu `main` (lub null gdy brak). */
+function attr(status, capability, attribute) {
+  return status?.components?.main?.[capability]?.[attribute]?.value ?? null
+}
+
+// Capability cyklu per typ AGD (standardowa + samsungce z czasem pozostałym).
+const CYCLE_CAPABILITY = {
+  washer: 'washerOperatingState',
+  dryer: 'dryerOperatingState',
+  dishwasher: 'dishwasherOperatingState',
+}
+
+/** Mapowanie maszyny stanu AGD na UI-model (run/pause/stop). */
+function mapCycleDevice(status, type) {
+  const cap = CYCLE_CAPABILITY[type]
+  const samsungCap = `samsungce.${cap}`
+  const machineState = attr(status, cap, 'machineState')
+  const remainingMin = attr(status, samsungCap, 'remainingTime')
+  const completionTime = attr(status, cap, 'completionTime')
+
+  if (machineState === 'run') {
+    return { type, state: 'running', label: 'W trakcie', remainingMin, completionTime }
+  }
+  if (machineState === 'pause') {
+    return { type, state: 'paused', label: 'Pauza', remainingMin, completionTime }
+  }
+  // stop: świeżo zakończony cykl (jobState = finished) → „Gotowe"; inaczej bezczynna.
+  const jobState = attr(status, cap, `${type}JobState`) ?? attr(status, samsungCap, `${type}JobState`)
+  if (jobState === 'finished') {
+    return { type, state: 'finished', label: 'Gotowe', remainingMin: null, completionTime: null }
+  }
+  return { type, state: 'idle', label: 'Bezczynna', remainingMin: null, completionTime: null }
+}
+
+/**
+ * @param {object} status surowy status ST (kształt z /devices/{id}/status)
+ * @param {string} deviceType typ z bazy (washer|dryer|dishwasher|fridge|ac|tv|other)
+ * @returns {{type:string,state:string,label:string,remainingMin:?number,completionTime:?string}}
+ */
+/** Lodówka: zawsze „on"; pokazujemy temperaturę i ostrzegamy o otwartych drzwiach. */
+function mapFridge(status) {
+  const door = attr(status, 'contactSensor', 'contact')
+  const tempC = attr(status, 'temperatureMeasurement', 'temperature')
+  return {
+    type: 'fridge',
+    state: 'on',
+    label: door === 'open' ? 'Drzwi otwarte' : 'Działa',
+    door,
+    tempC,
+  }
+}
+
+// Tryby klimatyzatora ST → czytelna etykieta PL.
+const AC_MODE_LABEL = {
+  cool: 'Chłodzenie', heat: 'Grzanie', dry: 'Osuszanie', wind: 'Wentylacja',
+  fanOnly: 'Wentylacja', auto: 'Auto',
+}
+
+/** Klima: on/off ze switcha; gdy on — tryb + zadana/aktualna temperatura. */
+function mapAc(status) {
+  const on = attr(status, 'switch', 'switch') === 'on'
+  const mode = attr(status, 'airConditionerMode', 'airConditionerMode')
+  return {
+    type: 'ac',
+    state: on ? 'on' : 'off',
+    label: on ? (AC_MODE_LABEL[mode] || 'Włączona') : 'Wyłączona',
+    mode,
+    targetTempC: attr(status, 'thermostatCoolingSetpoint', 'coolingSetpoint'),
+    tempC: attr(status, 'temperatureMeasurement', 'temperature'),
+  }
+}
+
+/** TV: on/off ze switcha; gdy on — głośność (kanał opcjonalnie). */
+function mapTv(status) {
+  const on = attr(status, 'switch', 'switch') === 'on'
+  return {
+    type: 'tv',
+    state: on ? 'on' : 'off',
+    label: on ? 'Włączony' : 'Wyłączony',
+    volume: attr(status, 'audioVolume', 'volume'),
+    channel: attr(status, 'tvChannel', 'tvChannelName') ?? attr(status, 'tvChannel', 'tvChannel'),
+  }
+}
+
+export function mapStStatus(status, deviceType) {
+  if (CYCLE_CAPABILITY[deviceType]) {
+    return mapCycleDevice(status, deviceType)
+  }
+  if (deviceType === 'fridge') {
+    return mapFridge(status)
+  }
+  if (deviceType === 'ac') {
+    return mapAc(status)
+  }
+  if (deviceType === 'tv') {
+    return mapTv(status)
+  }
+  return { type: deviceType || 'other', state: 'unknown', label: 'Nieznany stan', remainingMin: null, completionTime: null, fallback: true }
+}

@@ -56,10 +56,13 @@ export const SmartDevicesView = () => {
 
   const refreshOne = async () => { await refreshStatus() }
 
-  // Urządzenia na podczerwień (Smart IR) to piloty — bez poboru mocy, wykresów i kosztów.
-  const energyDevices = devices.filter((d) => !String(d.deviceType || '').startsWith('ir_'))
+  // Raport energii dotyczy tylko gniazdek Tuya: piloty IR (bez poboru) i urządzenia
+  // SmartThings (pomiar dojdzie w Fazie 5) wykluczone.
+  const energyDevices = devices.filter(
+    (d) => d.provider !== 'smartthings' && !String(d.deviceType || '').startsWith('ir_'),
+  )
   // Gniazdka (do powiązania z pilotami IR — realny stan zestawu z poboru mocy).
-  const plugs = devices.filter((d) => !d.deviceType || d.deviceType === 'plug')
+  const plugs = devices.filter((d) => d.provider !== 'smartthings' && (!d.deviceType || d.deviceType === 'plug'))
 
   // „Zestaw": piloty IR powiązane z gniazdkiem chowamy z płaskiej listy i wyświetlamy
   // zagnieżdżone w kaflu gniazdka. Powiązanie liczy się tylko gdy gniazdko istnieje na liście.

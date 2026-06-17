@@ -31,3 +31,8 @@ export async function getStDevices(ctx) {
 export async function getStDevice(ctx, deviceId) {
   return stGet(ctx, `/devices/${deviceId}`)
 }
+
+/** Pełny status urządzenia (components → capabilities → atrybuty). Wejście mappera. */
+export async function getStDeviceStatus(ctx, deviceId) {
+  return stGet(ctx, `/devices/${deviceId}/status`)
+}

@@ -1,0 +1,15 @@
+{
+  "components": {
+    "main": {
+      "dryerOperatingState": {
+        "machineState": { "value": "run" },
+        "dryerJobState": { "value": "drying" },
+        "completionTime": { "value": "2026-06-17T20:00:00Z" }
+      },
+      "samsungce.dryerOperatingState": {
+        "remainingTime": { "value": 80, "unit": "min" }
+      },
+      "switch": { "switch": { "value": "on" } }
+    }
+  }
+}

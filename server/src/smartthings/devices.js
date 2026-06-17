@@ -31,6 +31,8 @@ export function inferDeviceType(device) {
     if (TYPE_BY_CAPABILITY[id]) return TYPE_BY_CAPABILITY[id]
   }
   if (ids.includes('refrigeration')) return 'fridge'
+  if (ids.includes('airConditionerMode')) return 'ac'
+  if (ids.includes('tvChannel') || ids.includes('mediaInputSource')) return 'tv'
   return 'other'
 }
 

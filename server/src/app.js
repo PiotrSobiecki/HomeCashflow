@@ -13,8 +13,9 @@ import {
 import { validateCommands, validateAcCommands } from "./tuya/commands.js";
 import { buildAuthorizeUrl, exchangeCodeForTokens } from "./smartthings/oauth.js";
 import { saveTokens, getFreshAccessToken } from "./smartthings/credentials.js";
-import { getStDevices, getStDevice } from "./smartthings/client.js";
+import { getStDevices, getStDevice, getStDeviceStatus } from "./smartthings/client.js";
 import { summarizeDevices, inferDeviceType } from "./smartthings/devices.js";
+import { mapStStatus } from "./smartthings/status.js";
 import {
   readFinanceFromRelational,
   writeFinanceToRelational,
@@ -1547,6 +1548,25 @@ async function loadStContext(c, sql, householdId) {
   return { accessToken };
 }
 
+/** Status jednego urządzenia ST przez mapper (czytelny UI-model, nie surowy JSON). */
+async function readStStatus(stCtx, row) {
+  const status = await getStDeviceStatus(stCtx, row.external_device_id);
+  return {
+    id: row.id,
+    provider: "smartthings",
+    externalDeviceId: row.external_device_id,
+    ok: true,
+    online: true,
+    ...mapStStatus(status, row.device_type),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/** Payload urządzenia ST, które nie odpowiedziało (offline / błąd ST). */
+function stOfflinePayload(row) {
+  return { id: row.id, provider: "smartthings", externalDeviceId: row.external_device_id, ok: false, online: false };
+}
+
 // Discover ST: urządzenia z połączonego konta (owner-only). Już dodane w tym
 // gospodarstwie odfiltrowane. Statyczna ścieżka — bez kolizji z /:id (brak GET /:id).
 app.get("/api/smart-devices/discover-smartthings", authMiddleware, async (c) => {
@@ -1639,32 +1659,52 @@ app.get("/api/smart-devices/status", authMiddleware, async (c) => {
   if (!membership) return c.json({ statuses: [] });
 
   const rows = await sql`
-    SELECT id, tuya_device_id, device_type, ir_parent_id FROM smart_devices
+    SELECT id, provider, external_device_id, tuya_device_id, device_type, ir_parent_id FROM smart_devices
     WHERE household_id = ${membership.household_id} AND is_active = true
     ORDER BY created_at ASC
   `;
   if (rows.length === 0) return c.json({ statuses: [] });
 
-  const ctx = await loadTuyaContext(c, sql, membership.household_id);
-  if (!ctx) return c.json({ error: "tuya_not_configured" }, 400);
+  const tuyaRows = rows.filter((r) => r.provider !== "smartthings");
+  const stRows = rows.filter((r) => r.provider === "smartthings");
 
-  const todayByDevice = await getTodayStatsByDevice(sql, rows.map((r) => r.id));
-  const statuses = await Promise.all(
-    rows.map(async (r) => {
-      try {
-        const today = todayByDevice[r.id] ?? { kwh: 0, uptimeMin: 0 };
-        return {
-          ...(await readDeviceStatus(ctx, r, sql)),
-          todayKwh: today.kwh,
-          todayUptimeMin: today.uptimeMin,
-        };
-      } catch (err) {
-        console.error("[smart-devices] status failed", r.tuya_device_id, err);
-        return { id: r.id, tuyaDeviceId: r.tuya_device_id, ok: false, online: false };
-      }
-    }),
-  );
-  return c.json({ statuses });
+  // Tuya: jeden kontekst + statystyki energii (jak dotąd). 400 tylko gdy są urządzenia Tuya.
+  let tuyaStatuses = [];
+  if (tuyaRows.length > 0) {
+    const ctx = await loadTuyaContext(c, sql, membership.household_id);
+    if (!ctx) return c.json({ error: "tuya_not_configured" }, 400);
+    const todayByDevice = await getTodayStatsByDevice(sql, tuyaRows.map((r) => r.id));
+    tuyaStatuses = await Promise.all(
+      tuyaRows.map(async (r) => {
+        try {
+          const today = todayByDevice[r.id] ?? { kwh: 0, uptimeMin: 0 };
+          return { ...(await readDeviceStatus(ctx, r, sql)), todayKwh: today.kwh, todayUptimeMin: today.uptimeMin };
+        } catch (err) {
+          console.error("[smart-devices] status failed", r.tuya_device_id, err);
+          return { id: r.id, tuyaDeviceId: r.tuya_device_id, ok: false, online: false };
+        }
+      }),
+    );
+  }
+
+  // SmartThings: jeden kontekst, mapper per urządzenie; błąd jednego = offline, nie wywala reszty.
+  let stStatuses = [];
+  if (stRows.length > 0) {
+    const stCtx = await loadStContext(c, sql, membership.household_id);
+    stStatuses = await Promise.all(
+      stRows.map(async (r) => {
+        if (!stCtx) return stOfflinePayload(r);
+        try {
+          return await readStStatus(stCtx, r);
+        } catch (err) {
+          console.error("[smart-devices] ST status failed", r.external_device_id, err);
+          return stOfflinePayload(r);
+        }
+      }),
+    );
+  }
+
+  return c.json({ statuses: [...tuyaStatuses, ...stStatuses] });
 });
 
 app.get("/api/smart-devices/:id/status", authMiddleware, async (c) => {
@@ -1674,6 +1714,17 @@ app.get("/api/smart-devices/:id/status", authMiddleware, async (c) => {
 
   const result = await loadDeviceInHousehold(sql, user.id, id);
   if (result.error) return c.json(result.error.body, result.error.status);
+
+  if (result.row.provider === "smartthings") {
+    const stCtx = await loadStContext(c, sql, result.row.household_id);
+    if (!stCtx) return c.json({ error: "smartthings_not_connected" }, 400);
+    try {
+      return c.json(await readStStatus(stCtx, result.row));
+    } catch (err) {
+      console.error("[smart-devices] single ST status failed", err);
+      return c.json(stOfflinePayload(result.row));
+    }
+  }
 
   const ctx = await loadTuyaContext(c, sql, result.row.household_id);
   if (!ctx) return c.json({ error: "tuya_not_configured" }, 400);

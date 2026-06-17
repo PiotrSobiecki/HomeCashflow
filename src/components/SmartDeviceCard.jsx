@@ -11,6 +11,49 @@ const TYPE_META = {
   ir_ac: { label: 'Klimatyzacja', Icon: AirVent },
   ir_remote: { label: 'Pilot', Icon: Tv },
   plug: { label: 'Gniazdko', Icon: Plug },
+  washer: { label: 'Pralka', Icon: Cpu },
+  dryer: { label: 'Suszarka', Icon: Cpu },
+  dishwasher: { label: 'Zmywarka', Icon: Cpu },
+  fridge: { label: 'Lodówka', Icon: Cpu },
+  ac: { label: 'Klimatyzacja', Icon: AirVent },
+  tv: { label: 'Telewizor', Icon: Tv },
+}
+
+// Kolor „pigułki" stanu wg state z mappera ST (status.js).
+const ST_STATE_TONE = {
+  running: 'bg-indigo-500/20 text-indigo-300',
+  paused: 'bg-amber-500/20 text-amber-300',
+  finished: 'bg-emerald-500/20 text-emerald-300',
+  on: 'bg-emerald-500/20 text-emerald-300',
+  idle: 'bg-slate-600/40 text-slate-300',
+  off: 'bg-slate-600/40 text-slate-300',
+  unknown: 'bg-slate-600/40 text-slate-400',
+}
+
+/** Ciało karty urządzenia SmartThings — czytelny stan z mappera (nie surowy JSON). */
+function StDeviceBody({ status, online }) {
+  if (!status?.ok) {
+    return <p className="text-xs text-slate-500 mb-3">Nie udało się odświeżyć statusu.</p>
+  }
+  const tone = ST_STATE_TONE[status.state] || ST_STATE_TONE.unknown
+  const fmtEnd = (iso) => {
+    try { return new Date(iso).toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' }) } catch { return null }
+  }
+  return (
+    <div className="mb-3 space-y-1.5">
+      <span className={`inline-block text-xs font-medium px-2 py-0.5 rounded-full ${tone}`}>{status.label}</span>
+      {status.state === 'running' && (status.remainingMin != null || status.completionTime) && (
+        <p className="flex items-center gap-1 text-[11px] text-slate-400">
+          <Clock className="w-3 h-3" />
+          {status.remainingMin != null ? `Pozostało ~${status.remainingMin} min` : ''}
+          {status.completionTime && fmtEnd(status.completionTime) ? ` · koniec ok. ${fmtEnd(status.completionTime)}` : ''}
+        </p>
+      )}
+      {status.tempC != null && <p className="text-[11px] text-slate-400">Temperatura: {status.tempC}°C{status.targetTempC != null ? ` · zadana ${status.targetTempC}°C` : ''}</p>}
+      {status.volume != null && <p className="text-[11px] text-slate-400">Głośność: {status.volume}%</p>}
+      {!online && <p className="text-[11px] text-slate-500">Brak połączenia z urządzeniem.</p>}
+    </div>
+  )
 }
 import { DeviceControls } from './DeviceControls'
 import { AcControls } from './AcControls'
@@ -36,6 +79,7 @@ export const SmartDeviceCard = ({
 
   const online = status?.ok && status?.online
   const hasReading = status?.ok
+  const isSt = device.provider === 'smartthings'
   const isIrAc = device.deviceType === 'ir_ac'
   const isIrRemote = device.deviceType === 'ir_remote'
   const isIr = isIrAc || isIrRemote
@@ -123,6 +167,9 @@ export const SmartDeviceCard = ({
         </span>
       </div>
 
+      {isSt ? (
+        <StDeviceBody status={status} online={online} />
+      ) : (<>
       {/* Pomiary (gniazdka — urządzenia IR to piloty, bez pomiaru energii) */}
       {!isIr && (hasReading ? (
         <div className="mb-3">
@@ -187,6 +234,7 @@ export const SmartDeviceCard = ({
           {showChart && <DeviceEnergyChart deviceId={device.id} refreshKey={refreshKey} />}
         </>
       )}
+      </>)}
         </div>
 
         {/* Podpięte urządzenia — kolumny po prawo (desktop) / pod spodem (mobile) */}

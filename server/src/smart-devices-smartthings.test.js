@@ -17,11 +17,12 @@ vi.mock('./tuya/client.js', async () => {
 vi.mock('./smartthings/client.js', () => ({
   getStDevices: vi.fn(),
   getStDevice: vi.fn(),
+  getStDeviceStatus: vi.fn(),
 }))
 
 import { app, upsertUserAndHousehold } from './app.js'
 import { getTuyaToken, getDeviceInfo, getDeviceFunctions } from './tuya/client.js'
-import { getStDevices, getStDevice } from './smartthings/client.js'
+import { getStDevices, getStDevice, getStDeviceStatus } from './smartthings/client.js'
 import { saveTokens } from './smartthings/credentials.js'
 import { decodeFinanceDataKey } from './finance-crypto.js'
 import { neon } from '@neondatabase/serverless'
@@ -113,6 +114,7 @@ beforeEach(() => {
   vi.mocked(getDeviceFunctions).mockReset()
   vi.mocked(getStDevices).mockReset()
   vi.mocked(getStDevice).mockReset()
+  vi.mocked(getStDeviceStatus).mockReset()
 })
 
 afterEach(async () => {
@@ -266,6 +268,45 @@ describe('POST /api/smart-devices/smartthings', () => {
     const member = await addMemberToHousehold(owner.token)
     const res = await addStDevice(member.token, 'st-washer', 'Pralka')
     expect(res.status).toBe(403)
+  })
+})
+
+describe('GET /api/smart-devices/status — SmartThings devices', () => {
+  async function addWasher(owner) {
+    vi.mocked(getStDevice).mockResolvedValue(stDevice('st-washer', 'Pralka'))
+    await addStDevice(owner.token, 'st-washer', 'Pralka')
+  }
+
+  it('returns a mapped UI state (not raw JSON) for a running ST washer', async () => {
+    const owner = await createTuyaOwner()
+    await connectSmartthings(owner)
+    await addWasher(owner)
+    vi.mocked(getStDeviceStatus).mockResolvedValue({
+      components: { main: {
+        washerOperatingState: { machineState: { value: 'run' }, completionTime: { value: '2026-06-17T19:25:22Z' } },
+        'samsungce.washerOperatingState': { remainingTime: { value: 164, unit: 'min' } },
+      } },
+    })
+
+    const res = await app.request('/api/smart-devices/status', { headers: { cookie: `token=${owner.token}` } })
+    expect(res.status).toBe(200)
+    const { statuses } = await res.json()
+    const st = statuses.find((s) => s.externalDeviceId === 'st-washer')
+    expect(st).toMatchObject({
+      provider: 'smartthings', ok: true, online: true,
+      state: 'running', label: 'W trakcie', remainingMin: 164,
+    })
+  })
+
+  it('marks an ST device offline when the status call fails', async () => {
+    const owner = await createTuyaOwner()
+    await connectSmartthings(owner)
+    await addWasher(owner)
+    vi.mocked(getStDeviceStatus).mockRejectedValue(new Error('ST device offline'))
+
+    const { statuses } = await (await app.request('/api/smart-devices/status', { headers: { cookie: `token=${owner.token}` } })).json()
+    const st = statuses.find((s) => s.externalDeviceId === 'st-washer')
+    expect(st).toMatchObject({ provider: 'smartthings', ok: false, online: false })
   })
 })
 
