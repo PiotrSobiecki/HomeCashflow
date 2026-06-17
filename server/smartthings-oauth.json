@@ -1,0 +1,8 @@
+{
+  "clientName": "HomeCashflow",
+  "scope": ["r:locations:*", "r:devices:*", "x:devices:*"],
+  "redirectUris": [
+    "https://api.homecashflow.org/api/smartthings/callback",
+    "http://localhost:3000/api/smartthings/callback"
+  ]
+}

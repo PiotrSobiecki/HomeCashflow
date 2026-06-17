@@ -1,0 +1,319 @@
+{
+  "deviceId": "WASHER_DEVICE_ID",
+  "ownerId": "OWNER_ID",
+  "name": "[washer] Samsung",
+  "label": "Pralka",
+  "deviceManufacturerCode": "Samsung Electronics",
+  "manufacturerName": "Samsung Electronics",
+  "presentationId": "DA-WM-WM-000001",
+  "locationId": "LOCATION_ID",
+  "roomId": "ROOM_ID",
+  "components": [
+    {
+      "id": "main",
+      "label": "main",
+      "capabilities": [
+        {
+          "id": "execute",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "ocf",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "powerConsumptionReport",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "refresh",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "remoteControlStatus",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "demandResponseLoadControl",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "switch",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "washerOperatingState",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "custom.disabledCapabilities",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "custom.dryerDryLevel",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "custom.energyType",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "custom.jobBeginningStatus",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "custom.supportedOptions",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "custom.washerAutoDetergent",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "custom.washerAutoSoftener",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "custom.washerRinseCycles",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "custom.washerSoilLevel",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "custom.washerSpinLevel",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "custom.washerWaterTemperature",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "samsungce.audioVolumeLevel",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "samsungce.autoDispenseDetergent",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "samsungce.autoDispenseSoftener",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "samsungce.detergentOrder",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "samsungce.detergentState",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "samsungce.deviceIdentification",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "samsungce.dongleSoftwareInstallation",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "samsungce.detergentAutoReplenishment",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "samsungce.softenerAutoReplenishment",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "samsungce.driverVersion",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "samsungce.softwareUpdate",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "samsungce.kidsLock",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "samsungce.softenerOrder",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "samsungce.softenerState",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "samsungce.washerBubbleSoak",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "samsungce.washerCycle",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "samsungce.washerCyclePreset",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "samsungce.washerDelayEnd",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "samsungce.washerFreezePrevent",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "samsungce.washerOperatingState",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "samsungce.washerWashingTime",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "samsungce.washerWaterLevel",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "samsungce.washerWaterValve",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "samsungce.welcomeMessage",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "samsungce.waterConsumptionReport",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "samsungce.quickControl",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "samsungce.energyPlanner",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "samsungce.softwareVersion",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "sec.diagnosticsInformation",
+          "version": 1,
+          "optional": false
+        },
+        {
+          "id": "sec.wifiConfiguration",
+          "version": 1,
+          "optional": false
+        }
+      ],
+      "categories": [
+        {
+          "name": "Washer",
+          "categoryType": "manufacturer"
+        }
+      ],
+      "optional": false
+    },
+    {
+      "id": "hca.main",
+      "label": "hca.main",
+      "capabilities": [
+        {
+          "id": "hca.washerMode",
+          "version": 1,
+          "optional": false
+        }
+      ],
+      "categories": [
+        {
+          "name": "Other",
+          "categoryType": "manufacturer"
+        }
+      ],
+      "optional": false
+    }
+  ],
+  "createTime": "2026-06-17T15:33:30.622115486Z",
+  "childDevices": [],
+  "profile": {
+    "id": "602311d8-6a34-3d7d-af34-9d0cf2a70597"
+  },
+  "ocf": {
+    "ocfDeviceType": "oic.d.washer",
+    "name": "[washer] Samsung",
+    "specVersion": "core.1.1.0",
+    "verticalDomainSpecVersion": "res.1.1.0,sh.1.1.0",
+    "manufacturerName": "Samsung Electronics",
+    "modelNumber": "DA_WM_TP2_20_COMMON|20269741|200100020014112042A3020700000000",
+    "platformVersion": "DAWIT 2.0",
+    "platformOS": "TizenRT 2.0 + IPv6",
+    "hwVersion": "MediaTek",
+    "firmwareVersion": "DA_WM_TP2_20_COMMON_30250414",
+    "vendorId": "DA-WM-WM-000001",
+    "vendorResourceClientServerVersion": "MediaTek Release 2.211214.1",
+    "lastSignupTime": "2026-06-17T15:33:26.963859256Z",
+    "transferCandidate": false,
+    "additionalAuthCodeRequired": false
+  },
+  "type": "OCF",
+  "vid": "DA-WM-WM-000001",
+  "mnmn": "Samsung Electronics",
+  "ocfDeviceType": "oic.d.washer",
+  "restrictionTier": 0,
+  "allowed": null,
+  "executionContext": "CLOUD",
+  "relationships": []
+}
