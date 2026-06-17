@@ -2,10 +2,10 @@ name = "homecashflow-api"
 main = "src/worker.js"
 compatibility_date = "2024-12-01"
 
-# Cron co minutę: wyłączniki czasowe IR (na bieżąco) + snapshot zużycia co 15 min
-# (handler odpala energię tylko gdy minuta % 15 == 0).
+# Cron co 5 min: wyłączniki czasowe IR (±5 min — krok suwaka to i tak 30 min) +
+# snapshot zużycia co 15 min (handler odpala energię tylko gdy minuta % 15 == 0).
 [triggers]
-crons = ["* * * * *"]
+crons = ["*/5 * * * *"]
 
 [vars]
 FRONTEND_URL = "https://homecashflow.org"

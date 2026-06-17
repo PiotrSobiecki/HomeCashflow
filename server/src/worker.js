@@ -10,8 +10,8 @@ import { decodeFinanceDataKey } from './finance-crypto.js'
 export default {
   fetch: app.fetch,
 
-  // Cron co minutę: wyłączniki czasowe IR (na bieżąco). Snapshot zużycia + retencja
-  // tylko co 15 min (minuta % 15 == 0), żeby nie pollować urządzeń 15× częściej.
+  // Cron co 5 min: wyłączniki czasowe IR (±5 min — krok suwaka to i tak 30 min).
+  // Snapshot zużycia + retencja tylko co 15 min (minuta % 15 == 0).
   async scheduled(event, env, ctx) {
     ctx.waitUntil((async () => {
       const sql = neon(env.DATABASE_URL)
