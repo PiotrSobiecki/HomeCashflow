@@ -141,7 +141,7 @@ export const SmartDevicesView = () => {
                   key={device.id}
                   onDragOver={isDesktop ? (e) => e.preventDefault() : undefined}
                   onDrop={isDesktop ? (e) => { e.preventDefault(); handleDrop(device.id) } : undefined}
-                  className={`${span} ${draggingId === device.id ? 'opacity-50' : ''}`}
+                  className={`${span} flex flex-col ${draggingId === device.id ? 'opacity-50' : ''}`}
                 >
                   {/* Uchwyt przeciągania — tylko desktop (nie koliduje z suwakami/przyciskami w kaflu) */}
                   {isDesktop && (
