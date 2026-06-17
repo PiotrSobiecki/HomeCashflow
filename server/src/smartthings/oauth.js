@@ -6,8 +6,11 @@
  * @see https://developer.smartthings.com/docs/connected-services/oauth-integrations
  */
 
-export const SMARTTHINGS_AUTHORIZE_URL = 'https://api.smartthings.com/oauth/authorize'
-export const SMARTTHINGS_TOKEN_URL = 'https://api.smartthings.com/oauth/token'
+// OAuth (authorize + token) chodzi przez host regionalny `oauthin-regional`, NIE przez
+// api.smartthings.com (ten zwraca 403 na /oauth/* — służy do API urządzeń). Potwierdzone
+// empirycznie + zgodne z tym, czego używa SmartThings CLI przy logowaniu.
+export const SMARTTHINGS_AUTHORIZE_URL = 'https://oauthin-regional.api.smartthings.com/oauth/authorize'
+export const SMARTTHINGS_TOKEN_URL = 'https://oauthin-regional.api.smartthings.com/oauth/token'
 
 /**
  * Parsuje odpowiedź token endpointu na znormalizowany kształt.

@@ -18,7 +18,7 @@ describe('buildAuthorizeUrl', () => {
         state: 'st_abc',
       }),
     )
-    expect(url.origin + url.pathname).toBe('https://api.smartthings.com/oauth/authorize')
+    expect(url.origin + url.pathname).toBe('https://oauthin-regional.api.smartthings.com/oauth/authorize')
     expect(url.searchParams.get('client_id')).toBe('cid-123')
     expect(url.searchParams.get('response_type')).toBe('code')
     expect(url.searchParams.get('redirect_uri')).toBe(
@@ -100,7 +100,7 @@ describe('exchangeCodeForTokens', () => {
       { fetchFn, nowMs: 1_700_000_000_000 },
     )
 
-    expect(captured.url).toBe('https://api.smartthings.com/oauth/token')
+    expect(captured.url).toBe('https://oauthin-regional.api.smartthings.com/oauth/token')
     expect(captured.init.method).toBe('POST')
     expect(captured.init.headers.Authorization).toBe('Basic ' + btoa('cid:secret'))
     const body = new URLSearchParams(captured.init.body)
