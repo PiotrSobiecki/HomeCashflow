@@ -340,6 +340,24 @@ export const sendIrKey = async (id, payload) => {
   return jsonOrThrow(res, 'POST /api/smart-devices/ir-key');
 };
 
+export const fetchDeviceTimer = async (id) => {
+  const res = await fetch(`${API_URL}/api/smart-devices/${id}/timer`, {
+    credentials: 'include',
+    headers: { Accept: 'application/json' },
+  });
+  return jsonOrThrow(res, 'GET /api/smart-devices/timer');
+};
+
+export const setDeviceTimer = async (id, minutes) => {
+  const res = await fetch(`${API_URL}/api/smart-devices/${id}/timer`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ minutes }),
+  });
+  return jsonOrThrow(res, 'POST /api/smart-devices/timer');
+};
+
 export const fetchDeviceHistory = async (id, range) => {
   const res = await fetch(`${API_URL}/api/smart-devices/${id}/history?range=${range}`, {
     credentials: 'include',

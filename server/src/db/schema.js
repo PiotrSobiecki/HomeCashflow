@@ -242,6 +242,27 @@ export const deviceCommandLog = pgTable('device_command_log', {
   byHouseholdAt: index('idx_device_cmd_household_at').on(t.householdId, t.at),
 }))
 
+// ====== Wyłącznik czasowy dla urządzeń IR (Smart IR) ======
+//
+// Urządzenia IR (klima/TV) nie mają natywnego DP `countdown` jak gniazdka — pilot nie
+// zna stanu i nie umie odliczać. Timer trzymamy po stronie serwera: cron co minutę
+// wyłącza urządzenia, którym minął `fire_at`. Jeden aktywny timer per urządzenie
+// (partial unique po status='pending').
+export const deviceTimers = pgTable('device_timers', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  deviceId: uuid('device_id').notNull().references(() => smartDevices.id, { onDelete: 'cascade' }),
+  householdId: uuid('household_id').notNull().references(() => households.id, { onDelete: 'cascade' }),
+  fireAt: timestamp('fire_at', { withTimezone: true }).notNull(),
+  action: text('action').notNull().default('off'),
+  status: text('status').notNull().default('pending'),
+  createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  statusCheck: check('device_timers_status_check', sql`${t.status} IN ('pending', 'done', 'canceled', 'failed')`),
+  byStatusFire: index('idx_device_timers_status_fire').on(t.status, t.fireAt),
+  uniqPending: uniqueIndex('uniq_device_timer_pending').on(t.deviceId).where(sql`${t.status} = 'pending'`),
+}))
+
 // ====== Pomiary zużycia w czasie (Slice 4 — wykresy) ======
 //
 // Dwa rodzaje wierszy w jednej tabeli:

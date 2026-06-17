@@ -1949,6 +1949,59 @@ app.post("/api/smart-devices/:id/ir-key", authMiddleware, async (c) => {
   return c.json({ ok: true });
 });
 
+// Wyłącznik czasowy (tylko urządzenia IR — gniazdka mają natywny DP countdown).
+const IR_TIMER_TYPES = new Set(["ir_ac", "ir_remote"]);
+const MAX_TIMER_MINUTES = 24 * 60;
+
+// Aktywny timer urządzenia (lub null). Zwraca też ile minut zostało.
+app.get("/api/smart-devices/:id/timer", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+  const id = c.req.param("id");
+
+  const result = await loadDeviceInHousehold(sql, user.id, id);
+  if (result.error) return c.json(result.error.body, result.error.status);
+
+  const [t] = await sql`
+    SELECT fire_at FROM device_timers
+    WHERE device_id = ${id} AND status = 'pending'
+    ORDER BY fire_at ASC LIMIT 1
+  `;
+  if (!t) return c.json({ timer: null });
+  const minutesLeft = Math.max(0, Math.round((new Date(t.fire_at).getTime() - Date.now()) / 60000));
+  return c.json({ timer: { fireAt: toIso(t.fire_at), minutesLeft } });
+});
+
+// Ustaw/anuluj timer. body: { minutes }. minutes<=0 anuluje. Jeden aktywny per urządzenie.
+app.post("/api/smart-devices/:id/timer", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+  const id = c.req.param("id");
+
+  let body;
+  try { body = await c.req.json(); } catch { return c.json({ error: "Invalid JSON body" }, 400); }
+
+  const result = await loadDeviceInHousehold(sql, user.id, id);
+  if (result.error) return c.json(result.error.body, result.error.status);
+  if (!IR_TIMER_TYPES.has(result.row.device_type)) return c.json({ error: "timer_not_supported" }, 400);
+
+  const minutes = Number(body?.minutes);
+  if (!Number.isFinite(minutes)) return c.json({ error: "minutes_required" }, 400);
+
+  // Zawsze czyścimy poprzedni aktywny timer (partial unique pilnuje jednego pending).
+  await sql`UPDATE device_timers SET status = 'canceled' WHERE device_id = ${id} AND status = 'pending'`;
+
+  if (minutes <= 0) return c.json({ timer: null });
+
+  const clamped = Math.min(Math.round(minutes), MAX_TIMER_MINUTES);
+  const [t] = await sql`
+    INSERT INTO device_timers (device_id, household_id, fire_at, action, created_by)
+    VALUES (${id}, ${result.row.household_id}, NOW() + (${clamped} || ' minutes')::interval, 'off', ${user.id})
+    RETURNING fire_at
+  `;
+  return c.json({ timer: { fireAt: toIso(t.fire_at), minutesLeft: clamped } });
+});
+
 // ============ ACTION LOG (undo Phase 4) ============
 
 app.get("/api/action-log", authMiddleware, async (c) => {

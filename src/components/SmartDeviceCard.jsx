@@ -6,6 +6,7 @@ import {
 import { DeviceControls } from './DeviceControls'
 import { AcControls } from './AcControls'
 import { RemoteControls } from './RemoteControls'
+import { DeviceTimer } from './DeviceTimer'
 import { DeviceEnergyChart } from './DeviceEnergyChart'
 
 /**
@@ -116,6 +117,9 @@ export const SmartDeviceCard = ({
       )}
 
       {cmdError && <p className="text-xs text-rose-400 mb-2">{cmdError}</p>}
+
+      {/* Wyłącznik czasowy — urządzenia IR (gniazdka mają natywny countdown w DP) */}
+      {isIr && <DeviceTimer deviceId={device.id} disabled={!online} />}
 
       {/* Wykres zużycia (rozwijany — montowany dopiero po otwarciu); urządzenia IR bez pomiaru */}
       {!isIr && (
