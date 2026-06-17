@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { validateCommands, validateAcCommands, looksLikeIrAc } from './commands.js'
+import { validateCommands, validateAcCommands } from './commands.js'
 
 const FUNCTIONS = {
   functions: [
@@ -52,21 +52,6 @@ describe('validateCommands', () => {
 
   it('rejects when the device has no functions snapshot', () => {
     expect(validateCommands(null, [{ code: 'switch_1', value: true }])).not.toBeNull()
-  })
-})
-
-describe('looksLikeIrAc', () => {
-  it('detects an IR AC (power+mode+temp+wind present)', () => {
-    const fns = { functions: [
-      { code: 'power', type: 'Boolean' }, { code: 'mode', type: 'Enum' },
-      { code: 'temp', type: 'Enum' }, { code: 'wind', type: 'Enum' },
-    ] }
-    expect(looksLikeIrAc(fns)).toBe(true)
-  })
-
-  it('is false for a plain plug', () => {
-    expect(looksLikeIrAc({ functions: [{ code: 'switch_1' }] })).toBe(false)
-    expect(looksLikeIrAc(null)).toBe(false)
   })
 })
 

@@ -9,7 +9,7 @@ import {
   listProjectDevices, formatStatuses, sendCommands,
   getAcStatus, sendAcCommand, formatAcStatus,
 } from "./tuya/client.js";
-import { validateCommands, validateAcCommands, looksLikeIrAc } from "./tuya/commands.js";
+import { validateCommands, validateAcCommands } from "./tuya/commands.js";
 import {
   readFinanceFromRelational,
   writeFinanceToRelational,
@@ -1745,9 +1745,11 @@ app.post("/api/smart-devices", authMiddleware, async (c) => {
   const displayName = info?.name || tuyaDeviceId;
 
   // Klima na podczerwień (pod blasterem Smart IR): nie ma sterowalnych DP, chodzi
-  // osobnym API. Wykrywamy po funkcjach (power+mode+temp+wind); rodzic (infrared_id)
-  // to gateway_id sub-urządzenia. Bez rodzica nie da się sterować — odrzucamy z jasnym błędem.
-  const isIrAc = looksLikeIrAc(functions);
+  // osobnym API. Wykrywamy po kategorii Tuya (`infrared_ac`) — /functions zwraca dla
+  // niej surowe kody pilota (F/M/T/PowerOn/PowerOff), nie standardowe power/mode/temp/wind.
+  // Rodzic (infrared_id) to gateway_id sub-urządzenia (blaster). Bez rodzica nie da się
+  // sterować — odrzucamy z jasnym błędem.
+  const isIrAc = info?.category === "infrared_ac";
   const irParentId = isIrAc ? (info?.gateway_id ?? null) : null;
   if (isIrAc && !irParentId) {
     return c.json({ error: "ir_parent_missing" }, 400);

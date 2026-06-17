@@ -66,15 +66,6 @@ export const AC_CODES = {
 }
 
 /**
- * Czy snapshot funkcji wygląda na klimę IR (ma power+mode+temp+wind).
- * @returns {boolean}
- */
-export function looksLikeIrAc(functionsJson) {
-  const codes = new Set((functionsJson?.functions ?? []).map((f) => f.code))
-  return ['power', 'mode', 'temp', 'wind'].every((c) => codes.has(c))
-}
-
-/**
  * Walidacja komend klimy IR względem stałego modelu AC.
  * @returns {string | null} null = ok, inaczej kod błędu
  */
