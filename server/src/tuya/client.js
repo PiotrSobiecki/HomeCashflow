@@ -229,6 +229,24 @@ export function sendAcCommand(ctx, infraredId, remoteId, code, value) {
   )
 }
 
+/**
+ * Lista przycisków pilota IR (TV/STB/itp.). Zwraca { category_id, key_list: [{key, key_id, key_name}] }.
+ * Pilot IR jest bezstanowy — nie ma odczytu stanu, tylko wysyłka przycisków.
+ */
+export function getRemoteKeys(ctx, infraredId, remoteId) {
+  return tuyaFetchWithToken(ctx, 'GET', `/v2.0/infrareds/${infraredId}/remotes/${remoteId}/keys`)
+}
+
+/** Wysyła pojedynczy przycisk pilota IR. `categoryId` z listy przycisków. */
+export function sendRemoteKey(ctx, infraredId, remoteId, { categoryId, key, keyId }) {
+  return tuyaFetchWithToken(
+    ctx,
+    'POST',
+    `/v2.0/infrareds/${infraredId}/remotes/${remoteId}/raw/command`,
+    { category_id: categoryId, key, key_id: keyId },
+  )
+}
+
 /** Stan klimy IR znormalizowany do liczb (Tuya zwraca stringi). */
 export function formatAcStatus(result) {
   return {

@@ -34,8 +34,8 @@ export const SmartDevicesView = () => {
 
   const refreshOne = async () => { await refreshStatus() }
 
-  // Klimy na podczerwień (Smart IR) to piloty — bez poboru mocy, wykresów i kosztów.
-  const energyDevices = devices.filter((d) => d.deviceType !== 'ir_ac')
+  // Urządzenia na podczerwień (Smart IR) to piloty — bez poboru mocy, wykresów i kosztów.
+  const energyDevices = devices.filter((d) => !String(d.deviceType || '').startsWith('ir_'))
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800">

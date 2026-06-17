@@ -5,6 +5,7 @@ import {
 } from 'lucide-react'
 import { DeviceControls } from './DeviceControls'
 import { AcControls } from './AcControls'
+import { RemoteControls } from './RemoteControls'
 import { DeviceEnergyChart } from './DeviceEnergyChart'
 
 /**
@@ -24,6 +25,8 @@ export const SmartDeviceCard = ({
   const online = status?.ok && status?.online
   const hasReading = status?.ok
   const isIrAc = device.deviceType === 'ir_ac'
+  const isIrRemote = device.deviceType === 'ir_remote'
+  const isIr = isIrAc || isIrRemote
 
   // Statystyki dzisiejsze (od północy czasu warszawskiego) — liczone w backendzie
   const todayKwh = status?.todayKwh ?? null
@@ -80,8 +83,8 @@ export const SmartDeviceCard = ({
         </span>
       </div>
 
-      {/* Pomiary (gniazdka — klima IR nie mierzy energii) */}
-      {!isIrAc && (hasReading ? (
+      {/* Pomiary (gniazdka — urządzenia IR to piloty, bez pomiaru energii) */}
+      {!isIr && (hasReading ? (
         <div className="mb-3">
           <div className="grid grid-cols-3 gap-2">
             <Metric icon={Zap} label="Moc" value={status.powerW != null ? `${status.powerW} W` : '—'} />
@@ -98,9 +101,11 @@ export const SmartDeviceCard = ({
         <p className="text-xs text-slate-500 mb-3">Nie udało się odświeżyć statusu.</p>
       ))}
 
-      {/* Sterowanie — klima IR ma dedykowany panel, reszta generowana z zapisywalnych DP */}
+      {/* Sterowanie — klima IR: panel AC; pilot IR: siatka przycisków; reszta: DP urządzenia */}
       {isIrAc ? (
         <AcControls ac={status?.ac} onSend={handleSend} disabled={!online} />
+      ) : isIrRemote ? (
+        <RemoteControls deviceId={device.id} disabled={!online} />
       ) : (
         <DeviceControls
           functionsJson={device.functionsJson}
@@ -112,8 +117,8 @@ export const SmartDeviceCard = ({
 
       {cmdError && <p className="text-xs text-rose-400 mb-2">{cmdError}</p>}
 
-      {/* Wykres zużycia (rozwijany — montowany dopiero po otwarciu); klima IR bez pomiaru */}
-      {!isIrAc && (
+      {/* Wykres zużycia (rozwijany — montowany dopiero po otwarciu); urządzenia IR bez pomiaru */}
+      {!isIr && (
         <>
           <button
             type="button"

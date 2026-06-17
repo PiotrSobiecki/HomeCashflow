@@ -322,6 +322,24 @@ export const sendDeviceCommands = async (id, commands) => {
   return jsonOrThrow(res, 'POST /api/smart-devices/commands');
 };
 
+export const fetchIrKeys = async (id) => {
+  const res = await fetch(`${API_URL}/api/smart-devices/${id}/ir-keys`, {
+    credentials: 'include',
+    headers: { Accept: 'application/json' },
+  });
+  return jsonOrThrow(res, 'GET /api/smart-devices/ir-keys');
+};
+
+export const sendIrKey = async (id, payload) => {
+  const res = await fetch(`${API_URL}/api/smart-devices/${id}/ir-key`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return jsonOrThrow(res, 'POST /api/smart-devices/ir-key');
+};
+
 export const fetchDeviceHistory = async (id, range) => {
   const res = await fetch(`${API_URL}/api/smart-devices/${id}/history?range=${range}`, {
     credentials: 'include',

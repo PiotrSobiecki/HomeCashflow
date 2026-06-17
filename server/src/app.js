@@ -8,6 +8,7 @@ import {
   getTuyaToken, getDeviceInfo, getDeviceFunctions, getDeviceStatus,
   listProjectDevices, formatStatuses, sendCommands,
   getAcStatus, sendAcCommand, formatAcStatus,
+  getRemoteKeys, sendRemoteKey,
 } from "./tuya/client.js";
 import { validateCommands, validateAcCommands } from "./tuya/commands.js";
 import {
@@ -1341,6 +1342,10 @@ async function readDeviceStatus(ctx, row) {
     const ac = formatAcStatus(await getAcStatus(ctx, row.ir_parent_id, row.tuya_device_id));
     return { ...deviceStatusPayload(row, { ac, switchOn: ac.power === 1 }) };
   }
+  if (row.device_type === "ir_remote") {
+    // Pilot IR jest bezstanowy (blaster nie zna stanu TV) — raportujemy online, bez metryk.
+    return deviceStatusPayload(row, {});
+  }
   return deviceStatusPayload(row, formatStatuses(await getDeviceStatus(ctx, row.tuya_device_id)));
 }
 
@@ -1744,17 +1749,20 @@ app.post("/api/smart-devices", authMiddleware, async (c) => {
 
   const displayName = info?.name || tuyaDeviceId;
 
-  // Klima na podczerwień (pod blasterem Smart IR): nie ma sterowalnych DP, chodzi
-  // osobnym API. Wykrywamy po kategorii Tuya (`infrared_ac`) — /functions zwraca dla
-  // niej surowe kody pilota (F/M/T/PowerOn/PowerOff), nie standardowe power/mode/temp/wind.
-  // Rodzic (infrared_id) to gateway_id sub-urządzenia (blaster). Bez rodzica nie da się
-  // sterować — odrzucamy z jasnym błędem.
-  const isIrAc = info?.category === "infrared_ac";
-  const irParentId = isIrAc ? (info?.gateway_id ?? null) : null;
-  if (isIrAc && !irParentId) {
+  // Urządzenia na podczerwień (pod blasterem Smart IR): nie mają sterowalnych DP ani
+  // pomiaru energii — chodzą osobnym API. Wykrywamy po kategorii Tuya (`infrared_*`):
+  //  • `infrared_ac` → klima (struktura power/mode/temp/wind) — device_type 'ir_ac',
+  //  • reszta (`infrared_tv`, STB, …) → pilot z przyciskami — device_type 'ir_remote'.
+  // /functions zwraca dla nich surowe kody pilota, nie standardowe DP — dlatego po kategorii.
+  // Rodzic (infrared_id) to gateway_id sub-urządzenia (blaster). Bez rodzica nie da się sterować.
+  const category = info?.category ?? "";
+  const isIr = category.startsWith("infrared_");
+  const isIrAc = category === "infrared_ac";
+  const irParentId = isIr ? (info?.gateway_id ?? null) : null;
+  if (isIr && !irParentId) {
     return c.json({ error: "ir_parent_missing" }, 400);
   }
-  const deviceType = isIrAc ? "ir_ac" : "plug";
+  const deviceType = isIrAc ? "ir_ac" : isIr ? "ir_remote" : "plug";
 
   const [row] = await sql`
     INSERT INTO smart_devices
@@ -1874,6 +1882,68 @@ app.post("/api/smart-devices/:id/commands", authMiddleware, async (c) => {
     } catch (err) {
       console.error("[device-command-log] insert failed", err);
     }
+  }
+
+  return c.json({ ok: true });
+});
+
+// Lista przycisków pilota IR (TV/STB/itp.) — do narysowania pilota w UI. Tylko 'ir_remote'.
+app.get("/api/smart-devices/:id/ir-keys", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+  const id = c.req.param("id");
+
+  const result = await loadDeviceInHousehold(sql, user.id, id);
+  if (result.error) return c.json(result.error.body, result.error.status);
+  if (result.row.device_type !== "ir_remote") return c.json({ error: "not_ir_remote" }, 400);
+
+  const ctx = await loadTuyaContext(c, sql, result.row.household_id);
+  if (!ctx) return c.json({ error: "tuya_not_configured" }, 400);
+
+  try {
+    const r = await getRemoteKeys(ctx, result.row.ir_parent_id, result.row.tuya_device_id);
+    return c.json({ categoryId: r?.category_id ?? null, keys: r?.key_list ?? [] });
+  } catch (err) {
+    console.error("[smart-devices] ir-keys failed", err);
+    return c.json({ error: "ir_keys_failed" }, 502);
+  }
+});
+
+// Wysłanie pojedynczego przycisku pilota IR. body: { key, keyId, categoryId } (z listy ir-keys).
+app.post("/api/smart-devices/:id/ir-key", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+  const id = c.req.param("id");
+
+  let body;
+  try { body = await c.req.json(); } catch { return c.json({ error: "Invalid JSON body" }, 400); }
+
+  const result = await loadDeviceInHousehold(sql, user.id, id);
+  if (result.error) return c.json(result.error.body, result.error.status);
+  if (result.row.device_type !== "ir_remote") return c.json({ error: "not_ir_remote" }, 400);
+
+  const key = typeof body?.key === "string" ? body.key : null;
+  const keyId = typeof body?.keyId === "number" ? body.keyId : null;
+  const categoryId = typeof body?.categoryId === "number" ? body.categoryId : null;
+  if (!key && keyId == null) return c.json({ error: "key_required" }, 400);
+
+  const ctx = await loadTuyaContext(c, sql, result.row.household_id);
+  if (!ctx) return c.json({ error: "tuya_not_configured" }, 400);
+
+  try {
+    await sendRemoteKey(ctx, result.row.ir_parent_id, result.row.tuya_device_id, { categoryId, key, keyId });
+  } catch (err) {
+    console.error("[smart-devices] ir-key failed", err);
+    return c.json({ error: "command_failed" }, 502);
+  }
+
+  try {
+    await sql`
+      INSERT INTO device_command_log (household_id, device_id, actor_id, code, value)
+      VALUES (${result.row.household_id}, ${result.row.id}, ${user.id}, ${key ?? String(keyId)}, ${JSON.stringify({ keyId, categoryId })})
+    `;
+  } catch (err) {
+    console.error("[device-command-log] insert failed", err);
   }
 
   return c.json({ ok: true });
