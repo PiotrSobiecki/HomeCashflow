@@ -200,6 +200,25 @@ export const tuyaCredentials = pgTable('tuya_credentials', {
   datacenterCheck: check('tuya_credentials_datacenter_check', sql`${t.datacenter} IN ('eu', 'us', 'cn', 'in')`),
 }))
 
+// ====== Poświadczenia SmartThings per gospodarstwo (OAuth-In, Faza 1) ======
+//
+// W przeciwieństwie do Tuya (BYO client_id/secret per household), SmartThings ma JEDEN
+// OAuth-In SmartApp na całą apkę (client_id/secret w env). Tutaj trzymamy tylko to, co
+// per-user: tokeny OAuth (zaszyfrowane ff1:… AES-GCM, ten sam FINANCE_DATA_KEY).
+// Singleton per household → PK = household_id. Tokeny nigdy nie wracają do frontu.
+export const smartthingsCredentials = pgTable('smartthings_credentials', {
+  householdId: uuid('household_id').primaryKey().references(() => households.id, { onDelete: 'cascade' }),
+  accessTokenEnc: text('access_token_enc').notNull(), // ciphertext
+  refreshTokenEnc: text('refresh_token_enc').notNull(), // ciphertext
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(), // wygaśnięcie access tokenu
+  scopes: text('scopes'), // przyznane scope (space-separated)
+  locationId: text('location_id'), // domyślna lokacja ST (opcjonalnie)
+  samsungAccountId: text('samsung_account_id'), // do audytu (opcjonalnie)
+  verifiedAt: timestamp('verified_at', { withTimezone: true }), // ostatnia udana wymiana/odświeżenie
+  createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+})
+
 // ====== Urządzenia Tuya per gospodarstwo (Slice 2) ======
 //
 // N urządzeń per gospodarstwo (poświadczenia są jedne — tuya_credentials).

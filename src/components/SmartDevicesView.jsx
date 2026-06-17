@@ -12,6 +12,7 @@ function applyOrder(items, order) {
 import { AppHeader } from './AppHeader'
 import { AppFooter } from './AppFooter'
 import { TuyaIntegration } from './TuyaIntegration'
+import { SmartThingsIntegration } from './SmartThingsIntegration'
 import { SmartDeviceCard } from './SmartDeviceCard'
 import { EnergyReportExport } from './EnergyReportExport'
 import { AddSmartDeviceModal } from './AddSmartDeviceModal'
@@ -92,6 +93,9 @@ export const SmartDevicesView = () => {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Panel poświadczeń Tuya — pełna szerokość (owner-only, sam się ukrywa) */}
         <TuyaIntegration />
+
+        {/* Panel SmartThings (OAuth-In) — status widoczny dla wszystkich, akcje owner-only */}
+        <SmartThingsIntegration isOwner={isOwner} />
 
         {/* Sekcja urządzeń */}
         <div className="bg-slate-800/50 border border-slate-700/50 rounded-2xl p-6">

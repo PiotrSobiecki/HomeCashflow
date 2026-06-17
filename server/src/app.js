@@ -11,6 +11,8 @@ import {
   getRemoteKeys, sendRemoteKey,
 } from "./tuya/client.js";
 import { validateCommands, validateAcCommands } from "./tuya/commands.js";
+import { buildAuthorizeUrl, exchangeCodeForTokens } from "./smartthings/oauth.js";
+import { saveTokens } from "./smartthings/credentials.js";
 import {
   readFinanceFromRelational,
   writeFinanceToRelational,
@@ -1268,6 +1270,102 @@ app.delete("/api/tuya/credentials", authMiddleware, async (c) => {
   if (membership.owner_id !== user.id) return c.json({ error: "forbidden_owner_only" }, 403);
 
   await sql`DELETE FROM tuya_credentials WHERE household_id = ${membership.household_id}`;
+  return c.body(null, 204);
+});
+
+// ============ SMARTTHINGS (OAuth-In, Faza 1) ============
+//
+// JEDEN OAuth-In SmartApp na apkę (SMARTTHINGS_CLIENT_ID/SECRET w env). Tokeny per
+// gospodarstwo zaszyfrowane w smartthings_credentials. Łączenie/rozłączanie owner-only;
+// status widoczny dla członków. Tokeny nigdy nie wracają do frontu.
+
+const SMARTTHINGS_SCOPES = ["r:locations:*", "r:devices:*", "x:devices:*"];
+
+function smartthingsRedirectUri(c) {
+  return getEnv(c, "SMARTTHINGS_REDIRECT_URI") || `${getApiBaseUrl(c)}/api/smartthings/callback`;
+}
+
+// Owner inicjuje OAuth → redirect na ekran zgody Samsung.
+app.get("/api/smartthings/connect", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+  const membership = await getMembershipWithOwner(sql, user.id);
+  if (!membership) return c.json({ error: "No household" }, 400);
+  if (membership.owner_id !== user.id) return c.json({ error: "forbidden_owner_only" }, 403);
+
+  const clientId = getEnv(c, "SMARTTHINGS_CLIENT_ID");
+  if (!clientId) return c.json({ error: "config_smartthings" }, 500);
+
+  const url = buildAuthorizeUrl({
+    clientId,
+    redirectUri: smartthingsRedirectUri(c),
+    scopes: SMARTTHINGS_SCOPES,
+    state: crypto.randomUUID(),
+  });
+  return c.redirect(url);
+});
+
+// Callback Samsung: wymiana code → tokeny → zapis zaszyfrowany. Redirect na front.
+app.get("/api/smartthings/callback", async (c) => {
+  const frontend = getEnv(c, "FRONTEND_URL") || "http://localhost:5173";
+  const fail = (st) => c.redirect(`${frontend}/?view=urzadzenia&st=${st}`);
+
+  if (c.req.query("error")) return fail("error");
+  const code = c.req.query("code");
+  if (!code) return fail("error");
+
+  try {
+    // User jest zalogowany (cookie leci przy top-level redirect) — ustal gospodarstwo.
+    const token = parseCookie(c.req.header("cookie"), "token");
+    const { payload } = await jwtVerify(token, getSecret(c));
+    const sql = getDb(c);
+    const [user] = await sql`SELECT id FROM users WHERE id = ${payload.userId}`;
+    if (!user) return fail("error");
+    const membership = await getMembershipWithOwner(sql, user.id);
+    if (!membership || membership.owner_id !== user.id) return fail("error");
+
+    const tokens = await exchangeCodeForTokens({
+      code,
+      clientId: getEnv(c, "SMARTTHINGS_CLIENT_ID"),
+      clientSecret: getEnv(c, "SMARTTHINGS_CLIENT_SECRET"),
+      redirectUri: smartthingsRedirectUri(c),
+    });
+
+    await saveTokens(sql, {
+      householdId: membership.household_id,
+      tokens,
+      scopes: tokens.scope,
+      createdBy: user.id,
+      rawKey: getFinanceDataKey(c),
+    });
+    return fail("connected");
+  } catch (err) {
+    console.error("[smartthings/callback]", err);
+    return fail(err?.code === "invalid_grant" ? "reconnect" : "error");
+  }
+});
+
+// Status połączenia — bez tokenów. Widoczny dla każdego członka gospodarstwa.
+app.get("/api/smartthings/status", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+  const membership = await getMembershipWithOwner(sql, user.id);
+  if (!membership) return c.json({ connected: false });
+  const [row] = await sql`
+    SELECT verified_at FROM smartthings_credentials WHERE household_id = ${membership.household_id}
+  `;
+  if (!row) return c.json({ connected: false });
+  return c.json({ connected: true, verifiedAt: toIso(row.verified_at) });
+});
+
+// Rozłączenie — owner-only. Kasuje poświadczenia (urządzenia ST dojdą w Fazie 2).
+app.delete("/api/smartthings/disconnect", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+  const membership = await getMembershipWithOwner(sql, user.id);
+  if (!membership) return c.json({ error: "No household" }, 400);
+  if (membership.owner_id !== user.id) return c.json({ error: "forbidden_owner_only" }, 403);
+  await sql`DELETE FROM smartthings_credentials WHERE household_id = ${membership.household_id}`;
   return c.body(null, 204);
 });
 

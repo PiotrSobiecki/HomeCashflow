@@ -210,6 +210,39 @@ export const deleteTuyaCredentials = async () => {
   return true;
 };
 
+// ===== SmartThings (OAuth-In, Faza 1) =====
+
+/** GET status połączenia SmartThings → { connected, verifiedAt }. */
+export const fetchSmartThingsStatus = async () => {
+  const res = await fetch(`${API_URL}/api/smartthings/status`, {
+    method: 'GET',
+    credentials: 'include',
+    headers: { Accept: 'application/json' },
+  });
+  if (!res.ok) {
+    const err = new Error(`GET /api/smartthings/status: ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
+  return res.json();
+};
+
+/** Inicjuje OAuth — pełne przekierowanie przeglądarki na backend (cookie musi polecieć). */
+export const connectSmartThings = () => {
+  window.location.href = `${API_URL}/api/smartthings/connect`;
+};
+
+export const disconnectSmartThings = async () => {
+  const res = await fetch(`${API_URL}/api/smartthings/disconnect`, {
+    method: 'DELETE',
+    credentials: 'include',
+  });
+  if (!res.ok && res.status !== 204) {
+    throw new Error(`DELETE /api/smartthings/disconnect: ${res.status}`);
+  }
+  return true;
+};
+
 // ===== Urządzenia Tuya (Slice 2) =====
 
 const jsonOrThrow = async (res, label) => {
