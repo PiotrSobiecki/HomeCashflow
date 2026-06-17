@@ -77,6 +77,11 @@ export const SmartDeviceCard = ({
 
   return (
     <div className={`bg-slate-800/50 border rounded-2xl p-4 ${device.isActive ? 'border-slate-700/50' : 'border-slate-800 opacity-60'}`}>
+      {/* Zestaw poziomo na desktopie: gniazdko po lewej, urządzenia po prawo (mobile: pion).
+          Nagłówek gniazdka jest pierwszy w kolumnie → w jednym rzędzie z nagłówkami pilotów. */}
+      <div className={isGroup ? 'lg:flex lg:gap-4 lg:items-start' : undefined}>
+        <div className={isGroup ? 'lg:flex-1 min-w-0' : undefined}>
+
       <div className="flex items-start justify-between gap-2 mb-3">
         <div className="flex items-center gap-2.5 min-w-0">
           {/* Ikona typu. Stan on/off pokazujemy TYLKO gdy go znamy (gniazdko/klima);
@@ -107,15 +112,11 @@ export const SmartDeviceCard = ({
             </div>
           )}
         </div>
-        <span className={`flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs shrink-0 ${online ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-700/50 text-slate-400'}`}>
-          {online ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
-          {online ? 'Połączone' : 'Brak połączenia'}
+        {/* Połączenie — sama ikonka, bez napisu (nie wszystko musi być „połączone") */}
+        <span title={online ? 'Połączone' : 'Brak połączenia'} className={`shrink-0 ${online ? 'text-emerald-400' : 'text-slate-500'}`}>
+          {online ? <Wifi className="w-4 h-4" /> : <WifiOff className="w-4 h-4" />}
         </span>
       </div>
-
-      {/* Zestaw poziomo na desktopie: gniazdko po lewej, urządzenia po prawo (mobile: pion) */}
-      <div className={isGroup ? 'lg:flex lg:gap-4 lg:items-start' : undefined}>
-        <div className={isGroup ? 'lg:flex-1 min-w-0' : undefined}>
 
       {/* Pomiary (gniazdka — urządzenia IR to piloty, bez pomiaru energii) */}
       {!isIr && (hasReading ? (
