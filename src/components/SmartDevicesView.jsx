@@ -124,13 +124,17 @@ export const SmartDevicesView = () => {
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {topLevel.map((device) => {
-                const isGroupCard = (remotesByPlug[device.id] || []).length > 0
+                const groupSize = (remotesByPlug[device.id] || []).length
+                // Szerokość kafla zestawu = liczba elementów (gniazdko + piloty): 2 lub 3 kolumny.
+                const span = groupSize === 0 ? ''
+                  : groupSize === 1 ? 'sm:col-span-2 lg:col-span-2'
+                  : 'sm:col-span-2 lg:col-span-3'
                 return (
                 <div
                   key={device.id}
                   onDragOver={isDesktop ? (e) => e.preventDefault() : undefined}
                   onDrop={isDesktop ? (e) => { e.preventDefault(); handleDrop(device.id) } : undefined}
-                  className={`${isGroupCard ? 'sm:col-span-2 lg:col-span-3' : ''} ${draggingId === device.id ? 'opacity-50' : ''}`}
+                  className={`${span} ${draggingId === device.id ? 'opacity-50' : ''}`}
                 >
                   {/* Uchwyt przeciągania — tylko desktop (nie koliduje z suwakami/przyciskami w kaflu) */}
                   {isDesktop && (
