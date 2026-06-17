@@ -100,13 +100,9 @@ export const RemoteControls = ({ deviceId, disabled }) => {
 
   return (
     <div className="bg-slate-900/50 border border-slate-700/50 rounded-2xl p-3 sm:p-4 mb-3 space-y-3 overflow-hidden max-w-full">
-      {/* Pilot IR jest bezstanowy — nie pokazujemy on/off, bo blaster nie zna stanu sprzętu. */}
-      <p className="text-[11px] text-slate-500 leading-snug">
-        Pilot — przyciski wysyłają sygnał, ale nie wiadomo czy sprzęt jest włączony (jak fizyczny pilot).
-      </p>
       {/* Zasilanie / źródło / wycisz */}
       <div className="grid grid-cols-3 gap-2">
-        <IconBtn k={slot.power} icon={Power} label="Zasilanie" tone="power" onPress={press} off={off} busy={busy} />
+        <IconBtn k={slot.power} icon={Power} label="Zasilanie" tone="danger" onPress={press} off={off} busy={busy} />
         <IconBtn k={slot.source} icon={Tv} label="Źródło" onPress={press} off={off} busy={busy} />
         <IconBtn k={slot.mute} icon={VolumeX} label="Wycisz" onPress={press} off={off} busy={busy} />
       </div>
@@ -179,8 +175,6 @@ export const RemoteControls = ({ deviceId, disabled }) => {
 
 const toneCls = (tone, active) => {
   if (active) return 'bg-indigo-500 text-white'
-  // „power" = wyraźny przełącznik (nie czerwony alarm — stanu i tak nie znamy).
-  if (tone === 'power') return 'bg-indigo-500/20 text-indigo-200 hover:bg-indigo-500/30 ring-1 ring-indigo-500/30'
   if (tone === 'danger') return 'bg-rose-500/20 text-rose-300 hover:bg-rose-500/30'
   return 'bg-slate-700/50 text-slate-200 hover:bg-slate-600'
 }
