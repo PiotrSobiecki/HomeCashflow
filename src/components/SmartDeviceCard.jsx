@@ -43,9 +43,9 @@ export const SmartDeviceCard = ({
   const TypeIcon = typeMeta.Icon
   // Stan on/off znamy dla gniazdka/klimy zawsze; dla pilota tylko gdy powiązany z gniazdkiem.
   const stateKnown = !isIrRemote || !!status?.linked
-  // To gniazdko z zagnieżdżonymi pilotami = „zestaw". setOn: czy zestaw pobiera prąd (>10 W).
+  // To gniazdko z zagnieżdżonymi pilotami = „zestaw". setOn: czy zestaw pobiera prąd (>20 W).
   const isGroup = linkedRemotes.length > 0
-  const setOn = (status?.powerW ?? 0) > 10
+  const setOn = (status?.powerW ?? 0) > 20
 
   // Statystyki dzisiejsze (od północy czasu warszawskiego) — liczone w backendzie
   const todayKwh = status?.todayKwh ?? null

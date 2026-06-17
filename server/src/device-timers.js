@@ -13,7 +13,7 @@ import {
 } from './tuya/client.js'
 
 // Próg standby — pilot powiązany z gniazdkiem nie wyśle „off", gdy pobór poniżej (zestaw już zgaszony).
-const IR_PLUG_STANDBY_W = 10
+const IR_PLUG_STANDBY_W = 20
 
 /** Znajduje klawisz zasilania w liście pilota (po `key`/`key_name`). */
 function findPowerKey(keyList) {

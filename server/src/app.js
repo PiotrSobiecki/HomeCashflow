@@ -1338,8 +1338,8 @@ function deviceStatusPayload(row, formatted) {
  * Klima IR nie ma DP — jej stan idzie z AC API i ląduje w polu `ac` { power, mode, temp, wind }.
  * @returns {Promise<object>} payload statusu (bez statystyk dziennych — dokłada caller)
  */
-// Próg powyżej którego uznajemy zestaw na gniazdku za włączony (ponad standby).
-const IR_PLUG_STANDBY_W = 10;
+// Próg powyżej którego uznajemy zestaw na gniazdku za włączony (poniżej = standby/wyłączony).
+const IR_PLUG_STANDBY_W = 20;
 
 async function readDeviceStatus(ctx, row, sql) {
   if (row.device_type === "ir_ac") {
