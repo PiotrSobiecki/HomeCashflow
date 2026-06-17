@@ -45,7 +45,7 @@ export const AcControls = ({ ac, onSend, disabled }) => {
   }
 
   return (
-    <div className="space-y-3 mb-3">
+    <div className="bg-slate-900/50 border border-slate-700/50 rounded-2xl p-3 sm:p-4 mb-3 space-y-3">
       {/* Zasilanie + temperatura */}
       <div className="flex items-center justify-between gap-3">
         <button
