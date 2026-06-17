@@ -7,8 +7,9 @@ import { decodeFinanceDataKey, encryptField, decryptField } from "./finance-cryp
 import {
   getTuyaToken, getDeviceInfo, getDeviceFunctions, getDeviceStatus,
   listProjectDevices, formatStatuses, sendCommands,
+  getAcStatus, sendAcCommand, formatAcStatus,
 } from "./tuya/client.js";
-import { validateCommands } from "./tuya/commands.js";
+import { validateCommands, validateAcCommands, looksLikeIrAc } from "./tuya/commands.js";
 import {
   readFinanceFromRelational,
   writeFinanceToRelational,
@@ -1296,6 +1297,7 @@ function mapDevice(row) {
     productName: row.product_name ?? null,
     productId: row.product_id ?? null,
     deviceType: row.device_type ?? null,
+    irParentId: row.ir_parent_id ?? null,
     functionsJson: row.functions_json ?? null,
     isActive: row.is_active,
     createdBy: row.created_by ?? null,
@@ -1327,6 +1329,19 @@ function deviceStatusPayload(row, formatted) {
     ...formatted,
     updatedAt: new Date().toISOString(),
   };
+}
+
+/**
+ * Odczyt statusu jednego urządzenia z Tuya, z rozgałęzieniem na klimę IR.
+ * Klima IR nie ma DP — jej stan idzie z AC API i ląduje w polu `ac` { power, mode, temp, wind }.
+ * @returns {Promise<object>} payload statusu (bez statystyk dziennych — dokłada caller)
+ */
+async function readDeviceStatus(ctx, row) {
+  if (row.device_type === "ir_ac") {
+    const ac = formatAcStatus(await getAcStatus(ctx, row.ir_parent_id, row.tuya_device_id));
+    return { ...deviceStatusPayload(row, { ac, switchOn: ac.power === 1 }) };
+  }
+  return deviceStatusPayload(row, formatStatuses(await getDeviceStatus(ctx, row.tuya_device_id)));
 }
 
 // Sync snapshotów mocy leci cronem co 15 min — czas działania szacujemy jako
@@ -1402,7 +1417,7 @@ app.get("/api/smart-devices/status", authMiddleware, async (c) => {
   if (!membership) return c.json({ statuses: [] });
 
   const rows = await sql`
-    SELECT id, tuya_device_id FROM smart_devices
+    SELECT id, tuya_device_id, device_type, ir_parent_id FROM smart_devices
     WHERE household_id = ${membership.household_id} AND is_active = true
     ORDER BY created_at ASC
   `;
@@ -1415,10 +1430,9 @@ app.get("/api/smart-devices/status", authMiddleware, async (c) => {
   const statuses = await Promise.all(
     rows.map(async (r) => {
       try {
-        const raw = await getDeviceStatus(ctx, r.tuya_device_id);
         const today = todayByDevice[r.id] ?? { kwh: 0, uptimeMin: 0 };
         return {
-          ...deviceStatusPayload(r, formatStatuses(raw)),
+          ...(await readDeviceStatus(ctx, r)),
           todayKwh: today.kwh,
           todayUptimeMin: today.uptimeMin,
         };
@@ -1443,11 +1457,10 @@ app.get("/api/smart-devices/:id/status", authMiddleware, async (c) => {
   if (!ctx) return c.json({ error: "tuya_not_configured" }, 400);
 
   try {
-    const raw = await getDeviceStatus(ctx, result.row.tuya_device_id);
     const todayByDevice = await getTodayStatsByDevice(sql, [result.row.id]);
     const today = todayByDevice[result.row.id] ?? { kwh: 0, uptimeMin: 0 };
     return c.json({
-      ...deviceStatusPayload(result.row, formatStatuses(raw)),
+      ...(await readDeviceStatus(ctx, result.row)),
       todayKwh: today.kwh,
       todayUptimeMin: today.uptimeMin,
     });
@@ -1731,12 +1744,24 @@ app.post("/api/smart-devices", authMiddleware, async (c) => {
 
   const displayName = info?.name || tuyaDeviceId;
 
+  // Klima na podczerwień (pod blasterem Smart IR): nie ma sterowalnych DP, chodzi
+  // osobnym API. Wykrywamy po funkcjach (power+mode+temp+wind); rodzic (infrared_id)
+  // to gateway_id sub-urządzenia. Bez rodzica nie da się sterować — odrzucamy z jasnym błędem.
+  const isIrAc = looksLikeIrAc(functions);
+  const irParentId = isIrAc ? (info?.gateway_id ?? null) : null;
+  if (isIrAc && !irParentId) {
+    return c.json({ error: "ir_parent_missing" }, 400);
+  }
+  const deviceType = isIrAc ? "ir_ac" : "plug";
+
   const [row] = await sql`
     INSERT INTO smart_devices
-      (household_id, tuya_device_id, display_name, product_name, product_id, functions_json, created_by)
+      (household_id, tuya_device_id, display_name, product_name, product_id,
+       device_type, ir_parent_id, functions_json, created_by)
     VALUES
       (${membership.household_id}, ${tuyaDeviceId}, ${displayName},
        ${info?.product_name ?? null}, ${info?.product_id ?? null},
+       ${deviceType}, ${irParentId},
        ${functions == null ? null : JSON.stringify(functions)}, ${user.id})
     RETURNING *
   `;
@@ -1814,14 +1839,24 @@ app.post("/api/smart-devices/:id/commands", authMiddleware, async (c) => {
   if (result.error) return c.json(result.error.body, result.error.status);
 
   const commands = body?.commands;
-  const validationError = validateCommands(result.row.functions_json, commands);
+  const isIrAc = result.row.device_type === "ir_ac";
+  const validationError = isIrAc
+    ? validateAcCommands(commands)
+    : validateCommands(result.row.functions_json, commands);
   if (validationError) return c.json({ error: "command_not_allowed", detail: validationError }, 400);
 
   const ctx = await loadTuyaContext(c, sql, result.row.household_id);
   if (!ctx) return c.json({ error: "tuya_not_configured" }, 400);
 
   try {
-    await sendCommands(ctx, result.row.tuya_device_id, commands);
+    if (isIrAc) {
+      // AC API przyjmuje jedną komendę naraz — wysyłamy po kolei.
+      for (const cmd of commands) {
+        await sendAcCommand(ctx, result.row.ir_parent_id, result.row.tuya_device_id, cmd.code, cmd.value);
+      }
+    } else {
+      await sendCommands(ctx, result.row.tuya_device_id, commands);
+    }
   } catch (err) {
     console.error("[smart-devices] command failed", err);
     return c.json({ error: "command_failed" }, 502);

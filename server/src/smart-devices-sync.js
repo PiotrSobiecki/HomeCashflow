@@ -26,14 +26,14 @@ export async function collectEnergySnapshots(sql, rawKey, { householdId } = {}) 
                tc.client_id_enc, tc.client_secret_enc, tc.datacenter
         FROM smart_devices sd
         JOIN tuya_credentials tc ON tc.household_id = sd.household_id
-        WHERE sd.is_active = true AND sd.household_id = ${householdId}
+        WHERE sd.is_active = true AND sd.device_type IS DISTINCT FROM 'ir_ac' AND sd.household_id = ${householdId}
       `
     : await sql`
         SELECT sd.id, sd.tuya_device_id, sd.household_id,
                tc.client_id_enc, tc.client_secret_enc, tc.datacenter
         FROM smart_devices sd
         JOIN tuya_credentials tc ON tc.household_id = sd.household_id
-        WHERE sd.is_active = true
+        WHERE sd.is_active = true AND sd.device_type IS DISTINCT FROM 'ir_ac'
       `
 
   // Token cache per gospodarstwo — jedno urządzenie offline nie psuje reszty.

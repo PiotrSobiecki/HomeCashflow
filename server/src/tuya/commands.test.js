@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { validateCommands } from './commands.js'
+import { validateCommands, validateAcCommands, looksLikeIrAc } from './commands.js'
 
 const FUNCTIONS = {
   functions: [
@@ -52,5 +52,38 @@ describe('validateCommands', () => {
 
   it('rejects when the device has no functions snapshot', () => {
     expect(validateCommands(null, [{ code: 'switch_1', value: true }])).not.toBeNull()
+  })
+})
+
+describe('looksLikeIrAc', () => {
+  it('detects an IR AC (power+mode+temp+wind present)', () => {
+    const fns = { functions: [
+      { code: 'power', type: 'Boolean' }, { code: 'mode', type: 'Enum' },
+      { code: 'temp', type: 'Enum' }, { code: 'wind', type: 'Enum' },
+    ] }
+    expect(looksLikeIrAc(fns)).toBe(true)
+  })
+
+  it('is false for a plain plug', () => {
+    expect(looksLikeIrAc({ functions: [{ code: 'switch_1' }] })).toBe(false)
+    expect(looksLikeIrAc(null)).toBe(false)
+  })
+})
+
+describe('validateAcCommands', () => {
+  it('accepts in-range numeric commands', () => {
+    expect(validateAcCommands([{ code: 'power', value: 1 }])).toBeNull()
+    expect(validateAcCommands([{ code: 'temp', value: 24 }])).toBeNull()
+    expect(validateAcCommands([{ code: 'mode', value: 4 }])).toBeNull()
+    expect(validateAcCommands([{ code: 'wind', value: 0 }])).toBeNull()
+  })
+
+  it('rejects out-of-range, unknown code, non-number and empty', () => {
+    expect(validateAcCommands([{ code: 'temp', value: 40 }])).not.toBeNull()
+    expect(validateAcCommands([{ code: 'temp', value: 10 }])).not.toBeNull()
+    expect(validateAcCommands([{ code: 'mode', value: 9 }])).not.toBeNull()
+    expect(validateAcCommands([{ code: 'switch_1', value: 1 }])).not.toBeNull()
+    expect(validateAcCommands([{ code: 'power', value: true }])).not.toBeNull()
+    expect(validateAcCommands([])).not.toBeNull()
   })
 })

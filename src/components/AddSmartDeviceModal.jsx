@@ -6,6 +6,7 @@ function friendlyError(err) {
   switch (err?.code) {
     case 'device_already_linked': return 'To urządzenie jest już podpięte (do tego lub innego gospodarstwa).'
     case 'device_not_found_in_tuya': return 'Nie znaleziono urządzenia o tym ID na Twoim koncie Tuya.'
+    case 'ir_parent_missing': return 'To klima na podczerwień, ale nie udało się ustalić blastera Smart IR. Upewnij się, że pilot jest dodany pod Smart IR w aplikacji Tuya.'
     case 'tuya_not_configured': return 'Najpierw połącz konto Tuya (wpisz Client ID i Secret powyżej).'
     default: return 'Nie udało się dodać urządzenia. Spróbuj ponownie.'
   }

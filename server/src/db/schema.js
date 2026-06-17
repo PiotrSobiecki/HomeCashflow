@@ -214,6 +214,10 @@ export const smartDevices = pgTable('smart_devices', {
   productName: text('product_name'),
   productId: text('product_id'),
   deviceType: text('device_type').default('plug'),
+  // Dla urządzeń IR (np. klima Gree pod blasterem Smart IR): id blastera (infrared_id),
+  // którym Tuya wysyła kody IR. NULL dla zwykłych gniazdek. Sterowanie/odczyt idą wtedy
+  // przez /v2.0/infrareds/{ir_parent_id}/... zamiast standardowego /devices/{id}/commands.
+  irParentId: text('ir_parent_id'),
   functionsJson: jsonb('functions_json'),
   isActive: boolean('is_active').notNull().default(true),
   createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
