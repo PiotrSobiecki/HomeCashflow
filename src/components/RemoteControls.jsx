@@ -1,23 +1,34 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Power, Loader2, RefreshCw } from 'lucide-react'
+import {
+  Power, Loader2, RefreshCw, Volume2, VolumeX, Menu, Home, CornerUpLeft,
+  ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Plus, Minus, Tv,
+} from 'lucide-react'
 import { fetchIrKeys, sendIrKey } from '../lib/api'
 
-// Przyjazne polskie etykiety dla typowych przycisków pilota (fallback = key_name z Tuya).
-const LABELS = {
-  power: 'Zasilanie', poweroff: 'Wyłącz', poweron: 'Włącz',
-  mute: 'Wycisz', menu: 'Menu', back: 'Wstecz', exit: 'Wyjście', home: 'Home',
-  ok: 'OK', confirm: 'OK',
-  up: '▲', down: '▼', left: '◀', right: '▶',
-  vol_add: 'Głośność +', vol_red: 'Głośność −', volume_up: 'Głośność +', volume_down: 'Głośność −',
-  ch_add: 'Kanał +', ch_red: 'Kanał −', channel_up: 'Kanał +', channel_down: 'Kanał −',
-  signal: 'Źródło', source: 'Źródło', input: 'Źródło',
+// Aliasy nazw klawiszy Tuya → logiczne sloty pilota (case-insensitive, dopasowanie po `key`).
+const ALIASES = {
+  power: ['power', 'poweroff', 'poweron', 'power_off', 'power_on'],
+  mute: ['mute'],
+  source: ['signal', 'source', 'input', 'tv_av', 'av', 'hdmi'],
+  menu: ['menu'],
+  home: ['home'],
+  back: ['back', 'return', 'exit'],
+  ok: ['ok', 'enter', 'confirm'],
+  up: ['up'],
+  down: ['down'],
+  left: ['left'],
+  right: ['right'],
+  volUp: ['vol_add', 'volume_up', 'volup', 'volumeup'],
+  volDown: ['vol_red', 'volume_down', 'voldown', 'volumedown'],
+  chUp: ['ch_add', 'channel_up', 'chup', 'prog_add', 'channelup'],
+  chDown: ['ch_red', 'channel_down', 'chdown', 'prog_red', 'channeldown'],
 }
 
-const labelFor = (k) => LABELS[String(k?.key || '').toLowerCase()] || k?.key_name || k?.key || '—'
-const isPower = (k) => /power/i.test(k?.key || '')
+const norm = (s) => String(s || '').toLowerCase().replace(/[\s_-]/g, '')
 
 /**
- * Pilot IR (TV/STB/itp.): siatka przycisków pobranych z Tuya. Bezstanowy — tylko wysyłka.
+ * Pilot IR (TV/STB/itp.): układ przypominający fizyczny pilot. Sloty mapowane po nazwach
+ * klawiszy Tuya; rozpoznane idą na stałe miejsca, reszta do sekcji „Więcej". Bezstanowy.
  * @param {string} deviceId
  * @param {boolean} disabled
  */
@@ -44,7 +55,8 @@ export const RemoteControls = ({ deviceId, disabled }) => {
 
   useEffect(() => { load() }, [load])
 
-  const press = async (k) => {
+  const press = useCallback(async (k) => {
+    if (!k) return
     setBusyKey(k.key_id ?? k.key)
     try {
       await sendIrKey(deviceId, { key: k.key, keyId: k.key_id ?? null, categoryId })
@@ -53,16 +65,11 @@ export const RemoteControls = ({ deviceId, disabled }) => {
     } finally {
       setBusyKey(null)
     }
-  }
+  }, [deviceId, categoryId])
 
   if (loading) {
-    return (
-      <div className="flex justify-center py-4 mb-3">
-        <Loader2 className="w-5 h-5 text-indigo-400 animate-spin" />
-      </div>
-    )
+    return <div className="flex justify-center py-4 mb-3"><Loader2 className="w-5 h-5 text-indigo-400 animate-spin" /></div>
   }
-
   if (error) {
     return (
       <div className="mb-3">
@@ -73,42 +80,154 @@ export const RemoteControls = ({ deviceId, disabled }) => {
       </div>
     )
   }
-
   if (!keys || keys.length === 0) {
     return <p className="text-xs text-slate-500 mb-3">Ten pilot nie ma zapisanych przycisków w Tuya.</p>
   }
 
-  const powerKey = keys.find(isPower)
-  const rest = keys.filter((k) => !isPower(k))
+  // Dopasowanie slotów; `used` zbiera zużyte id, żeby reszta trafiła do „Więcej".
+  const used = new Set()
+  const find = (slot) => {
+    const wanted = ALIASES[slot]
+    const k = keys.find((x) => wanted.includes(norm(x.key)))
+    if (k) used.add(k.key_id ?? k.key)
+    return k || null
+  }
+  const slot = Object.fromEntries(Object.keys(ALIASES).map((s) => [s, find(s)]))
+
+  // Cyfry 0–9 (po `key` lub `key_name`).
+  const digits = []
+  for (let d = 0; d <= 9; d++) {
+    const k = keys.find((x) => norm(x.key) === String(d) || norm(x.key_name) === String(d) || norm(x.key) === `num${d}` || norm(x.key) === `digit${d}`)
+    if (k) { used.add(k.key_id ?? k.key); digits[d] = k }
+  }
+  const hasDigits = digits.some(Boolean)
+
+  const extras = keys.filter((x) => !used.has(x.key_id ?? x.key))
+  const busy = (k) => busyKey === (k?.key_id ?? k?.key)
+  const off = disabled || busyKey != null
 
   return (
-    <div className="space-y-2 mb-3">
-      {powerKey && (
-        <button
-          type="button" disabled={disabled || busyKey != null}
-          onClick={() => press(powerKey)}
-          className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 text-sm font-medium rounded-xl transition-colors disabled:opacity-50"
-        >
-          <Power className="w-4 h-4" /> {labelFor(powerKey)}
-        </button>
-      )}
-      <div className="grid grid-cols-3 gap-1.5">
-        {rest.map((k) => {
-          const id = k.key_id ?? k.key
-          return (
-            <button
-              key={id} type="button"
-              disabled={disabled || busyKey != null}
-              onClick={() => press(k)}
-              className={`px-2 py-2 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 ${
-                busyKey === id ? 'bg-indigo-500 text-white' : 'bg-slate-700/50 hover:bg-slate-600 text-slate-200'
-              }`}
-            >
-              {labelFor(k)}
-            </button>
-          )
-        })}
+    <div className="bg-slate-900/50 border border-slate-700/50 rounded-2xl p-3 mb-3 space-y-3">
+      {/* Góra: zasilanie / źródło / wycisz */}
+      <div className="grid grid-cols-3 gap-2">
+        <IconBtn k={slot.power} icon={Power} label="Zasil." tone="danger" onPress={press} off={off} busy={busy} />
+        <IconBtn k={slot.source} icon={Tv} label="Źródło" onPress={press} off={off} busy={busy} />
+        <IconBtn k={slot.mute} icon={VolumeX} label="Wycisz" onPress={press} off={off} busy={busy} />
       </div>
+
+      {/* Kołyski głośności/kanałów + krzyżak nawigacji */}
+      {(slot.volUp || slot.volDown || slot.chUp || slot.chDown || slot.up || slot.down || slot.left || slot.right || slot.ok) && (
+        <div className="grid grid-cols-3 gap-2 items-center">
+          {/* Głośność */}
+          <Rocker icon={Volume2} label="Głoś."
+            up={slot.volUp} down={slot.volDown} onPress={press} off={off} busy={busy} />
+
+          {/* Krzyżak */}
+          <div className="flex flex-col items-center gap-1">
+            <ArrowBtn k={slot.up} icon={ChevronUp} onPress={press} off={off} busy={busy} />
+            <div className="flex items-center gap-1">
+              <ArrowBtn k={slot.left} icon={ChevronLeft} onPress={press} off={off} busy={busy} />
+              <button
+                type="button" disabled={off || !slot.ok} onClick={() => press(slot.ok)}
+                className={`w-12 h-12 rounded-full text-xs font-semibold transition-colors disabled:opacity-40 ${
+                  busy(slot.ok) ? 'bg-indigo-500 text-white' : 'bg-indigo-500/20 text-indigo-200 hover:bg-indigo-500/30'
+                }`}
+              >OK</button>
+              <ArrowBtn k={slot.right} icon={ChevronRight} onPress={press} off={off} busy={busy} />
+            </div>
+            <ArrowBtn k={slot.down} icon={ChevronDown} onPress={press} off={off} busy={busy} />
+          </div>
+
+          {/* Kanały */}
+          <Rocker icon={Tv} label="Kanał"
+            up={slot.chUp} down={slot.chDown} onPress={press} off={off} busy={busy} />
+        </div>
+      )}
+
+      {/* Menu / Home / Wstecz */}
+      {(slot.menu || slot.home || slot.back) && (
+        <div className="grid grid-cols-3 gap-2">
+          <IconBtn k={slot.menu} icon={Menu} label="Menu" onPress={press} off={off} busy={busy} />
+          <IconBtn k={slot.home} icon={Home} label="Home" onPress={press} off={off} busy={busy} />
+          <IconBtn k={slot.back} icon={CornerUpLeft} label="Wstecz" onPress={press} off={off} busy={busy} />
+        </div>
+      )}
+
+      {/* Klawiatura numeryczna */}
+      {hasDigits && (
+        <div className="grid grid-cols-3 gap-1.5">
+          {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((d) => (
+            <NumBtn key={d} k={digits[d]} n={d} onPress={press} off={off} busy={busy} />
+          ))}
+          <div />
+          <NumBtn k={digits[0]} n={0} onPress={press} off={off} busy={busy} />
+          <div />
+        </div>
+      )}
+
+      {/* Nierozpoznane przyciski — nic nie ginie */}
+      {extras.length > 0 && (
+        <div>
+          <p className="text-[10px] uppercase tracking-wide text-slate-500 mb-1.5">Więcej</p>
+          <div className="grid grid-cols-3 gap-1.5">
+            {extras.map((k) => (
+              <TextBtn key={k.key_id ?? k.key} k={k} onPress={press} off={off} busy={busy} />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
+
+const toneCls = (tone, active) => {
+  if (active) return 'bg-indigo-500 text-white'
+  if (tone === 'danger') return 'bg-rose-500/20 text-rose-300 hover:bg-rose-500/30'
+  return 'bg-slate-700/50 text-slate-200 hover:bg-slate-600'
+}
+
+const IconBtn = ({ k, icon: Icon, label, tone, onPress, off, busy }) => (
+  <button
+    type="button" disabled={off || !k} onClick={() => onPress(k)}
+    className={`flex flex-col items-center justify-center gap-0.5 py-2 rounded-xl text-[11px] font-medium transition-colors disabled:opacity-40 ${toneCls(tone, busy(k))}`}
+  >
+    <Icon className="w-4 h-4" /> {label}
+  </button>
+)
+
+const ArrowBtn = ({ k, icon: Icon, onPress, off, busy }) => (
+  <button
+    type="button" disabled={off || !k} onClick={() => onPress(k)}
+    className={`w-12 h-12 flex items-center justify-center rounded-full transition-colors disabled:opacity-40 ${toneCls(null, busy(k))}`}
+  >
+    <Icon className="w-5 h-5" />
+  </button>
+)
+
+const Rocker = ({ icon: Icon, label, up, down, onPress, off, busy }) => (
+  <div className="flex flex-col items-center gap-1 bg-slate-800/60 rounded-full py-1.5">
+    <button type="button" disabled={off || !up} onClick={() => onPress(up)}
+      className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors disabled:opacity-40 ${toneCls(null, busy(up))}`}>
+      <Plus className="w-4 h-4" />
+    </button>
+    <span className="flex items-center gap-0.5 text-[10px] text-slate-400"><Icon className="w-3 h-3" />{label}</span>
+    <button type="button" disabled={off || !down} onClick={() => onPress(down)}
+      className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors disabled:opacity-40 ${toneCls(null, busy(down))}`}>
+      <Minus className="w-4 h-4" />
+    </button>
+  </div>
+)
+
+const NumBtn = ({ k, n, onPress, off, busy }) => (
+  <button
+    type="button" disabled={off || !k} onClick={() => onPress(k)}
+    className={`py-2 rounded-lg text-sm font-semibold tabular-nums transition-colors disabled:opacity-30 ${toneCls(null, busy(k))}`}
+  >{n}</button>
+)
+
+const TextBtn = ({ k, onPress, off, busy }) => (
+  <button
+    type="button" disabled={off} onClick={() => onPress(k)}
+    className={`px-2 py-2 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 ${toneCls(null, busy(k))}`}
+  >{k.key_name || k.key}</button>
+)
