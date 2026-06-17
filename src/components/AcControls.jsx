@@ -25,7 +25,7 @@ const TEMP_MAX = 30
  * @param {{power:number,mode:number,temp:number,wind:number}} ac — bieżący stan z odczytu
  * @param {(commands:Array)=>Promise} onSend
  */
-export const AcControls = ({ ac, onSend, disabled }) => {
+export const AcControls = ({ ac, onSend, disabled, children }) => {
   const [busy, setBusy] = useState(false)
 
   const power = ac?.power === 1
@@ -101,6 +101,9 @@ export const AcControls = ({ ac, onSend, disabled }) => {
           {WINDS.map((w) => <option key={w.value} value={w.value}>{w.label}</option>)}
         </select>
       </Row>
+
+      {/* Slot na wyłącznik czasowy — wewnątrz panelu sterowania */}
+      {children}
     </div>
   )
 }

@@ -36,7 +36,7 @@ const norm = (s) => String(s || '').toLowerCase().replace(/[\s_]/g, '')
  * @param {boolean|null} powerOn — realny stan zestawu z gniazdka (null = nieznany)
  * @param {number|null} plugW — pobór zestawu w W (gdy powiązane)
  */
-export const RemoteControls = ({ deviceId, disabled, powerOn = null, plugW = null }) => {
+export const RemoteControls = ({ deviceId, disabled, powerOn = null, plugW = null, children }) => {
   const [keys, setKeys] = useState(null)
   const [categoryId, setCategoryId] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -116,7 +116,7 @@ export const RemoteControls = ({ deviceId, disabled, powerOn = null, plugW = nul
       )}
       {/* Zasilanie / źródło / wycisz */}
       <div className="grid grid-cols-3 gap-2">
-        <IconBtn k={slot.power} icon={Power} label={powerOn === true ? 'Wyłącz' : powerOn === false ? 'Włącz' : 'Zasilanie'} tone="danger" onPress={press} off={off} busy={busy} />
+        <IconBtn k={slot.power} icon={Power} label={powerOn === true ? 'Wyłącz' : powerOn === false ? 'Włącz' : 'Zasilanie'} tone={powerOn === false ? 'on' : 'danger'} onPress={press} off={off} busy={busy} />
         <IconBtn k={slot.source} icon={Tv} label="Źródło" onPress={press} off={off} busy={busy} />
         <IconBtn k={slot.mute} icon={VolumeX} label="Wycisz" onPress={press} off={off} busy={busy} />
       </div>
@@ -183,12 +183,16 @@ export const RemoteControls = ({ deviceId, disabled, powerOn = null, plugW = nul
           <IconBtn k={slot.back} icon={CornerUpLeft} label="Wstecz" onPress={press} off={off} busy={busy} />
         </div>
       )}
+
+      {/* Slot na wyłącznik czasowy — wewnątrz panelu sterowania */}
+      {children}
     </div>
   )
 }
 
 const toneCls = (tone, active) => {
   if (active) return 'bg-indigo-500 text-white'
+  if (tone === 'on') return 'bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30'
   if (tone === 'danger') return 'bg-rose-500/20 text-rose-300 hover:bg-rose-500/30'
   return 'bg-slate-700/50 text-slate-200 hover:bg-slate-600'
 }
