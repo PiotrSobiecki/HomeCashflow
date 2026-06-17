@@ -184,7 +184,7 @@ export const SmartDeviceCard = ({
   }
 
   return (
-    <div className={`bg-slate-800/50 border rounded-2xl p-4 flex-1 ${device.isActive ? 'border-slate-700/50' : 'border-slate-800 opacity-60'}`}>
+    <div className={`bg-slate-800/50 border rounded-2xl p-4 flex-1 flex flex-col ${device.isActive ? 'border-slate-700/50' : 'border-slate-800 opacity-60'}`}>
       {/* Zestaw poziomo na desktopie: gniazdko po lewej, urządzenia po prawo (mobile: pion).
           Nagłówek gniazdka jest pierwszy w kolumnie → w jednym rzędzie z nagłówkami pilotów. */}
       <div className={isGroup ? 'lg:flex lg:gap-4 lg:items-start' : undefined}>
@@ -351,7 +351,8 @@ export const SmartDeviceCard = ({
           })}
       </div>
 
-      <div className="flex items-center justify-between mt-2">
+      {/* Stopka (Odśwież + akcje) dociśnięta do dołu — równa linia we wszystkich kaflach. */}
+      <div className="flex items-center justify-between mt-auto pt-3">
         <button
           type="button"
           onClick={handleRefresh}
