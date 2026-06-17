@@ -189,25 +189,28 @@ export const SmartDeviceCard = ({
           const sendRd = async (cmds) => { try { await onSend(rd.id, cmds) } catch { /* cicho */ } }
           return (
             <div key={rd.id} className="lg:flex-1 min-w-0 mt-3 lg:mt-0 pt-3 lg:pt-0 border-t lg:border-t-0 lg:border-l border-slate-700/50 lg:pl-4">
-                <div className="flex items-center justify-between gap-2 mb-2">
-                  <span className="flex items-center gap-2 min-w-0 text-sm text-white">
-                    <RIcon className="w-4 h-4 text-slate-400 shrink-0" />
-                    <span className="truncate">{rd.displayName}</span>
-                  </span>
-                  <span className="flex items-center gap-2 shrink-0">
-                    <span className={`text-xs ${setOn ? 'text-emerald-400' : 'text-slate-400'}`}>
-                      {setOn ? 'Włączony' : 'Uśpiony'}
-                    </span>
-                    {isOwner && (
-                      <button
-                        type="button" onClick={() => onLinkPlug(rd.id, null)}
-                        title="Odepnij od gniazdka"
-                        className="p-1 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                  </span>
+                {/* Nagłówek jak w gniazdkach: kafelek ikony (zielony gdy włączone) + nazwa + typ */}
+                <div className="flex items-start justify-between gap-2 mb-3">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className={`shrink-0 w-9 h-9 rounded-lg flex items-center justify-center ${
+                      setOn ? 'bg-emerald-500/15 text-emerald-400' : 'bg-slate-700/40 text-slate-400'
+                    }`}>
+                      <RIcon className="w-5 h-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <h4 className="text-white font-medium truncate leading-tight">{rd.displayName}</h4>
+                      <p className="text-[11px] text-slate-500 truncate">{(TYPE_META[rd.deviceType] || {}).label || 'Pilot'}</p>
+                    </div>
+                  </div>
+                  {isOwner && (
+                    <button
+                      type="button" onClick={() => onLinkPlug(rd.id, null)}
+                      title="Odepnij od gniazdka"
+                      className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg shrink-0"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
                 {rd.deviceType === 'ir_ac' ? (
                   <AcControls ac={rs?.ac} onSend={sendRd} disabled={!online}>
