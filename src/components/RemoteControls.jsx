@@ -5,26 +5,26 @@ import {
 } from 'lucide-react'
 import { fetchIrKeys, sendIrKey } from '../lib/api'
 
-// Aliasy nazw klawiszy Tuya → logiczne sloty pilota (case-insensitive, dopasowanie po `key`).
+// Aliasy nazw klawiszy Tuya → logiczne sloty pilota. Dopasowanie po `key` LUB `key_name`
+// (Tuya bywa niespójna: key="Volume+", key_name="volume_up"). norm zachowuje +/-.
 const ALIASES = {
-  power: ['power', 'poweroff', 'poweron', 'power_off', 'power_on'],
+  power: ['power', 'poweroff', 'poweron'],
   mute: ['mute'],
-  source: ['signal', 'source', 'input', 'tv_av', 'av', 'hdmi'],
+  source: ['source', 'input', 'signal'],
   menu: ['menu'],
-  home: ['home'],
-  back: ['back', 'return', 'exit'],
+  back: ['exit', 'back', 'return'],
   ok: ['ok', 'enter', 'confirm'],
-  up: ['up'],
-  down: ['down'],
-  left: ['left'],
-  right: ['right'],
-  volUp: ['vol_add', 'volume_up', 'volup', 'volumeup'],
-  volDown: ['vol_red', 'volume_down', 'voldown', 'volumedown'],
-  chUp: ['ch_add', 'channel_up', 'chup', 'prog_add', 'channelup'],
-  chDown: ['ch_red', 'channel_down', 'chdown', 'prog_red', 'channeldown'],
+  up: ['up', 'navigateup'],
+  down: ['down', 'navigatedown'],
+  left: ['left', 'navigateleft'],
+  right: ['right', 'navigateright'],
+  volUp: ['volume+', 'volumeup', 'vol+', 'voladd'],
+  volDown: ['volume-', 'volumedown', 'vol-', 'volred'],
+  chUp: ['channel+', 'channelup', 'ch+', 'chadd', 'chup', 'progadd'],
+  chDown: ['channel-', 'channeldown', 'ch-', 'chred', 'chdown', 'progred'],
 }
 
-const norm = (s) => String(s || '').toLowerCase().replace(/[\s_-]/g, '')
+const norm = (s) => String(s || '').toLowerCase().replace(/[\s_]/g, '')
 
 /**
  * Pilot IR (TV/STB/itp.): układ przypominający fizyczny pilot. Sloty mapowane po nazwach
@@ -84,25 +84,20 @@ export const RemoteControls = ({ deviceId, disabled }) => {
     return <p className="text-xs text-slate-500 mb-3">Ten pilot nie ma zapisanych przycisków w Tuya.</p>
   }
 
-  // Dopasowanie slotów; `used` zbiera zużyte id, żeby reszta trafiła do „Więcej".
-  const used = new Set()
+  // Dopasowanie slotów po `key` lub `key_name`.
   const find = (slot) => {
     const wanted = ALIASES[slot]
-    const k = keys.find((x) => wanted.includes(norm(x.key)))
-    if (k) used.add(k.key_id ?? k.key)
-    return k || null
+    return keys.find((x) => wanted.includes(norm(x.key)) || wanted.includes(norm(x.key_name))) || null
   }
   const slot = Object.fromEntries(Object.keys(ALIASES).map((s) => [s, find(s)]))
 
   // Cyfry 0–9 (po `key` lub `key_name`).
   const digits = []
   for (let d = 0; d <= 9; d++) {
-    const k = keys.find((x) => norm(x.key) === String(d) || norm(x.key_name) === String(d) || norm(x.key) === `num${d}` || norm(x.key) === `digit${d}`)
-    if (k) { used.add(k.key_id ?? k.key); digits[d] = k }
+    digits[d] = keys.find((x) => norm(x.key) === String(d) || norm(x.key_name) === String(d)) || null
   }
   const hasDigits = digits.some(Boolean)
 
-  const extras = keys.filter((x) => !used.has(x.key_id ?? x.key))
   const busy = (k) => busyKey === (k?.key_id ?? k?.key)
   const off = disabled || busyKey != null
 
@@ -164,18 +159,6 @@ export const RemoteControls = ({ deviceId, disabled }) => {
           <div />
         </div>
       )}
-
-      {/* Nierozpoznane przyciski — nic nie ginie */}
-      {extras.length > 0 && (
-        <div>
-          <p className="text-[10px] uppercase tracking-wide text-slate-500 mb-1.5">Więcej</p>
-          <div className="grid grid-cols-3 gap-1.5">
-            {extras.map((k) => (
-              <TextBtn key={k.key_id ?? k.key} k={k} onPress={press} off={off} busy={busy} />
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   )
 }
@@ -223,11 +206,4 @@ const NumBtn = ({ k, n, onPress, off, busy }) => (
     type="button" disabled={off || !k} onClick={() => onPress(k)}
     className={`py-2 rounded-lg text-sm font-semibold tabular-nums transition-colors disabled:opacity-30 ${toneCls(null, busy(k))}`}
   >{n}</button>
-)
-
-const TextBtn = ({ k, onPress, off, busy }) => (
-  <button
-    type="button" disabled={off} onClick={() => onPress(k)}
-    className={`px-2 py-2 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 ${toneCls(null, busy(k))}`}
-  >{k.key_name || k.key}</button>
 )
