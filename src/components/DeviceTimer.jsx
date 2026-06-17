@@ -30,7 +30,8 @@ export const DeviceTimer = ({ deviceId, disabled }) => {
   const load = useCallback(async () => {
     try {
       const { timer } = await fetchDeviceTimer(deviceId)
-      setMin(timer ? snap(timer.minutesLeft) : 0)
+      // Aktywny timer nigdy nie pokazuje „wył." (min. jeden krok), nawet gdy zostało <15 min.
+      setMin(timer ? Math.max(STEP, snap(timer.minutesLeft)) : 0)
       setFireAt(timer?.fireAt ?? null)
     } catch {
       // cicho — timer to nie krytyczna ścieżka
@@ -38,6 +39,15 @@ export const DeviceTimer = ({ deviceId, disabled }) => {
   }, [deviceId])
 
   useEffect(() => { load() }, [load])
+
+  // Gdy minie czas — wyzeruj suwak (serwer i tak wyłączy urządzenie cronem).
+  useEffect(() => {
+    if (!fireAt) return
+    const ms = new Date(fireAt).getTime() - Date.now()
+    if (ms <= 0) { setMin(0); setFireAt(null); return }
+    const id = setTimeout(() => { setMin(0); setFireAt(null) }, ms)
+    return () => clearTimeout(id)
+  }, [fireAt])
 
   const commit = async (value) => {
     setBusy(true)
