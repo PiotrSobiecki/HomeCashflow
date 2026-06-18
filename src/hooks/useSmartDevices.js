@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   fetchSmartDevices, fetchSmartDevicesStatus,
-  addSmartDevice, addSmartThingsDevice, patchSmartDevice, deleteSmartDevice, sendDeviceCommands, sendStCommand,
+  addSmartDevice, addSmartThingsDevice, patchSmartDevice, deleteSmartDevice, sendDeviceCommands, sendStCommand, sendStSetting,
 } from '../lib/api'
 import { usePolling } from './usePolling'
 
@@ -117,5 +117,18 @@ export function useSmartDevices() {
     setTimeout(refreshStatus, 1500)
   }, [refreshStatus])
 
-  return { devices, statusById, loading, error, reload, refreshStatus, add, addSt, rename, setActive, linkPlug, remove, sendCommand, sendSt }
+  // Zmiana ustawienia cyklu pralki ST (temperatura/wirowanie/płukanie/namaczanie/program).
+  // Optimistic: od razu nadpisz wartość w settings, potem potwierdź realnym odczytem.
+  const sendStSettingCmd = useCallback(async (deviceId, setting, value) => {
+    await sendStSetting(deviceId, setting, value)
+    setStatusById((prev) => {
+      const s = prev[deviceId]
+      if (!s?.settings?.[setting]) return prev
+      const settings = { ...s.settings, [setting]: { ...s.settings[setting], value: String(value) } }
+      return { ...prev, [deviceId]: { ...s, settings } }
+    })
+    setTimeout(refreshStatus, 1500)
+  }, [refreshStatus])
+
+  return { devices, statusById, loading, error, reload, refreshStatus, add, addSt, rename, setActive, linkPlug, remove, sendCommand, sendSt, sendStSetting: sendStSettingCmd }
 }

@@ -16,7 +16,7 @@ import { saveTokens, getFreshAccessToken } from "./smartthings/credentials.js";
 import { getStDevices, getStDevice, getStDeviceStatus, sendStCommand } from "./smartthings/client.js";
 import { summarizeDevices, inferDeviceType } from "./smartthings/devices.js";
 import { mapStStatus } from "./smartthings/status.js";
-import { buildStCommand, allowedStActions } from "./smartthings/commands.js";
+import { buildStCommand, allowedStActions, buildStSettingCommand, allowedStSetting } from "./smartthings/commands.js";
 import {
   readFinanceFromRelational,
   writeFinanceToRelational,
@@ -1596,9 +1596,14 @@ async function runStCommand(c, sql, user, row) {
   let body;
   try { body = await c.req.json(); } catch { return c.json({ error: "Invalid JSON body" }, 400); }
   const action = body?.action;
+  // Dwa kontrakty: { action } (start/pauza/stop) lub { setting, value } (temperatura,
+  // wirowanie, płukanie, namaczanie, program — tylko pralka).
+  const isSetting = body?.setting != null;
 
-  // Walidacja względem capabilities (typ + akcja) — spoza zakresu nie idzie do ST.
-  const cmd = buildStCommand(row.device_type, action);
+  // Walidacja względem capabilities — spoza zakresu nie idzie do ST.
+  const cmd = isSetting
+    ? buildStSettingCommand(row.device_type, body.setting, body.value)
+    : buildStCommand(row.device_type, action);
   if (!cmd) {
     return c.json({ error: "command_not_supported", message: "Tej akcji nie można wykonać na tym urządzeniu." }, 400);
   }
@@ -1615,12 +1620,22 @@ async function runStCommand(c, sql, user, row) {
   }
 
   // Bramka Samsung: bez fizycznie włączonego zdalnego sterowania ST odrzuca komendy.
-  const allowed = allowedStActions(row.device_type, status);
-  if (!allowed.remoteControlEnabled) {
-    return c.json({ error: "remote_control_disabled", message: "Włącz zdalne sterowanie na pralce, aby sterować nią z aplikacji." }, 409);
-  }
-  if (!allowed.actions.includes(action)) {
-    return c.json({ error: "action_not_available", message: "Nie można teraz wykonać tej akcji (sprawdź stan urządzenia)." }, 409);
+  if (isSetting) {
+    const allowed = allowedStSetting(row.device_type, status, body.setting, body.value);
+    if (allowed.reason === "remote_control_disabled") {
+      return c.json({ error: "remote_control_disabled", message: "Włącz zdalne sterowanie na pralce, aby zmienić ustawienia z aplikacji." }, 409);
+    }
+    if (!allowed.ok) {
+      return c.json({ error: "setting_not_available", message: "Tej wartości nie można teraz ustawić (sprawdź program i stan pralki)." }, 409);
+    }
+  } else {
+    const allowed = allowedStActions(row.device_type, status);
+    if (!allowed.remoteControlEnabled) {
+      return c.json({ error: "remote_control_disabled", message: "Włącz zdalne sterowanie na pralce, aby sterować nią z aplikacji." }, 409);
+    }
+    if (!allowed.actions.includes(action)) {
+      return c.json({ error: "action_not_available", message: "Nie można teraz wykonać tej akcji (sprawdź stan urządzenia)." }, 409);
+    }
   }
 
   try {
@@ -1631,10 +1646,12 @@ async function runStCommand(c, sql, user, row) {
   }
 
   // Audyt po udanym wysłaniu (kto/kiedy/co). Błąd logu nie wywala akcji.
+  const logCode = isSetting ? `setting:${body.setting}` : action;
+  const logValue = isSetting ? String(body.value) : JSON.stringify(cmd);
   try {
     await sql`
       INSERT INTO device_command_log (household_id, device_id, actor_id, code, value)
-      VALUES (${row.household_id}, ${row.id}, ${user.id}, ${action}, ${JSON.stringify(cmd)})
+      VALUES (${row.household_id}, ${row.id}, ${user.id}, ${logCode}, ${logValue})
     `;
   } catch (err) {
     console.error("[device-command-log] ST insert failed", err);

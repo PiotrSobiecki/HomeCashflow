@@ -389,6 +389,17 @@ export const sendStCommand = async (id, action) => {
   return jsonOrThrow(res, 'POST /api/smart-devices/commands (ST)');
 };
 
+/** Zmiana ustawienia cyklu pralki ST: setting = temperature|spin|rinse|bubbleSoak|cycle. */
+export const sendStSetting = async (id, setting, value) => {
+  const res = await fetch(`${API_URL}/api/smart-devices/${id}/commands`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ setting, value }),
+  });
+  return jsonOrThrow(res, 'POST /api/smart-devices/commands (ST setting)');
+};
+
 export const fetchIrKeys = async (id) => {
   const res = await fetch(`${API_URL}/api/smart-devices/${id}/ir-keys`, {
     credentials: 'include',

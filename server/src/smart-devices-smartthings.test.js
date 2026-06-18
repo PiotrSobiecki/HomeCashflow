@@ -466,6 +466,54 @@ describe('POST /api/smart-devices/:id/commands — SmartThings control', () => {
     expect(await logCount(washer.id)).toBe(0)
   })
 
+  // Status pralki z listą wspieranych temperatur (do walidacji ustawień cyklu).
+  function washerSettingsStatusJson(remote = 'true') {
+    return { components: { main: {
+      washerOperatingState: { machineState: { value: 'stop' } },
+      remoteControlStatus: { remoteControlEnabled: { value: remote } },
+      'custom.washerWaterTemperature': {
+        washerWaterTemperature: { value: '40' },
+        supportedWasherWaterTemperature: { value: ['cold', '20', '30', '40', '60', '90'] },
+      },
+    } } }
+  }
+  function setting(token, id, body) {
+    return app.request(`/api/smart-devices/${id}/commands`, {
+      method: 'POST',
+      headers: { cookie: `token=${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+  }
+
+  it('member sets washer water temperature → setWasherWaterTemperature sent and logged', async () => {
+    const owner = await createTuyaOwner()
+    await connectSmartthings(owner)
+    const washer = await addWasher(owner)
+    vi.mocked(getStDeviceStatus).mockResolvedValue(washerSettingsStatusJson('true'))
+    vi.mocked(sendStCommand).mockResolvedValue({})
+
+    const res = await setting(owner.token, washer.id, { setting: 'temperature', value: '60' })
+    expect(res.status).toBe(200)
+    expect(vi.mocked(sendStCommand)).toHaveBeenCalledWith(
+      expect.anything(), 'st-washer',
+      { component: 'main', capability: 'custom.washerWaterTemperature', command: 'setWasherWaterTemperature', arguments: ['60'] },
+    )
+    expect(await logCount(washer.id)).toBe(1)
+  })
+
+  it('rejects a setting value outside the supported list (no ST call, no log)', async () => {
+    const owner = await createTuyaOwner()
+    await connectSmartthings(owner)
+    const washer = await addWasher(owner)
+    vi.mocked(getStDeviceStatus).mockResolvedValue(washerSettingsStatusJson('true'))
+
+    const res = await setting(owner.token, washer.id, { setting: 'temperature', value: '999' })
+    expect(res.status).toBe(409)
+    expect((await res.json()).error).toBe('setting_not_available')
+    expect(vi.mocked(sendStCommand)).not.toHaveBeenCalled()
+    expect(await logCount(washer.id)).toBe(0)
+  })
+
   it('returns 401 without auth', async () => {
     const res = await app.request('/api/smart-devices/whatever/commands', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },

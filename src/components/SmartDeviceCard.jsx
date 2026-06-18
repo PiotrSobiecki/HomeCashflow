@@ -103,18 +103,8 @@ function StDeviceBody({ status, online }) {
       )}
       {status.tempC != null && <p className="text-[11px] text-slate-400">Temperatura: {status.tempC}°C{status.targetTempC != null ? ` · zadana ${status.targetTempC}°C` : ''}</p>}
       {status.volume != null && <p className="text-[11px] text-slate-400">Głośność: {status.volume}%</p>}
-      {/* Pobór mocy: z powiązanego gniazdka Tuya, a gdy brak powiązania — natywnie
-          z SmartThings (powerConsumptionReport), jeśli urządzenie sam go wystawia. */}
-      {status.linked ? (
-        <div className="grid grid-cols-2 gap-2 pt-1">
-          <Metric icon={Zap} label="Moc" value={status.plugW != null ? `${status.plugW} W` : '—'} />
-          <Metric icon={Activity} label="Zużycie dziś" value={status.todayKwh != null ? `${Number(status.todayKwh).toFixed(2)} kWh` : '—'} />
-        </div>
-      ) : status.nativeW != null ? (
-        <div className="pt-1">
-          <Metric icon={Zap} label="Moc (SmartThings)" value={`${status.nativeW} W`} />
-        </div>
-      ) : null}
+      {/* Mocy natywnej ze SmartThings nie pokazujemy — powerConsumptionReport.power jest
+          chwilowy i prawie zawsze 0. Realny pobór bierzemy z gniazdka Tuya (zestaw). */}
       {!online && <p className="text-[11px] text-slate-500">Brak połączenia z urządzeniem.</p>}
     </div>
   )
@@ -122,6 +112,7 @@ function StDeviceBody({ status, online }) {
 import { DeviceControls } from './DeviceControls'
 import { AcControls } from './AcControls'
 import { RemoteControls } from './RemoteControls'
+import { WasherSettings } from './WasherSettings'
 import { DeviceTimer } from './DeviceTimer'
 import { PlugLinkPicker } from './PlugLinkPicker'
 import { DeviceEnergyChart } from './DeviceEnergyChart'
@@ -131,7 +122,7 @@ import { DeviceEnergyChart } from './DeviceEnergyChart'
  */
 export const SmartDeviceCard = ({
   device, status, isOwner, plugs = [], linkedRemotes = [],
-  onRefresh, onRename, onToggleActive, onLinkPlug, onRemove, onSend, onSendSt,
+  onRefresh, onRename, onToggleActive, onLinkPlug, onRemove, onSend, onSendSt, onSendStSetting,
 }) => {
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(device.displayName)
@@ -151,7 +142,9 @@ export const SmartDeviceCard = ({
   const TypeIcon = typeMeta.Icon
   // Stan on/off znamy dla gniazdka/klimy zawsze; dla pilota tylko gdy powiązany z gniazdkiem.
   const stateKnown = !isIrRemote || !!status?.linked
-  // To gniazdko z zagnieżdżonymi pilotami = „zestaw". setOn: czy zestaw pobiera prąd (>20 W).
+  // Urządzenie ST jest „włączone" gdy działa (pralka w cyklu) lub on (klima/TV/lodówka).
+  const stActive = isSt && (status?.state === 'running' || status?.state === 'on')
+  // „Zestaw": to gniazdko ma zagnieżdżone urządzenia (piloty IR / AGD ST). setOn: czy pobiera prąd (>20 W).
   const isGroup = linkedRemotes.length > 0
   const setOn = (status?.powerW ?? 0) > 20
 
@@ -196,7 +189,7 @@ export const SmartDeviceCard = ({
               pilot IR jest bezstanowy → neutralna, żeby nie sugerować włączenia. */}
           <div className={`shrink-0 w-9 h-9 rounded-lg flex items-center justify-center ${
             !stateKnown ? 'bg-slate-700/40 text-slate-300'
-            : status?.switchOn ? 'bg-emerald-500/15 text-emerald-400'
+            : (status?.switchOn || stActive) ? 'bg-emerald-500/15 text-emerald-400'
             : 'bg-slate-700/40 text-slate-400'
           }`}>
             <TypeIcon className="w-5 h-5" />
@@ -236,6 +229,15 @@ export const SmartDeviceCard = ({
           <StDeviceBody status={status} online={online} />
           {/* Sterowanie start/pauza/stop — tylko akcje dozwolone teraz (z controls). */}
           <StControls deviceId={device.id} controls={status?.controls} disabled={!online} onSendSt={onSendSt} />
+          {/* Ustawienia cyklu pralki (temperatura/wirowanie/płukanie/namaczanie/program).
+              Zmiana możliwa tylko przy zdalnym sterowaniu i gdy pralka nie pierze. */}
+          {device.deviceType === 'washer' && status?.settings && (
+            <WasherSettings
+              settings={status.settings}
+              onSend={(setting, value) => onSendStSetting(device.id, setting, value)}
+              disabled={!online || status.state === 'running' || !status?.controls?.remoteControlEnabled}
+            />
+          )}
           {/* Powiązanie z gniazdkiem Tuya = koszt z gniazdka; bez powiązania pobór czytany
               natywnie z SmartThings (jeśli urządzenie go wystawia). */}
           {isOwner && <PlugLinkPicker device={device} plugs={plugs} onLinkPlug={onLinkPlug} />}
@@ -312,19 +314,24 @@ export const SmartDeviceCard = ({
         {linkedRemotes.map(({ device: rd, status: rs }) => {
           const RIcon = (TYPE_META[rd.deviceType] || {}).Icon || Cpu
           const sendRd = async (cmds) => { try { await onSend(rd.id, cmds) } catch { /* cicho */ } }
+          // ST AGD (pralka) zagnieżdżone pod gniazdkiem: własny status/sterowanie z chmury ST.
+          const rdIsSt = rd.provider === 'smartthings'
+          const rdOnline = rdIsSt ? (rs?.ok && rs?.online) : online
+          // Zielona ikona: ST wg stanu cyklu, IR wg poboru gniazdka (zestaw pod prądem).
+          const rdActive = rdIsSt ? (rs?.state === 'running' || rs?.state === 'on') : setOn
           return (
             <div key={rd.id} className="lg:flex-1 min-w-0 mt-3 lg:mt-0 pt-3 lg:pt-0 border-t lg:border-t-0 lg:border-l border-slate-700/50 lg:pl-4">
                 {/* Nagłówek jak w gniazdkach: kafelek ikony (zielony gdy włączone) + nazwa + typ */}
                 <div className="flex items-start justify-between gap-2 mb-3">
                   <div className="flex items-center gap-2.5 min-w-0">
                     <div className={`shrink-0 w-9 h-9 rounded-lg flex items-center justify-center ${
-                      setOn ? 'bg-emerald-500/15 text-emerald-400' : 'bg-slate-700/40 text-slate-400'
+                      rdActive ? 'bg-emerald-500/15 text-emerald-400' : 'bg-slate-700/40 text-slate-400'
                     }`}>
                       <RIcon className="w-5 h-5" />
                     </div>
                     <div className="min-w-0">
                       <h4 className="text-white font-medium truncate leading-tight">{rd.displayName}</h4>
-                      <p className="text-[11px] text-slate-500 truncate">{(TYPE_META[rd.deviceType] || {}).label || 'Pilot'}</p>
+                      <p className="text-[11px] text-slate-500 truncate">{(TYPE_META[rd.deviceType] || {}).label || 'Urządzenie'}</p>
                     </div>
                   </div>
                   {isOwner && (
@@ -337,7 +344,19 @@ export const SmartDeviceCard = ({
                     </button>
                   )}
                 </div>
-                {rd.deviceType === 'ir_ac' ? (
+                {rdIsSt ? (
+                  <>
+                    <StDeviceBody status={rs} online={rdOnline} />
+                    <StControls deviceId={rd.id} controls={rs?.controls} disabled={!rdOnline} onSendSt={onSendSt} />
+                    {rd.deviceType === 'washer' && rs?.settings && (
+                      <WasherSettings
+                        settings={rs.settings}
+                        onSend={(setting, value) => onSendStSetting(rd.id, setting, value)}
+                        disabled={!rdOnline || rs.state === 'running' || !rs?.controls?.remoteControlEnabled}
+                      />
+                    )}
+                  </>
+                ) : rd.deviceType === 'ir_ac' ? (
                   <AcControls ac={rs?.ac} onSend={sendRd} disabled={!online}>
                     <DeviceTimer deviceId={rd.id} disabled={!online} />
                   </AcControls>

@@ -30,7 +30,7 @@ export const SmartDevicesView = () => {
   const [isOwner, setIsOwner] = useState(false)
   const {
     devices, statusById, loading, error,
-    refreshStatus, add, addSt, rename, setActive, linkPlug, remove, sendCommand, sendSt,
+    refreshStatus, add, addSt, rename, setActive, linkPlug, remove, sendCommand, sendSt, sendStSetting,
   } = useSmartDevices()
   const [showAdd, setShowAdd] = useState(false)
   const [removeTarget, setRemoveTarget] = useState(null)
@@ -64,12 +64,13 @@ export const SmartDevicesView = () => {
   // Gniazdka (do powiązania z pilotami IR — realny stan zestawu z poboru mocy).
   const plugs = devices.filter((d) => d.provider !== 'smartthings' && (!d.deviceType || d.deviceType === 'plug'))
 
-  // „Zestaw": piloty IR powiązane z gniazdkiem chowamy z płaskiej listy i wyświetlamy
-  // zagnieżdżone w kaflu gniazdka. Powiązanie liczy się tylko gdy gniazdko istnieje na liście.
+  // „Zestaw": gniazdko jest rodzicem. Każde urządzenie powiązane z gniazdkiem (pilot IR,
+  // ale też pralka/suszarka SmartThings) chowamy z płaskiej listy i pokazujemy zagnieżdżone
+  // w kaflu gniazdka. Powiązanie liczy się tylko gdy gniazdko istnieje na liście.
   const plugIds = new Set(plugs.map((p) => p.id))
   const remotesByPlug = {}
   for (const d of devices) {
-    if (String(d.deviceType || '').startsWith('ir_') && d.linkedPlugId && plugIds.has(d.linkedPlugId)) {
+    if (d.linkedPlugId && plugIds.has(d.linkedPlugId)) {
       (remotesByPlug[d.linkedPlugId] ||= []).push(d)
     }
   }
@@ -169,6 +170,7 @@ export const SmartDevicesView = () => {
                       onRemove={setRemoveTarget}
                       onSend={sendCommand}
                       onSendSt={sendSt}
+                      onSendStSetting={sendStSetting}
                     />
                   </ErrorBoundary>
                 </div>

@@ -5,6 +5,8 @@
  * @see https://developer.smartthings.com/docs/api/public#operation/executeDeviceCommands
  */
 
+import { WASHER_SETTINGS, allowedWasherSettings } from './washer.js'
+
 // Capability maszyny stanu cyklu per typ AGD (sterowane setMachineState).
 const CYCLE_CAPABILITY = {
   washer: 'washerOperatingState',
@@ -51,4 +53,31 @@ export function allowedStActions(deviceType, status) {
   }
   const machineState = attr(status, capability, 'machineState')
   return { remoteControlEnabled, actions: ACTIONS_BY_STATE[machineState] ?? ['start'] }
+}
+
+/**
+ * Buduje komendę ST dla zmiany ustawienia cyklu pralki (temperatura/wirowanie/płukanie/
+ * namaczanie/program). Zwraca null gdy typ nie jest pralką lub ustawienie nieznane —
+ * wołający odrzuca takie żądanie (400). Wartość bierzemy jako string (ST tak oczekuje).
+ */
+export function buildStSettingCommand(deviceType, setting, value) {
+  if (deviceType !== 'washer') return null
+  const def = WASHER_SETTINGS[setting]
+  if (!def || value == null) return null
+  return { component: 'main', capability: def.capability, command: def.command, arguments: [String(value)] }
+}
+
+/**
+ * Czy zmianę ustawienia da się teraz wykonać: bramka zdalnego sterowania + czy wartość
+ * jest na liście wspieranych przez urządzenie (twardo odrzucamy spoza zakresu, żeby nie
+ * wysłać pralce nieprawidłowej komendy). settings = mapa { ustawienie: [wspierane] }.
+ */
+export function allowedStSetting(deviceType, status, setting, value) {
+  if (deviceType !== 'washer') return { ok: false, reason: 'unsupported' }
+  const remoteControlEnabled = attr(status, 'remoteControlStatus', 'remoteControlEnabled') === 'true'
+  if (!remoteControlEnabled) return { ok: false, reason: 'remote_control_disabled', remoteControlEnabled }
+  const supported = allowedWasherSettings(status)[setting]
+  if (!supported) return { ok: false, reason: 'unsupported', remoteControlEnabled }
+  if (!supported.includes(String(value))) return { ok: false, reason: 'value_not_supported', remoteControlEnabled }
+  return { ok: true, remoteControlEnabled }
 }

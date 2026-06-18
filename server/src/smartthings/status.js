@@ -6,6 +6,8 @@
  * @see https://developer.smartthings.com/docs/api/public#operation/getDeviceStatus
  */
 
+import { readWasherSettings } from './washer.js'
+
 /** Wartość atrybutu capability z komponentu `main` (lub null gdy brak). */
 function attr(status, capability, attribute) {
   return status?.components?.main?.[capability]?.[attribute]?.value ?? null
@@ -25,19 +27,21 @@ function mapCycleDevice(status, type) {
   const machineState = attr(status, cap, 'machineState')
   const remainingMin = attr(status, samsungCap, 'remainingTime')
   const completionTime = attr(status, cap, 'completionTime')
+  // Ustawienia cyklu (temperatura/wirowanie/płukanie/namaczanie/program) — tylko pralka.
+  const settings = type === 'washer' ? readWasherSettings(status) : null
 
   if (machineState === 'run') {
-    return { type, state: 'running', label: 'W trakcie', remainingMin, completionTime }
+    return { type, state: 'running', label: 'W trakcie', remainingMin, completionTime, settings }
   }
   if (machineState === 'pause') {
-    return { type, state: 'paused', label: 'Pauza', remainingMin, completionTime }
+    return { type, state: 'paused', label: 'Pauza', remainingMin, completionTime, settings }
   }
   // stop: świeżo zakończony cykl (jobState = finished) → „Gotowe"; inaczej bezczynna.
   const jobState = attr(status, cap, `${type}JobState`) ?? attr(status, samsungCap, `${type}JobState`)
   if (jobState === 'finished') {
-    return { type, state: 'finished', label: 'Gotowe', remainingMin: null, completionTime: null }
+    return { type, state: 'finished', label: 'Gotowe', remainingMin: null, completionTime: null, settings }
   }
-  return { type, state: 'idle', label: 'Bezczynna', remainingMin: null, completionTime: null }
+  return { type, state: 'idle', label: 'Bezczynna', remainingMin: null, completionTime: null, settings }
 }
 
 /**
