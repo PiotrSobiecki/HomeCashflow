@@ -80,6 +80,14 @@ export function useSmartDevices() {
     setDevices((prev) => prev.map((d) => (d.id === id ? updated : d)))
   }, [])
 
+  // Własne nazwy programów pralki (mapa { kodKursu: nazwa }). Etykiety renderuje backend
+  // w status.settings, więc po zapisie odśwież status, żeby zobaczyć nowe nazwy.
+  const saveCycleLabels = useCallback(async (id, cycleLabels) => {
+    const updated = await patchSmartDevice(id, { cycleLabels })
+    setDevices((prev) => prev.map((d) => (d.id === id ? updated : d)))
+    refreshStatus()
+  }, [refreshStatus])
+
   // Powiązanie urządzenia IR z gniazdkiem (plugId=null rozłącza). Po zmianie odśwież status.
   const linkPlug = useCallback(async (id, plugId) => {
     const updated = await patchSmartDevice(id, { linkedPlugId: plugId })
@@ -130,5 +138,5 @@ export function useSmartDevices() {
     setTimeout(refreshStatus, 1500)
   }, [refreshStatus])
 
-  return { devices, statusById, loading, error, reload, refreshStatus, add, addSt, rename, setActive, linkPlug, remove, sendCommand, sendSt, sendStSetting: sendStSettingCmd }
+  return { devices, statusById, loading, error, reload, refreshStatus, add, addSt, rename, setActive, linkPlug, saveCycleLabels, remove, sendCommand, sendSt, sendStSetting: sendStSettingCmd }
 }

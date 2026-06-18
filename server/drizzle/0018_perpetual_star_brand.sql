@@ -1,0 +1,1 @@
+ALTER TABLE "smart_devices" ADD COLUMN "cycle_labels" jsonb;

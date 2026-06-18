@@ -251,6 +251,9 @@ export const smartDevices = pgTable('smart_devices', {
   // bezstanowy, więc realny on/off wnioskujemy z mocy gniazdka. NULL = brak powiązania.
   // Self-FK do smart_devices (gniazdko w tym samym gospodarstwie).
   linkedPlugId: uuid('linked_plug_id').references(() => smartDevices.id, { onDelete: 'set null' }),
+  // Własne nazwy programów pralki (SmartThings nie wystawia nazw kursów — tylko kody jak
+  // "1C"). Mapa { kodKursu: nazwaPL } nadpisuje draft z washer.js. NULL = same defaulty.
+  cycleLabels: jsonb('cycle_labels'),
   functionsJson: jsonb('functions_json'),
   isActive: boolean('is_active').notNull().default(true),
   createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
