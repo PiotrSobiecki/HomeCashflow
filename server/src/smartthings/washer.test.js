@@ -32,21 +32,33 @@ describe('readWasherSettings', () => {
     expect(readWasherSettings(status({ washerOperatingState: { machineState: { value: 'run' } } }))).toBeNull()
   })
 
-  it('labels cycles: curated name, else description from params, else override', () => {
+  it('labels cycles from the curated draft', () => {
     const s = readWasherSettings(fixture('washer-status.json'))
     const byCode = Object.fromEntries(s.cycle.options.map((o) => [o.value, o.label]))
-    // Kurs pewny po „odcisku" parametrów (jedyny z maks. wirowaniem 400).
-    expect(byCode['26']).toBe('Wełna')
-    // Kurs bez nazwy w drafcie → opis z domyślnych parametrów (temp/wirowanie/płukanie).
-    expect(byCode['33']).toMatch(/obr/)
-    expect(byCode['33']).not.toBe('Program 33')
+    expect(byCode['1C']).toBe('Eco 40-60') // potwierdzone przez usera
+    expect(byCode['26']).toBe('Wełna')     // pewne po parametrach (spin 400)
+  })
+
+  it('falls back to a param description for an unknown course code', () => {
+    // Kurs spoza COURSE_LABEL → opis z domyślnych parametrów (samsungce.washerCycle.supportedCycles).
+    const s = readWasherSettings(status({
+      'custom.supportedOptions': { supportedCourses: { value: ['ZZ'] } },
+      'samsungce.washerCycle': {
+        washerCycle: { value: 'Table_02_Course_ZZ' },
+        supportedCycles: { value: [{
+          cycle: 'ZZ',
+          supportedOptions: { waterTemperature: { default: '60' }, spinLevel: { default: '1400' }, rinseCycle: { default: '4' } },
+        }] },
+      },
+    }))
+    expect(s.cycle.options).toContainEqual({ value: 'ZZ', label: '60° · 1400 obr · 4× płuk' })
   })
 
   it('user cycle labels override the draft', () => {
-    const s = readWasherSettings(fixture('washer-status.json'), { 26: 'Moja wełna', 33: 'Bawełna 60' })
+    const s = readWasherSettings(fixture('washer-status.json'), { 26: 'Moja wełna', '1C': 'Mój eco' })
     const byCode = Object.fromEntries(s.cycle.options.map((o) => [o.value, o.label]))
     expect(byCode['26']).toBe('Moja wełna') // nadpisuje curated
-    expect(byCode['33']).toBe('Bawełna 60') // nadpisuje opis
+    expect(byCode['1C']).toBe('Mój eco')    // nadpisuje curated
   })
 })
 

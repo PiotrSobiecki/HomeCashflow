@@ -68,13 +68,36 @@ const BUBBLE_LABEL = { on: 'Włączone', off: 'Wyłączone' }
 //   3) opis z parametrów kursu (np. „60° · 1400 · 4× płuk") — informacyjny fallback,
 //   4) „Program 1C" — gdy nie znamy nawet parametrów.
 //
-// DRAFT: wpisane tylko kursy jednoznaczne po parametrach (Table_02, model WW90T65):
-//   26 = jedyny z maks. wirowaniem 400 → Wełna; 28 = jedyny bez płukania → Wirowanie;
-//   3A = wszystko zablokowane na 70°/1200 → Czyszczenie bębna. Resztę user nazwie w UI.
+// DRAFT nazw PL (Table_02, model WW90T65). Lista programów potwierdzona przez usera (pokrętło/apka),
+// kody dopasowane po „odcisku" parametrów. PEWNE (parametry jednoznaczne):
+//   1C = Eco 40-60 (potwierdzone przez usera; temp auto pasuje), 26 = Wełna (jedyny maks. wir. 400),
+//   28 = Wirowanie (jedyny bez płukania), 3A = Czyszczenie bębna (wszystko zablokowane 70°/1200),
+//   27 = Płukanie i wirowanie (bez prania, temp auto). RESZTA = best-guess po parametrach,
+//   do weryfikacji na sprzęcie (user poprawia w UI; potwierdzone wpisy lądują tu na stałe).
 const COURSE_LABEL = {
-  26: 'Wełna',
-  28: 'Wirowanie',
-  '3A': 'Czyszczenie bębna',
+  '1C': 'Eco 40-60',          // ✓ pewne (user)
+  26: 'Wełna',                // ✓ pewne (spin 400)
+  28: 'Wirowanie',            // ✓ pewne (bez płukania)
+  '3A': 'Czyszczenie bębna',  // ✓ pewne (70° zablokowane)
+  27: 'Płukanie i wirowanie', // ✓ pewne (bez prania, auto)
+  // — poniżej best-guess (do potwierdzenia) —
+  '2E': 'Higieniczna para',   // 90° (najgorętszy)
+  20: 'Bawełna',              // 60°/1400/4× płuk
+  33: 'Ręczniki',             // 60°/1400/4× płuk
+  '1B': 'Dziecięce',          // do 90°/1200/4× płuk
+  24: 'Syntetyki',            // 40°/800/3× płuk
+  '2A': 'Jeansy',             // 30°/800/4× płuk (extra płukanie)
+  '2F': 'Odzież sportowa',    // 30°/800/3× płuk
+  '1E': 'Koszule',            // 30°/1200/3× płuk
+  '1F': 'Delikatne',          // tylko zimna (najdelikatniejszy)
+  30: 'Kolory',               // 40–60°/1400/2× płuk
+  34: 'Pościel',              // 40–60°/1400/3× płuk
+  25: 'Mieszane',             // 40–60°/1200/2× płuk
+  32: 'Ekonomiczne',          // 30–60°/800 (niskie wir.)
+  22: 'Pranie szybkie 15',    // 40°/800/2× płuk (proste)
+  23: 'Ciche pranie',         // 30°/1200/3× płuk
+  21: 'Pochmurny dzień',      // 30°/1200/4× płuk
+  '2D': 'Odzież wierzchnia',  // 40°/800/2× płuk
 }
 
 /** Skrócona etykieta wartości (do opisu kursu): bez „°C"/„obr." żeby zmieścić w jednej linii. */
