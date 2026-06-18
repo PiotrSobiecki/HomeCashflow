@@ -31,6 +31,23 @@ describe('readWasherSettings', () => {
   it('returns null when the device exposes no washer settings', () => {
     expect(readWasherSettings(status({ washerOperatingState: { machineState: { value: 'run' } } }))).toBeNull()
   })
+
+  it('labels cycles: curated name, else description from params, else override', () => {
+    const s = readWasherSettings(fixture('washer-status.json'))
+    const byCode = Object.fromEntries(s.cycle.options.map((o) => [o.value, o.label]))
+    // Kurs pewny po „odcisku" parametrów (jedyny z maks. wirowaniem 400).
+    expect(byCode['26']).toBe('Wełna')
+    // Kurs bez nazwy w drafcie → opis z domyślnych parametrów (temp/wirowanie/płukanie).
+    expect(byCode['33']).toMatch(/obr/)
+    expect(byCode['33']).not.toBe('Program 33')
+  })
+
+  it('user cycle labels override the draft', () => {
+    const s = readWasherSettings(fixture('washer-status.json'), { 26: 'Moja wełna', 33: 'Bawełna 60' })
+    const byCode = Object.fromEntries(s.cycle.options.map((o) => [o.value, o.label]))
+    expect(byCode['26']).toBe('Moja wełna') // nadpisuje curated
+    expect(byCode['33']).toBe('Bawełna 60') // nadpisuje opis
+  })
 })
 
 describe('allowedWasherSettings', () => {

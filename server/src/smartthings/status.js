@@ -21,14 +21,14 @@ const CYCLE_CAPABILITY = {
 }
 
 /** Mapowanie maszyny stanu AGD na UI-model (run/pause/stop). */
-function mapCycleDevice(status, type) {
+function mapCycleDevice(status, type, cycleLabels) {
   const cap = CYCLE_CAPABILITY[type]
   const samsungCap = `samsungce.${cap}`
   const machineState = attr(status, cap, 'machineState')
   const remainingMin = attr(status, samsungCap, 'remainingTime')
   const completionTime = attr(status, cap, 'completionTime')
   // Ustawienia cyklu (temperatura/wirowanie/płukanie/namaczanie/program) — tylko pralka.
-  const settings = type === 'washer' ? readWasherSettings(status) : null
+  const settings = type === 'washer' ? readWasherSettings(status, cycleLabels) : null
 
   if (machineState === 'run') {
     return { type, state: 'running', label: 'W trakcie', remainingMin, completionTime, settings }
@@ -108,15 +108,15 @@ function nativePower(status) {
   }
 }
 
-export function mapStStatus(status, deviceType) {
-  const base = mapStType(status, deviceType)
+export function mapStStatus(status, deviceType, cycleLabels) {
+  const base = mapStType(status, deviceType, cycleLabels)
   const native = nativePower(status)
   return native ? { ...base, ...native } : base
 }
 
-function mapStType(status, deviceType) {
+function mapStType(status, deviceType, cycleLabels) {
   if (CYCLE_CAPABILITY[deviceType]) {
-    return mapCycleDevice(status, deviceType)
+    return mapCycleDevice(status, deviceType, cycleLabels)
   }
   if (deviceType === 'fridge') {
     return mapFridge(status)

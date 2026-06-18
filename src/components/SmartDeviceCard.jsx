@@ -122,7 +122,7 @@ import { DeviceEnergyChart } from './DeviceEnergyChart'
  */
 export const SmartDeviceCard = ({
   device, status, isOwner, plugs = [], linkedRemotes = [],
-  onRefresh, onRename, onToggleActive, onLinkPlug, onRemove, onSend, onSendSt, onSendStSetting,
+  onRefresh, onRename, onToggleActive, onLinkPlug, onSaveCycleLabels, onRemove, onSend, onSendSt, onSendStSetting,
 }) => {
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(device.displayName)
@@ -236,6 +236,8 @@ export const SmartDeviceCard = ({
               settings={status.settings}
               onSend={(setting, value) => onSendStSetting(device.id, setting, value)}
               disabled={!online || status.state === 'running' || !status?.controls?.remoteControlEnabled}
+              cycleLabels={device.cycleLabels}
+              onSaveLabels={isOwner ? (labels) => onSaveCycleLabels(device.id, labels) : null}
             />
           )}
           {/* Powiązanie z gniazdkiem Tuya = koszt z gniazdka; bez powiązania pobór czytany
@@ -353,6 +355,8 @@ export const SmartDeviceCard = ({
                         settings={rs.settings}
                         onSend={(setting, value) => onSendStSetting(rd.id, setting, value)}
                         disabled={!rdOnline || rs.state === 'running' || !rs?.controls?.remoteControlEnabled}
+                        cycleLabels={rd.cycleLabels}
+                        onSaveLabels={isOwner ? (labels) => onSaveCycleLabels(rd.id, labels) : null}
                       />
                     )}
                   </>

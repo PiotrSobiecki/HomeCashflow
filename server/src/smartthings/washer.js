@@ -60,16 +60,52 @@ const TEMP_LABEL = { none: 'Brak', cold: 'Zimna', 20: '20°C', 30: '30°C', 40: 
 const SPIN_LABEL = { noSpin: 'Bez wirowania', rinseHold: 'Stop w wodzie', 400: '400 obr.', 800: '800 obr.', 1000: '1000 obr.', 1200: '1200 obr.', 1400: '1400 obr.' }
 const BUBBLE_LABEL = { on: 'Włączone', off: 'Wyłączone' }
 
-// Programy: ST zwraca surowe kody kursów (1C, 25…) bez nazw — brak ich w API.
-// Bez tej mapy UI pokaże „Program 1C". Uzupełnij wpisy po sprawdzeniu na sprzęcie.
-const COURSE_LABEL = {}
+// Programy: ST zwraca surowe kody kursów (1C, 25…) BEZ nazw — w publicznym API ich nie ma
+// (apka SmartThings rozwiązuje je z wbudowanej tablicy `Table_XX`, niewystawianej przez REST).
+// Dlatego nazwy mamy w trzech warstwach (od najwyższego priorytetu):
+//   1) etykiety własne usera (cycle_labels per urządzenie) — edytowalne w UI,
+//   2) draft COURSE_LABEL poniżej — tylko kursy pewne po „odcisku" parametrów,
+//   3) opis z parametrów kursu (np. „60° · 1400 · 4× płuk") — informacyjny fallback,
+//   4) „Program 1C" — gdy nie znamy nawet parametrów.
+//
+// DRAFT: wpisane tylko kursy jednoznaczne po parametrach (Table_02, model WW90T65):
+//   26 = jedyny z maks. wirowaniem 400 → Wełna; 28 = jedyny bez płukania → Wirowanie;
+//   3A = wszystko zablokowane na 70°/1200 → Czyszczenie bębna. Resztę user nazwie w UI.
+const COURSE_LABEL = {
+  26: 'Wełna',
+  28: 'Wirowanie',
+  '3A': 'Czyszczenie bębna',
+}
 
-function labelFor(setting, value) {
+/** Skrócona etykieta wartości (do opisu kursu): bez „°C"/„obr." żeby zmieścić w jednej linii. */
+function shortTemp(v) { return v === 'cold' ? 'zimna' : `${v}°` }
+function shortSpin(v) { return v === 'noSpin' ? 'bez wir.' : v === 'rinseHold' ? 'stop w wodzie' : `${v} obr` }
+
+/**
+ * Opis kursu z jego domyślnych parametrów (`samsungce.washerCycle.supportedCycles`):
+ * „60° · 1400 · 4× płuk". Pomija temperaturę gdy kurs jej nie ustawia (default 'none').
+ * Zwraca null gdy nie znajdziemy wpisu kursu — wtedy wołający da „Program {kod}".
+ */
+function describeCourse(status, code) {
+  const cycles = attr(status, 'samsungce.washerCycle', 'supportedCycles')
+  const entry = Array.isArray(cycles) ? cycles.find((cyc) => cyc?.cycle === code) : null
+  if (!entry?.supportedOptions) return null
+  const o = entry.supportedOptions
+  const parts = []
+  if (o.waterTemperature?.default && o.waterTemperature.default !== 'none') parts.push(shortTemp(o.waterTemperature.default))
+  if (o.spinLevel?.default) parts.push(shortSpin(o.spinLevel.default))
+  if (o.rinseCycle?.default && o.rinseCycle.default !== '0') parts.push(`${o.rinseCycle.default}× płuk`)
+  return parts.length ? parts.join(' · ') : null
+}
+
+function labelFor(setting, value, ctx) {
   if (setting === 'temperature') return TEMP_LABEL[value] ?? String(value)
   if (setting === 'spin') return SPIN_LABEL[value] ?? String(value)
   if (setting === 'rinse') return value === '0' ? 'Bez płukania' : `${value}× płukanie`
   if (setting === 'bubbleSoak') return BUBBLE_LABEL[value] ?? String(value)
-  if (setting === 'cycle') return COURSE_LABEL[value] ?? `Program ${value}`
+  if (setting === 'cycle') {
+    return ctx?.custom?.[value] ?? COURSE_LABEL[value] ?? describeCourse(ctx?.status, value) ?? `Program ${value}`
+  }
   return String(value)
 }
 
@@ -97,7 +133,9 @@ function supportedValues(status, setting) {
  * Pomija ustawienia bez sensownych opcji (np. temperatura = tylko „none"). Zwraca
  * null gdy urządzenie nie wystawia żadnego z capability (nie-Samsung / nie-pralka).
  */
-export function readWasherSettings(status) {
+export function readWasherSettings(status, customLabels) {
+  // Kontekst dla etykiet programów: nazwy własne usera + status (do opisu z parametrów).
+  const ctx = { custom: customLabels && typeof customLabels === 'object' ? customLabels : null, status }
   const out = {}
   for (const setting of Object.keys(WASHER_SETTINGS)) {
     const def = WASHER_SETTINGS[setting]
@@ -108,7 +146,7 @@ export function readWasherSettings(status) {
       : attr(status, def.capability, def.currentAttr)
     out[setting] = {
       value: current != null ? String(current) : null,
-      options: raw.map((v) => ({ value: String(v), label: labelFor(setting, v) })),
+      options: raw.map((v) => ({ value: String(v), label: labelFor(setting, v, ctx) })),
     }
   }
   return Object.keys(out).length ? out : null

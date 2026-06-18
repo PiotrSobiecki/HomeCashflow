@@ -1408,6 +1408,7 @@ function mapDevice(row) {
     deviceType: row.device_type ?? null,
     irParentId: row.ir_parent_id ?? null,
     linkedPlugId: row.linked_plug_id ?? null,
+    cycleLabels: row.cycle_labels ?? null,
     functionsJson: row.functions_json ?? null,
     isActive: row.is_active,
     createdBy: row.created_by ?? null,
@@ -1558,7 +1559,7 @@ async function readStStatus(stCtx, row) {
     externalDeviceId: row.external_device_id,
     ok: true,
     online: true,
-    ...mapStStatus(status, row.device_type),
+    ...mapStStatus(status, row.device_type, row.cycle_labels),
     // Dozwolone akcje sterowania (Faza 4) — UI rysuje tylko wspierane przyciski.
     controls: allowedStActions(row.device_type, status),
     updatedAt: new Date().toISOString(),
@@ -1752,7 +1753,7 @@ app.get("/api/smart-devices/status", authMiddleware, async (c) => {
   if (!membership) return c.json({ statuses: [] });
 
   const rows = await sql`
-    SELECT id, provider, external_device_id, tuya_device_id, device_type, ir_parent_id, linked_plug_id FROM smart_devices
+    SELECT id, provider, external_device_id, tuya_device_id, device_type, ir_parent_id, linked_plug_id, cycle_labels FROM smart_devices
     WHERE household_id = ${membership.household_id} AND is_active = true
     ORDER BY created_at ASC
   `;
@@ -2199,10 +2200,29 @@ app.patch("/api/smart-devices/:id", authMiddleware, async (c) => {
     }
   }
 
+  // Własne nazwy programów pralki: mapa { kodKursu: nazwa }. Sanityzujemy — tylko stringi,
+  // przycięte, puste pomijamy (powrót do draftu), limit by nie wpychać śmieci do JSONB.
+  let nextCycleLabels = result.row.cycle_labels;
+  if ("cycleLabels" in body) {
+    const src = body.cycleLabels;
+    if (src != null && (typeof src !== "object" || Array.isArray(src))) {
+      return c.json({ error: "invalid_cycle_labels" }, 400);
+    }
+    const clean = {};
+    for (const [code, name] of Object.entries(src ?? {}).slice(0, 60)) {
+      if (typeof name !== "string") continue;
+      const trimmed = name.trim().slice(0, 40);
+      if (trimmed) clean[String(code).slice(0, 16)] = trimmed;
+    }
+    nextCycleLabels = Object.keys(clean).length ? clean : null;
+  }
+
   const [row] = await sql`
     UPDATE smart_devices
     SET display_name = ${nextName}, is_active = ${nextActive},
-        linked_plug_id = ${nextPlug}, updated_at = NOW()
+        linked_plug_id = ${nextPlug},
+        cycle_labels = ${nextCycleLabels == null ? null : JSON.stringify(nextCycleLabels)},
+        updated_at = NOW()
     WHERE id = ${id}
     RETURNING *
   `;

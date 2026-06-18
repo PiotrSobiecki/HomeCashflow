@@ -127,6 +127,13 @@
       "when": 1781731706481,
       "tag": "0017_moaning_fenris",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1781773646726,
+      "tag": "0018_perpetual_star_brand",
+      "breakpoints": true
     }
   ]
 }
