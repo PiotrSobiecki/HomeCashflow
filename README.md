@@ -11,9 +11,11 @@ Frontend: React + Vite, backend: Hono na Cloudflare Workers, baza: Neon PostgreS
 - Rozdzielenie wydatkow stalych i zmiennych
 - Cele oszczednosciowe i podsumowania miesieczne
 - Prognoza finansowa, poduszka bezpieczenstwa i wskazniki biegu finansowego
-- Inteligentne urzadzenia (zakladka "Urzadzenia"): integracja z Tuya Cloud,
-  status na zywo (moc, napiecie, zuzycie dzienne), sterowanie, wykresy zuzycia
-  energii z kosztami wg ustawionej ceny za 1 kWh
+- Inteligentne urzadzenia (zakladka "Urzadzenia"): integracje z Tuya Cloud
+  (poswiadczenia per gospodarstwo) oraz SmartThings/Samsung (logowanie OAuth) —
+  status na zywo (moc, napiecie, zuzycie dzienne), sterowanie (gniazdka, piloty IR,
+  klima, AGD jak pralka/suszarka/zmywarka), wykresy zuzycia energii z kosztami
+  wg ustawionej ceny za 1 kWh
 - Raporty zuzycia energii do PDF: dowolny zakres dat (max rok), wybor urzadzen,
   pobranie pliku lub wysylka na e-mail uzytkownika
 
@@ -27,6 +29,7 @@ Frontend: React + Vite, backend: Hono na Cloudflare Workers, baza: Neon PostgreS
 | Auth | Google OAuth 2.0 (JWT httpOnly cookies) | - |
 | Emails | Resend (zaproszenia + raporty PDF) | - |
 | Smart home | Tuya Cloud API (poswiadczenia per gospodarstwo, szyfrowane) | - |
+| Smart home | SmartThings API (OAuth 2.0, tokeny per gospodarstwo, szyfrowane) | - |
 
 ## Start lokalny
 
@@ -69,8 +72,17 @@ FRONTEND_URL=http://localhost:5173
 GOOGLE_CLIENT_ID=twoj-google-client-id
 GOOGLE_CLIENT_SECRET=twoj-google-client-secret
 RESEND_API_KEY=twoj-resend-api-key
-FINANCE_DATA_KEY=64-znakowy-hex-klucz-aes256   # szyfrowanie danych finansowych i poswiadczen Tuya
+FINANCE_DATA_KEY=64-znakowy-hex-klucz-aes256   # szyfrowanie danych finansowych oraz poswiadczen/tokenow Tuya i SmartThings
+
+# SmartThings (opcjonalnie — integracja AGD/smart home Samsung; jeden OAuth-In SmartApp na cala aplikacje)
+SMARTTHINGS_CLIENT_ID=twoj-smartthings-client-id
+SMARTTHINGS_CLIENT_SECRET=twoj-smartthings-client-secret
+SMARTTHINGS_REDIRECT_URI=http://localhost:3000/api/smartthings/callback
 ```
+
+Tuya jest konfigurowane per gospodarstwo z poziomu UI (Client ID/Secret z iot.tuya.com),
+wiec nie wymaga zmiennych srodowiskowych. SmartThings uzywa jednego OAuth-In SmartApp na cala
+aplikacje (powyzsze sekrety), a tokeny per uzytkownik trafiaja zaszyfrowane do bazy.
 
 ### Uruchomienie
 
@@ -189,11 +201,16 @@ npx wrangler secret put GOOGLE_CLIENT_ID
 npx wrangler secret put GOOGLE_CLIENT_SECRET
 npx wrangler secret put RESEND_API_KEY
 npx wrangler secret put FINANCE_DATA_KEY
+npx wrangler secret put SMARTTHINGS_CLIENT_ID       # opcjonalnie (integracja SmartThings)
+npx wrangler secret put SMARTTHINGS_CLIENT_SECRET   # opcjonalnie (integracja SmartThings)
 npx wrangler deploy
 ```
 
-Backend ma tez cron (konfiguracja w `server/wrangler.toml`), ktory co 15 minut
-zbiera pomiary energii z urzadzen Tuya (`device_energy_snapshots`).
+`SMARTTHINGS_REDIRECT_URI` nie jest sekretem — jest ustawiany w `[vars]` w `server/wrangler.toml`.
+
+Backend ma tez cron (konfiguracja w `server/wrangler.toml`) uruchamiany co 5 minut:
+obsluguje wylaczniki czasowe urzadzen IR oraz co 15 minut zbiera pomiary energii
+z urzadzen smart home (`device_energy_snapshots`).
 
 ### Frontend (Pages)
 
