@@ -12,6 +12,7 @@ function applyOrder(items, order) {
 import { AppHeader } from './AppHeader'
 import { AppFooter } from './AppFooter'
 import { TuyaIntegration } from './TuyaIntegration'
+import { SmartThingsIntegration } from './SmartThingsIntegration'
 import { SmartDeviceCard } from './SmartDeviceCard'
 import { EnergyReportExport } from './EnergyReportExport'
 import { AddSmartDeviceModal } from './AddSmartDeviceModal'
@@ -29,7 +30,7 @@ export const SmartDevicesView = () => {
   const [isOwner, setIsOwner] = useState(false)
   const {
     devices, statusById, loading, error,
-    refreshStatus, add, rename, setActive, linkPlug, remove, sendCommand,
+    refreshStatus, add, addSt, rename, setActive, linkPlug, remove, sendCommand, sendSt, sendStSetting,
   } = useSmartDevices()
   const [showAdd, setShowAdd] = useState(false)
   const [removeTarget, setRemoveTarget] = useState(null)
@@ -55,17 +56,21 @@ export const SmartDevicesView = () => {
 
   const refreshOne = async () => { await refreshStatus() }
 
-  // Urządzenia na podczerwień (Smart IR) to piloty — bez poboru mocy, wykresów i kosztów.
-  const energyDevices = devices.filter((d) => !String(d.deviceType || '').startsWith('ir_'))
+  // Raport energii dotyczy tylko gniazdek Tuya: piloty IR (bez poboru) i urządzenia
+  // SmartThings (pomiar dojdzie w Fazie 5) wykluczone.
+  const energyDevices = devices.filter(
+    (d) => d.provider !== 'smartthings' && !String(d.deviceType || '').startsWith('ir_'),
+  )
   // Gniazdka (do powiązania z pilotami IR — realny stan zestawu z poboru mocy).
-  const plugs = devices.filter((d) => !d.deviceType || d.deviceType === 'plug')
+  const plugs = devices.filter((d) => d.provider !== 'smartthings' && (!d.deviceType || d.deviceType === 'plug'))
 
-  // „Zestaw": piloty IR powiązane z gniazdkiem chowamy z płaskiej listy i wyświetlamy
-  // zagnieżdżone w kaflu gniazdka. Powiązanie liczy się tylko gdy gniazdko istnieje na liście.
+  // „Zestaw": gniazdko jest rodzicem. Każde urządzenie powiązane z gniazdkiem (pilot IR,
+  // ale też pralka/suszarka SmartThings) chowamy z płaskiej listy i pokazujemy zagnieżdżone
+  // w kaflu gniazdka. Powiązanie liczy się tylko gdy gniazdko istnieje na liście.
   const plugIds = new Set(plugs.map((p) => p.id))
   const remotesByPlug = {}
   for (const d of devices) {
-    if (String(d.deviceType || '').startsWith('ir_') && d.linkedPlugId && plugIds.has(d.linkedPlugId)) {
+    if (d.linkedPlugId && plugIds.has(d.linkedPlugId)) {
       (remotesByPlug[d.linkedPlugId] ||= []).push(d)
     }
   }
@@ -92,6 +97,9 @@ export const SmartDevicesView = () => {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Panel poświadczeń Tuya — pełna szerokość (owner-only, sam się ukrywa) */}
         <TuyaIntegration />
+
+        {/* Panel SmartThings (OAuth-In) — status widoczny dla wszystkich, akcje owner-only */}
+        <SmartThingsIntegration isOwner={isOwner} />
 
         {/* Sekcja urządzeń */}
         <div className="bg-slate-800/50 border border-slate-700/50 rounded-2xl p-6">
@@ -134,7 +142,7 @@ export const SmartDevicesView = () => {
                   key={device.id}
                   onDragOver={isDesktop ? (e) => e.preventDefault() : undefined}
                   onDrop={isDesktop ? (e) => { e.preventDefault(); handleDrop(device.id) } : undefined}
-                  className={`${span} ${draggingId === device.id ? 'opacity-50' : ''}`}
+                  className={`${span} flex flex-col ${draggingId === device.id ? 'opacity-50' : ''}`}
                 >
                   {/* Uchwyt przeciągania — tylko desktop (nie koliduje z suwakami/przyciskami w kaflu) */}
                   {isDesktop && (
@@ -161,6 +169,8 @@ export const SmartDevicesView = () => {
                       onLinkPlug={linkPlug}
                       onRemove={setRemoveTarget}
                       onSend={sendCommand}
+                      onSendSt={sendSt}
+                      onSendStSetting={sendStSetting}
                     />
                   </ErrorBoundary>
                 </div>
@@ -182,7 +192,7 @@ export const SmartDevicesView = () => {
       <AppFooter />
 
       {showAdd && (
-        <AddSmartDeviceModal onClose={() => setShowAdd(false)} onAdd={add} />
+        <AddSmartDeviceModal onClose={() => setShowAdd(false)} onAdd={add} onAddSt={addSt} />
       )}
 
       <ConfirmDialog

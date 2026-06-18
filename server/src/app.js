@@ -11,6 +11,12 @@ import {
   getRemoteKeys, sendRemoteKey,
 } from "./tuya/client.js";
 import { validateCommands, validateAcCommands } from "./tuya/commands.js";
+import { buildAuthorizeUrl, exchangeCodeForTokens } from "./smartthings/oauth.js";
+import { saveTokens, getFreshAccessToken } from "./smartthings/credentials.js";
+import { getStDevices, getStDevice, getStDeviceStatus, sendStCommand } from "./smartthings/client.js";
+import { summarizeDevices, inferDeviceType } from "./smartthings/devices.js";
+import { mapStStatus } from "./smartthings/status.js";
+import { buildStCommand, allowedStActions, buildStSettingCommand, allowedStSetting } from "./smartthings/commands.js";
 import {
   readFinanceFromRelational,
   writeFinanceToRelational,
@@ -1271,6 +1277,105 @@ app.delete("/api/tuya/credentials", authMiddleware, async (c) => {
   return c.body(null, 204);
 });
 
+// ============ SMARTTHINGS (OAuth-In, Faza 1) ============
+//
+// JEDEN OAuth-In SmartApp na apkę (SMARTTHINGS_CLIENT_ID/SECRET w env). Tokeny per
+// gospodarstwo zaszyfrowane w smartthings_credentials. Łączenie/rozłączanie owner-only;
+// status widoczny dla członków. Tokeny nigdy nie wracają do frontu.
+
+const SMARTTHINGS_SCOPES = ["r:locations:*", "r:devices:*", "x:devices:*"];
+
+function smartthingsRedirectUri(c) {
+  return getEnv(c, "SMARTTHINGS_REDIRECT_URI") || `${getApiBaseUrl(c)}/api/smartthings/callback`;
+}
+
+// Owner inicjuje OAuth → redirect na ekran zgody Samsung.
+app.get("/api/smartthings/connect", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+  const membership = await getMembershipWithOwner(sql, user.id);
+  if (!membership) return c.json({ error: "No household" }, 400);
+  if (membership.owner_id !== user.id) return c.json({ error: "forbidden_owner_only" }, 403);
+
+  const clientId = getEnv(c, "SMARTTHINGS_CLIENT_ID");
+  if (!clientId) return c.json({ error: "config_smartthings" }, 500);
+
+  const url = buildAuthorizeUrl({
+    clientId,
+    redirectUri: smartthingsRedirectUri(c),
+    scopes: SMARTTHINGS_SCOPES,
+    state: crypto.randomUUID(),
+  });
+  return c.redirect(url);
+});
+
+// Callback Samsung: wymiana code → tokeny → zapis zaszyfrowany. Redirect na front.
+app.get("/api/smartthings/callback", async (c) => {
+  const frontend = getEnv(c, "FRONTEND_URL") || "http://localhost:5173";
+  const fail = (st) => c.redirect(`${frontend}/?view=urzadzenia&st=${st}`);
+
+  if (c.req.query("error")) return fail("error");
+  const code = c.req.query("code");
+  if (!code) return fail("error");
+
+  try {
+    // User jest zalogowany (cookie leci przy top-level redirect) — ustal gospodarstwo.
+    const token = parseCookie(c.req.header("cookie"), "token");
+    const { payload } = await jwtVerify(token, getSecret(c));
+    const sql = getDb(c);
+    const [user] = await sql`SELECT id FROM users WHERE id = ${payload.userId}`;
+    if (!user) return fail("error");
+    const membership = await getMembershipWithOwner(sql, user.id);
+    if (!membership || membership.owner_id !== user.id) return fail("error");
+
+    const tokens = await exchangeCodeForTokens({
+      code,
+      clientId: getEnv(c, "SMARTTHINGS_CLIENT_ID"),
+      clientSecret: getEnv(c, "SMARTTHINGS_CLIENT_SECRET"),
+      redirectUri: smartthingsRedirectUri(c),
+    });
+
+    await saveTokens(sql, {
+      householdId: membership.household_id,
+      tokens,
+      scopes: tokens.scope,
+      createdBy: user.id,
+      rawKey: getFinanceDataKey(c),
+    });
+    return fail("connected");
+  } catch (err) {
+    console.error("[smartthings/callback]", err);
+    return fail(err?.code === "invalid_grant" ? "reconnect" : "error");
+  }
+});
+
+// Status połączenia — bez tokenów. Widoczny dla każdego członka gospodarstwa.
+app.get("/api/smartthings/status", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+  const membership = await getMembershipWithOwner(sql, user.id);
+  if (!membership) return c.json({ connected: false });
+  const [row] = await sql`
+    SELECT verified_at FROM smartthings_credentials WHERE household_id = ${membership.household_id}
+  `;
+  if (!row) return c.json({ connected: false });
+  return c.json({ connected: true, verifiedAt: toIso(row.verified_at) });
+});
+
+// Rozłączenie — owner-only. Kasuje poświadczenia (urządzenia ST dojdą w Fazie 2).
+app.delete("/api/smartthings/disconnect", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+  const membership = await getMembershipWithOwner(sql, user.id);
+  if (!membership) return c.json({ error: "No household" }, 400);
+  if (membership.owner_id !== user.id) return c.json({ error: "forbidden_owner_only" }, 403);
+  // Rozłączenie kasuje też urządzenia ST (RODO + nie zostawiamy martwych kart bez tokenów).
+  // Urządzenia Tuya zostają nietknięte.
+  await sql`DELETE FROM smart_devices WHERE household_id = ${membership.household_id} AND provider = 'smartthings'`;
+  await sql`DELETE FROM smartthings_credentials WHERE household_id = ${membership.household_id}`;
+  return c.body(null, 204);
+});
+
 // ============ SMART DEVICES (Tuya — Slice 2) ============
 //
 // N urządzeń per gospodarstwo. Poświadczenia (jedne) z tuya_credentials.
@@ -1293,7 +1398,10 @@ async function loadTuyaContext(c, sql, householdId) {
 function mapDevice(row) {
   return {
     id: row.id,
-    tuyaDeviceId: row.tuya_device_id,
+    provider: row.provider ?? "tuya",
+    externalDeviceId: row.external_device_id ?? row.tuya_device_id ?? null,
+    tuyaDeviceId: row.tuya_device_id ?? null,
+    capabilitiesJson: row.capabilities_json ?? null,
     displayName: row.display_name,
     productName: row.product_name ?? null,
     productId: row.product_id ?? null,
@@ -1424,6 +1532,216 @@ app.get("/api/smart-devices/discover", authMiddleware, async (c) => {
   return c.json({ devices });
 });
 
+// ============ SMART DEVICES (SmartThings — Faza 2) ============
+//
+// Osobne endpointy od Tuya (rozdzielona logika providerów; Tuya bez zmian). Tokeny ST
+// trzymane per gospodarstwo w smartthings_credentials (Faza 1). Import owner-only.
+
+/** Ważny access token ST dla gospodarstwa → ctx do wywołań klienta. Null gdy nie połączono. */
+async function loadStContext(c, sql, householdId) {
+  const accessToken = await getFreshAccessToken(sql, {
+    householdId,
+    clientId: getEnv(c, "SMARTTHINGS_CLIENT_ID"),
+    clientSecret: getEnv(c, "SMARTTHINGS_CLIENT_SECRET"),
+    rawKey: getFinanceDataKey(c),
+  });
+  if (!accessToken) return null;
+  return { accessToken };
+}
+
+/** Status jednego urządzenia ST przez mapper (czytelny UI-model, nie surowy JSON). */
+async function readStStatus(stCtx, row) {
+  const status = await getStDeviceStatus(stCtx, row.external_device_id);
+  return {
+    id: row.id,
+    provider: "smartthings",
+    externalDeviceId: row.external_device_id,
+    ok: true,
+    online: true,
+    ...mapStStatus(status, row.device_type),
+    // Dozwolone akcje sterowania (Faza 4) — UI rysuje tylko wspierane przyciski.
+    controls: allowedStActions(row.device_type, status),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/** Payload urządzenia ST, które nie odpowiedziało (offline / błąd ST). */
+function stOfflinePayload(row) {
+  return { id: row.id, provider: "smartthings", externalDeviceId: row.external_device_id, ok: false, online: false };
+}
+
+/**
+ * Koszt cyklu (Faza 5): pralka ST nie mierzy kWh sama — gdy powiązana z gniazdkiem Tuya,
+ * dokładamy bieżącą moc + zużycie dziś z tego gniazdka. Błąd gniazdka = stan ST bez poboru.
+ */
+async function enrichStWithPlug(base, row, tuyaCtx, sql) {
+  if (!row.linked_plug_id || !tuyaCtx) return base;
+  const [plug] = await sql`SELECT id, tuya_device_id FROM smart_devices WHERE id = ${row.linked_plug_id}`;
+  if (!plug) return base;
+  try {
+    const f = formatStatuses(await getDeviceStatus(tuyaCtx, plug.tuya_device_id));
+    const today = await getTodayStatsByDevice(sql, [plug.id]);
+    return { ...base, linked: true, plugW: f.powerW ?? 0, todayKwh: today[plug.id]?.kwh ?? 0 };
+  } catch (err) {
+    console.error("[smart-devices] ST plug read failed", plug.tuya_device_id, err);
+    return base;
+  }
+}
+
+/**
+ * Sterowanie urządzeniem ST (Faza 4) — member+. Waliduje względem capabilities (snapshot)
+ * i bramki zdalnego sterowania PRZED wysłaniem; loguje udaną komendę. Komunikaty PL.
+ */
+async function runStCommand(c, sql, user, row) {
+  let body;
+  try { body = await c.req.json(); } catch { return c.json({ error: "Invalid JSON body" }, 400); }
+  const action = body?.action;
+  // Dwa kontrakty: { action } (start/pauza/stop) lub { setting, value } (temperatura,
+  // wirowanie, płukanie, namaczanie, program — tylko pralka).
+  const isSetting = body?.setting != null;
+
+  // Walidacja względem capabilities — spoza zakresu nie idzie do ST.
+  const cmd = isSetting
+    ? buildStSettingCommand(row.device_type, body.setting, body.value)
+    : buildStCommand(row.device_type, action);
+  if (!cmd) {
+    return c.json({ error: "command_not_supported", message: "Tej akcji nie można wykonać na tym urządzeniu." }, 400);
+  }
+
+  const ctx = await loadStContext(c, sql, row.household_id);
+  if (!ctx) return c.json({ error: "smartthings_not_connected", message: "Konto SmartThings nie jest połączone." }, 400);
+
+  let status;
+  try {
+    status = await getStDeviceStatus(ctx, row.external_device_id);
+  } catch (err) {
+    console.error("[smart-devices] ST status before command failed", err);
+    return c.json({ error: "device_unreachable", message: "Urządzenie nie odpowiada (offline)." }, 502);
+  }
+
+  // Bramka Samsung: bez fizycznie włączonego zdalnego sterowania ST odrzuca komendy.
+  if (isSetting) {
+    const allowed = allowedStSetting(row.device_type, status, body.setting, body.value);
+    if (allowed.reason === "remote_control_disabled") {
+      return c.json({ error: "remote_control_disabled", message: "Włącz zdalne sterowanie na pralce, aby zmienić ustawienia z aplikacji." }, 409);
+    }
+    if (!allowed.ok) {
+      return c.json({ error: "setting_not_available", message: "Tej wartości nie można teraz ustawić (sprawdź program i stan pralki)." }, 409);
+    }
+  } else {
+    const allowed = allowedStActions(row.device_type, status);
+    if (!allowed.remoteControlEnabled) {
+      return c.json({ error: "remote_control_disabled", message: "Włącz zdalne sterowanie na pralce, aby sterować nią z aplikacji." }, 409);
+    }
+    if (!allowed.actions.includes(action)) {
+      return c.json({ error: "action_not_available", message: "Nie można teraz wykonać tej akcji (sprawdź stan urządzenia)." }, 409);
+    }
+  }
+
+  try {
+    await sendStCommand(ctx, row.external_device_id, cmd);
+  } catch (err) {
+    console.error("[smart-devices] ST command failed", err);
+    return c.json({ error: "command_failed", message: "Urządzenie nie przyjęło komendy (zajęte lub offline). Spróbuj ponownie." }, 502);
+  }
+
+  // Audyt po udanym wysłaniu (kto/kiedy/co). Błąd logu nie wywala akcji.
+  const logCode = isSetting ? `setting:${body.setting}` : action;
+  const logValue = isSetting ? String(body.value) : JSON.stringify(cmd);
+  try {
+    await sql`
+      INSERT INTO device_command_log (household_id, device_id, actor_id, code, value)
+      VALUES (${row.household_id}, ${row.id}, ${user.id}, ${logCode}, ${logValue})
+    `;
+  } catch (err) {
+    console.error("[device-command-log] ST insert failed", err);
+  }
+
+  return c.json({ ok: true });
+}
+
+// Discover ST: urządzenia z połączonego konta (owner-only). Już dodane w tym
+// gospodarstwie odfiltrowane. Statyczna ścieżka — bez kolizji z /:id (brak GET /:id).
+app.get("/api/smart-devices/discover-smartthings", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+  const membership = await getMembershipWithOwner(sql, user.id);
+  if (!membership) return c.json({ error: "No household" }, 400);
+  if (membership.owner_id !== user.id) return c.json({ error: "forbidden_owner_only" }, 403);
+
+  const ctx = await loadStContext(c, sql, membership.household_id);
+  if (!ctx) return c.json({ error: "smartthings_not_connected" }, 400);
+
+  let raw;
+  try {
+    raw = await getStDevices(ctx);
+  } catch (err) {
+    console.error("[smart-devices] ST discover failed", err);
+    if (err?.status === 401) return c.json({ error: "reconnect" }, 400);
+    return c.json({ error: "smartthings_unavailable" }, 502);
+  }
+
+  const added = await sql`
+    SELECT external_device_id FROM smart_devices
+    WHERE household_id = ${membership.household_id} AND provider = 'smartthings'
+  `;
+  const addedIds = new Set(added.map((r) => r.external_device_id));
+  const devices = summarizeDevices({ items: raw }).filter((d) => !addedIds.has(d.deviceId));
+  return c.json({ devices });
+});
+
+// Dodanie urządzenia ST (owner-only): profil + snapshot capabilities → karta provider=smartthings.
+app.post("/api/smart-devices/smartthings", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+
+  let body;
+  try { body = await c.req.json(); } catch { return c.json({ error: "Invalid JSON body" }, 400); }
+  if (typeof body?.externalDeviceId !== "string" || !body.externalDeviceId.trim()) {
+    return c.json({ error: "externalDeviceId is required" }, 400);
+  }
+  const externalDeviceId = body.externalDeviceId.trim();
+
+  const membership = await getMembershipWithOwner(sql, user.id);
+  if (!membership) return c.json({ error: "No household" }, 400);
+  if (membership.owner_id !== user.id) return c.json({ error: "forbidden_owner_only" }, 403);
+
+  // Duplikat (UNIQUE(provider, external_device_id)) — to samo urządzenie w jakimkolwiek gospodarstwie.
+  const [dupe] = await sql`
+    SELECT 1 FROM smart_devices WHERE provider = 'smartthings' AND external_device_id = ${externalDeviceId}
+  `;
+  if (dupe) return c.json({ error: "device_already_linked" }, 409);
+
+  const ctx = await loadStContext(c, sql, membership.household_id);
+  if (!ctx) return c.json({ error: "smartthings_not_connected" }, 400);
+
+  let device;
+  try {
+    device = await getStDevice(ctx, externalDeviceId);
+  } catch (err) {
+    console.error("[smart-devices] ST getDevice failed", err);
+    return c.json({ error: "device_not_found_in_smartthings" }, 404);
+  }
+
+  const displayName =
+    typeof body.displayName === "string" && body.displayName.trim()
+      ? body.displayName.trim()
+      : device?.label || device?.name || externalDeviceId;
+  const deviceType = inferDeviceType(device);
+
+  const [row] = await sql`
+    INSERT INTO smart_devices
+      (household_id, provider, external_device_id, display_name, product_name,
+       device_type, capabilities_json, created_by)
+    VALUES
+      (${membership.household_id}, 'smartthings', ${externalDeviceId}, ${displayName},
+       ${device?.deviceManufacturerCode ?? device?.manufacturerName ?? null},
+       ${deviceType}, ${JSON.stringify(device?.components ?? [])}, ${user.id})
+    RETURNING *
+  `;
+  return c.json(mapDevice(row), 201);
+});
+
 // Batch status wszystkich aktywnych urządzeń (member+). Jeden błąd nie wywala reszty.
 app.get("/api/smart-devices/status", authMiddleware, async (c) => {
   const user = c.get("user");
@@ -1434,32 +1752,57 @@ app.get("/api/smart-devices/status", authMiddleware, async (c) => {
   if (!membership) return c.json({ statuses: [] });
 
   const rows = await sql`
-    SELECT id, tuya_device_id, device_type, ir_parent_id FROM smart_devices
+    SELECT id, provider, external_device_id, tuya_device_id, device_type, ir_parent_id, linked_plug_id FROM smart_devices
     WHERE household_id = ${membership.household_id} AND is_active = true
     ORDER BY created_at ASC
   `;
   if (rows.length === 0) return c.json({ statuses: [] });
 
-  const ctx = await loadTuyaContext(c, sql, membership.household_id);
-  if (!ctx) return c.json({ error: "tuya_not_configured" }, 400);
+  const tuyaRows = rows.filter((r) => r.provider !== "smartthings");
+  const stRows = rows.filter((r) => r.provider === "smartthings");
 
-  const todayByDevice = await getTodayStatsByDevice(sql, rows.map((r) => r.id));
-  const statuses = await Promise.all(
-    rows.map(async (r) => {
-      try {
-        const today = todayByDevice[r.id] ?? { kwh: 0, uptimeMin: 0 };
-        return {
-          ...(await readDeviceStatus(ctx, r, sql)),
-          todayKwh: today.kwh,
-          todayUptimeMin: today.uptimeMin,
-        };
-      } catch (err) {
-        console.error("[smart-devices] status failed", r.tuya_device_id, err);
-        return { id: r.id, tuyaDeviceId: r.tuya_device_id, ok: false, online: false };
-      }
-    }),
-  );
-  return c.json({ statuses });
+  // Tuya: jeden kontekst + statystyki energii (jak dotąd). 400 tylko gdy są urządzenia Tuya.
+  // Kontekst Tuya współdzielony z odczytem gniazdek powiązanych z urządzeniami ST (koszt).
+  let tuyaCtx = null;
+  let tuyaStatuses = [];
+  if (tuyaRows.length > 0) {
+    tuyaCtx = await loadTuyaContext(c, sql, membership.household_id);
+    if (!tuyaCtx) return c.json({ error: "tuya_not_configured" }, 400);
+    const todayByDevice = await getTodayStatsByDevice(sql, tuyaRows.map((r) => r.id));
+    tuyaStatuses = await Promise.all(
+      tuyaRows.map(async (r) => {
+        try {
+          const today = todayByDevice[r.id] ?? { kwh: 0, uptimeMin: 0 };
+          return { ...(await readDeviceStatus(tuyaCtx, r, sql)), todayKwh: today.kwh, todayUptimeMin: today.uptimeMin };
+        } catch (err) {
+          console.error("[smart-devices] status failed", r.tuya_device_id, err);
+          return { id: r.id, tuyaDeviceId: r.tuya_device_id, ok: false, online: false };
+        }
+      }),
+    );
+  } else if (stRows.some((r) => r.linked_plug_id)) {
+    // Brak własnych urządzeń Tuya, ale ST powiązane z gniazdkiem → potrzebny kontekst Tuya.
+    tuyaCtx = await loadTuyaContext(c, sql, membership.household_id);
+  }
+
+  // SmartThings: jeden kontekst, mapper per urządzenie; błąd jednego = offline, nie wywala reszty.
+  let stStatuses = [];
+  if (stRows.length > 0) {
+    const stCtx = await loadStContext(c, sql, membership.household_id);
+    stStatuses = await Promise.all(
+      stRows.map(async (r) => {
+        if (!stCtx) return stOfflinePayload(r);
+        try {
+          return await enrichStWithPlug(await readStStatus(stCtx, r), r, tuyaCtx, sql);
+        } catch (err) {
+          console.error("[smart-devices] ST status failed", r.external_device_id, err);
+          return stOfflinePayload(r);
+        }
+      }),
+    );
+  }
+
+  return c.json({ statuses: [...tuyaStatuses, ...stStatuses] });
 });
 
 app.get("/api/smart-devices/:id/status", authMiddleware, async (c) => {
@@ -1469,6 +1812,18 @@ app.get("/api/smart-devices/:id/status", authMiddleware, async (c) => {
 
   const result = await loadDeviceInHousehold(sql, user.id, id);
   if (result.error) return c.json(result.error.body, result.error.status);
+
+  if (result.row.provider === "smartthings") {
+    const stCtx = await loadStContext(c, sql, result.row.household_id);
+    if (!stCtx) return c.json({ error: "smartthings_not_connected" }, 400);
+    try {
+      const tuyaCtx = result.row.linked_plug_id ? await loadTuyaContext(c, sql, result.row.household_id) : null;
+      return c.json(await enrichStWithPlug(await readStStatus(stCtx, result.row), result.row, tuyaCtx, sql));
+    } catch (err) {
+      console.error("[smart-devices] single ST status failed", err);
+      return c.json(stOfflinePayload(result.row));
+    }
+  }
 
   const ctx = await loadTuyaContext(c, sql, result.row.household_id);
   if (!ctx) return c.json({ error: "tuya_not_configured" }, 400);
@@ -1778,10 +2133,10 @@ app.post("/api/smart-devices", authMiddleware, async (c) => {
 
   const [row] = await sql`
     INSERT INTO smart_devices
-      (household_id, tuya_device_id, display_name, product_name, product_id,
+      (household_id, provider, external_device_id, tuya_device_id, display_name, product_name, product_id,
        device_type, ir_parent_id, functions_json, created_by)
     VALUES
-      (${membership.household_id}, ${tuyaDeviceId}, ${displayName},
+      (${membership.household_id}, 'tuya', ${tuyaDeviceId}, ${tuyaDeviceId}, ${displayName},
        ${info?.product_name ?? null}, ${info?.product_id ?? null},
        ${deviceType}, ${irParentId},
        ${functions == null ? null : JSON.stringify(functions)}, ${user.id})
@@ -1824,11 +2179,13 @@ app.patch("/api/smart-devices/:id", authMiddleware, async (c) => {
       : result.row.display_name;
   const nextActive = typeof body.isActive === "boolean" ? body.isActive : result.row.is_active;
 
-  // Powiązanie z gniazdkiem (tylko urządzenia IR; gniazdko musi być w tym samym
-  // gospodarstwie i być gniazdkiem). `linkedPlugId: null` rozłącza. Pominięte = bez zmian.
+  // Powiązanie z gniazdkiem: piloty IR (realny stan zestawu z poboru) oraz urządzenia
+  // SmartThings (koszt cyklu — pralka ST nie mierzy kWh sama, dane z gniazdka Tuya).
+  // Gniazdko musi być w tym samym gospodarstwie i być gniazdkiem. `null` rozłącza.
   let nextPlug = result.row.linked_plug_id;
   if ("linkedPlugId" in body) {
-    if (!IR_TIMER_TYPES.has(result.row.device_type)) return c.json({ error: "link_not_supported" }, 400);
+    const canLink = IR_TIMER_TYPES.has(result.row.device_type) || result.row.provider === "smartthings";
+    if (!canLink) return c.json({ error: "link_not_supported" }, 400);
     if (body.linkedPlugId == null) {
       nextPlug = null;
     } else {
@@ -1873,11 +2230,16 @@ app.post("/api/smart-devices/:id/commands", authMiddleware, async (c) => {
   const sql = getDb(c);
   const id = c.req.param("id");
 
-  let body;
-  try { body = await c.req.json(); } catch { return c.json({ error: "Invalid JSON body" }, 400); }
-
   const result = await loadDeviceInHousehold(sql, user.id, id);
   if (result.error) return c.json(result.error.body, result.error.status);
+
+  // SmartThings: osobny kontrakt (action: start/pauza/stop) + bramka zdalnego sterowania.
+  if (result.row.provider === "smartthings") {
+    return runStCommand(c, sql, user, result.row);
+  }
+
+  let body;
+  try { body = await c.req.json(); } catch { return c.json({ error: "Invalid JSON body" }, 400); }
 
   const commands = body?.commands;
   const isIrAc = result.row.device_type === "ir_ac";

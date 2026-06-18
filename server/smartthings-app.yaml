@@ -1,0 +1,18 @@
+# Definicja OAuth-In SmartApp dla `smartthings apps:create -i smartthings-app.yaml`.
+# JEDNA aplikacja na całą apkę (nie per user). Zwraca Client ID + Secret (secret RAZ!).
+# Po utworzeniu plik możesz zostawić w repo jako dokumentację (nie zawiera sekretów).
+appName: homecashflow
+displayName: HomeCashflow
+description: Zarządzanie urządzeniami domowymi w HomeCashflow
+appType: API_ONLY
+classifications:
+  - CONNECTED_SERVICE
+oauth:
+  clientName: HomeCashflow
+  scope:
+    - r:locations:*
+    - r:devices:*
+    - x:devices:*
+  redirectUris:
+    - https://api.homecashflow.org/api/smartthings/callback
+    - http://localhost:3000/api/smartthings/callback

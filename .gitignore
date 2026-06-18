@@ -9,6 +9,9 @@ dist/
 .env.local
 .env.production
 server/.env.production
+# Wrangler local secrets (gdyby kiedyś użyć `wrangler dev`; projekt zwykle czyta .env.local)
+.dev.vars
+server/.dev.vars
 
 # IDE
 .vscode/

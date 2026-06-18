@@ -1,0 +1,10 @@
+{
+  "components": {
+    "main": {
+      "switch": { "switch": { "value": "on" } },
+      "tvChannel": { "tvChannel": { "value": "5" }, "tvChannelName": { "value": "TVP1" } },
+      "audioVolume": { "volume": { "value": 15, "unit": "%" } },
+      "mediaPlayback": { "playbackStatus": { "value": "playing" } }
+    }
+  }
+}

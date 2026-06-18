@@ -6,6 +6,7 @@ import { app } from './app.js'
 import { collectEnergySnapshots } from './smart-devices-sync.js'
 import { fireDueTimers } from './device-timers.js'
 import { decodeFinanceDataKey } from './finance-crypto.js'
+import { refreshExpiringTokens } from './smartthings/credentials.js'
 
 export default {
   fetch: app.fetch,
@@ -31,6 +32,21 @@ export default {
           console.log('[cron] energy snapshots', res)
         } catch (err) {
           console.error('[cron] energy snapshots failed', err)
+        }
+      }
+
+      // SmartThings: odświeżanie tokenów ~co 12h (cron leci co 5 min).
+      const st = new Date(event.scheduledTime)
+      if (st.getHours() % 12 === 0 && st.getMinutes() < 5) {
+        try {
+          const res = await refreshExpiringTokens(sql, {
+            clientId: env.SMARTTHINGS_CLIENT_ID,
+            clientSecret: env.SMARTTHINGS_CLIENT_SECRET,
+            rawKey,
+          })
+          if (res.due) console.log('[cron] smartthings tokens', res)
+        } catch (err) {
+          console.error('[cron] smartthings refresh failed', err)
         }
       }
     })())

@@ -1,0 +1,10 @@
+{
+  "components": {
+    "main": {
+      "switch": { "switch": { "value": "on" } },
+      "airConditionerMode": { "airConditionerMode": { "value": "cool" } },
+      "thermostatCoolingSetpoint": { "coolingSetpoint": { "value": 22, "unit": "C" } },
+      "temperatureMeasurement": { "temperature": { "value": 25, "unit": "C" } }
+    }
+  }
+}

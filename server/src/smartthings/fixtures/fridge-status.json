@@ -1,0 +1,12 @@
+{
+  "components": {
+    "main": {
+      "refrigeration": {
+        "rapidCooling": { "value": "off" },
+        "rapidFreezing": { "value": "off" }
+      },
+      "temperatureMeasurement": { "temperature": { "value": 4, "unit": "C" } },
+      "contactSensor": { "contact": { "value": "closed" } }
+    }
+  }
+}

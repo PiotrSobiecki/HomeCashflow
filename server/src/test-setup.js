@@ -7,6 +7,12 @@ dotenv.config({ path: join(root, '.env.local') })
 dotenv.config({ path: join(root, '.env') })
 dotenv.config({ path: join(here, '..', '.env') })
 
+// NIGDY nie wysyłamy realnych emaili z testów. Helper addMemberToHousehold woła
+// /api/household/invite, które przy ustawionym RESEND_API_KEY wysyłało prawdziwe
+// zaproszenia na mem-…@test.com (widoczne w dashboardzie Resend, psuło reputację).
+// Route degraduje się łagodnie bez klucza — zaproszenie i tak trafia do bazy.
+delete process.env.RESEND_API_KEY
+
 // Testy zawsze pukają w DATABASE_URL_TEST (osobny Neon branch, izolowany od deva).
 // Jeśli nie ustawione — fail-fast zamiast pomyłkowego wipe dev DB.
 if (process.env.DATABASE_URL_TEST) {

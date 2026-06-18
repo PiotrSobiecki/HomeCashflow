@@ -210,6 +210,39 @@ export const deleteTuyaCredentials = async () => {
   return true;
 };
 
+// ===== SmartThings (OAuth-In, Faza 1) =====
+
+/** GET status połączenia SmartThings → { connected, verifiedAt }. */
+export const fetchSmartThingsStatus = async () => {
+  const res = await fetch(`${API_URL}/api/smartthings/status`, {
+    method: 'GET',
+    credentials: 'include',
+    headers: { Accept: 'application/json' },
+  });
+  if (!res.ok) {
+    const err = new Error(`GET /api/smartthings/status: ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
+  return res.json();
+};
+
+/** Inicjuje OAuth — pełne przekierowanie przeglądarki na backend (cookie musi polecieć). */
+export const connectSmartThings = () => {
+  window.location.href = `${API_URL}/api/smartthings/connect`;
+};
+
+export const disconnectSmartThings = async () => {
+  const res = await fetch(`${API_URL}/api/smartthings/disconnect`, {
+    method: 'DELETE',
+    credentials: 'include',
+  });
+  if (!res.ok && res.status !== 204) {
+    throw new Error(`DELETE /api/smartthings/disconnect: ${res.status}`);
+  }
+  return true;
+};
+
 // ===== Urządzenia Tuya (Slice 2) =====
 
 const jsonOrThrow = async (res, label) => {
@@ -218,6 +251,7 @@ const jsonOrThrow = async (res, label) => {
     const err = new Error(data.error || `${label}: ${res.status}`);
     err.code = data.error;
     err.status = res.status;
+    err.serverMessage = data.message; // czytelny komunikat PL z backendu (jeśli jest)
     throw err;
   }
   return data;
@@ -291,6 +325,28 @@ export const addSmartDevice = async (tuyaDeviceId) => {
   return jsonOrThrow(res, 'POST /api/smart-devices');
 };
 
+// ===== Urządzenia SmartThings (Faza 2) =====
+
+/** Lista urządzeń z połączonego konta SmartThings (już dodane odfiltrowane). */
+export const discoverSmartThingsDevices = async () => {
+  const res = await fetch(`${API_URL}/api/smart-devices/discover-smartthings`, {
+    credentials: 'include',
+    headers: { Accept: 'application/json' },
+  });
+  const data = await jsonOrThrow(res, 'GET /api/smart-devices/discover-smartthings');
+  return Array.isArray(data.devices) ? data.devices : [];
+};
+
+export const addSmartThingsDevice = async (externalDeviceId, displayName) => {
+  const res = await fetch(`${API_URL}/api/smart-devices/smartthings`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ externalDeviceId, displayName }),
+  });
+  return jsonOrThrow(res, 'POST /api/smart-devices/smartthings');
+};
+
 export const patchSmartDevice = async (id, body) => {
   const res = await fetch(`${API_URL}/api/smart-devices/${id}`, {
     method: 'PATCH',
@@ -320,6 +376,28 @@ export const sendDeviceCommands = async (id, commands) => {
     body: JSON.stringify({ commands }),
   });
   return jsonOrThrow(res, 'POST /api/smart-devices/commands');
+};
+
+/** Komenda sterująca urządzenia SmartThings: action = 'start' | 'pause' | 'stop'. */
+export const sendStCommand = async (id, action) => {
+  const res = await fetch(`${API_URL}/api/smart-devices/${id}/commands`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ action }),
+  });
+  return jsonOrThrow(res, 'POST /api/smart-devices/commands (ST)');
+};
+
+/** Zmiana ustawienia cyklu pralki ST: setting = temperature|spin|rinse|bubbleSoak|cycle. */
+export const sendStSetting = async (id, setting, value) => {
+  const res = await fetch(`${API_URL}/api/smart-devices/${id}/commands`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ setting, value }),
+  });
+  return jsonOrThrow(res, 'POST /api/smart-devices/commands (ST setting)');
 };
 
 export const fetchIrKeys = async (id) => {

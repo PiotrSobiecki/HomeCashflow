@@ -106,10 +106,13 @@ async function countCommandLog(deviceRowId) {
 
 // reportedAt = czas raportu add_ele (DP `time`). Domyślnie = recorded_at; przekaż ten
 // sam reportedAt w kilku wierszach, by zasymulować zatrzaśnięty "cień" (liczy się raz).
+// ON CONFLICT DO NOTHING jak w realnym syncu (smart-devices-sync.js) — paczka add_ele
+// z tym samym event_time wpada raz (idempotentne między rundami crona).
 async function insertSnapshot(deviceId, { at, powerW, energyKwh, reportedAt }) {
   await sql`
     INSERT INTO device_energy_snapshots (device_id, recorded_at, power_w, energy_kwh, energy_reported_at, switch_on, is_online)
     VALUES (${deviceId}, ${at}, ${powerW}, ${energyKwh}, ${reportedAt === undefined ? at : reportedAt}, true, true)
+    ON CONFLICT (device_id, energy_reported_at) WHERE energy_reported_at IS NOT NULL DO NOTHING
   `
 }
 
