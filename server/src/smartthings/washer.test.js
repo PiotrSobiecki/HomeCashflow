@@ -36,7 +36,10 @@ describe('readWasherSettings', () => {
     const s = readWasherSettings(fixture('washer-status.json'))
     const byCode = Object.fromEntries(s.cycle.options.map((o) => [o.value, o.label]))
     expect(byCode['1C']).toBe('Eco 40-60') // potwierdzone przez usera
-    expect(byCode['26']).toBe('Wełna')     // pewne po parametrach (spin 400)
+    expect(byCode['28']).toBe('Wirowanie') // pewne po parametrach (bez płukania)
+    // Kolejność jak na pokrętle: Eco 40-60 pierwsze, Kolory drugie.
+    expect(s.cycle.options[0].value).toBe('1C')
+    expect(s.cycle.options[1].value).toBe('21')
   })
 
   it('falls back to a param description for an unknown course code', () => {

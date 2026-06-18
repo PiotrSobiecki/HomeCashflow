@@ -75,29 +75,41 @@ const BUBBLE_LABEL = { on: 'Włączone', off: 'Wyłączone' }
 //   27 = Płukanie i wirowanie (bez prania, temp auto). RESZTA = best-guess po parametrach,
 //   do weryfikacji na sprzęcie (user poprawia w UI; potwierdzone wpisy lądują tu na stałe).
 const COURSE_LABEL = {
-  '1C': 'Eco 40-60',          // ✓ pewne (user)
-  26: 'Wełna',                // ✓ pewne (spin 400)
+  // ✓ potwierdzone przez usera (na sprzęcie) lub jednoznaczne po parametrach
+  '1C': 'Eco 40-60',          // ✓ user
+  '1B': 'Bawełna',            // ✓ user
+  '1E': 'Pranie szybkie 15',  // ✓ user
+  '1F': 'Ekonomiczne',        // ✓ user
+  26: 'Delikatne',            // ✓ user
+  20: 'Higieniczna para',     // ✓ user
+  24: 'Pościel',              // ✓ user
+  25: 'Syntetyki',            // ✓ user
+  32: 'Koszule',              // ✓ user
+  22: 'Wełna',                // ✓ user
   28: 'Wirowanie',            // ✓ pewne (bez płukania)
   '3A': 'Czyszczenie bębna',  // ✓ pewne (70° zablokowane)
   27: 'Płukanie i wirowanie', // ✓ pewne (bez prania, auto)
-  // — poniżej best-guess (do potwierdzenia) —
-  '2E': 'Higieniczna para',   // 90° (najgorętszy)
-  20: 'Bawełna',              // 60°/1400/4× płuk
-  33: 'Ręczniki',             // 60°/1400/4× płuk
-  '1B': 'Dziecięce',          // do 90°/1200/4× płuk
-  24: 'Syntetyki',            // 40°/800/3× płuk
-  '2A': 'Jeansy',             // 30°/800/4× płuk (extra płukanie)
-  '2F': 'Odzież sportowa',    // 30°/800/3× płuk
-  '1E': 'Koszule',            // 30°/1200/3× płuk
-  '1F': 'Delikatne',          // tylko zimna (najdelikatniejszy)
-  30: 'Kolory',               // 40–60°/1400/2× płuk
-  34: 'Pościel',              // 40–60°/1400/3× płuk
-  25: 'Mieszane',             // 40–60°/1200/2× płuk
-  32: 'Ekonomiczne',          // 30–60°/800 (niskie wir.)
-  22: 'Pranie szybkie 15',    // 40°/800/2× płuk (proste)
-  23: 'Ciche pranie',         // 30°/1200/3× płuk
-  21: 'Pochmurny dzień',      // 30°/1200/4× płuk
-  '2D': 'Odzież wierzchnia',  // 40°/800/2× płuk
+  // — poniżej: dopasowane po parametrach i zweryfikowane przez usera na sprzęcie —
+  '2E': 'Dziecięce',          // ? 90°/1400/4× płuk
+  34: 'Mieszane',             // ? 40–60°/1400/3× płuk
+  33: 'Ręczniki',             // ? 60°/1400/4× płuk
+  '2A': 'Jeansy',             // ? 30°/800/4× płuk
+  '2F': 'Odzież sportowa',    // ? 30°/800/3× płuk
+  30: 'Pochmurny dzień',      // ? user (zamiana z 21)
+  23: 'Odzież wierzchnia',    // ? user (zamiana z 2D)
+  21: 'Kolory',               // ? zamiana z 30
+  '2D': 'Ciche pranie',       // ? zamiana z 23
+}
+
+// Kolejność programów w UI wg pokrętła pralki (lista podana przez usera) — ST zwraca kursy
+// w innej kolejności niż panel. Kody spoza listy lądują na końcu (zachowują kolejność z ST).
+const CYCLE_ORDER = [
+  '1C', '21', '33', '1E', '1B', '27', '3A', '1F', '25', '26', '24',
+  '32', '20', '22', '23', '2F', '2A', '2E', '2D', '34', '30', '28',
+]
+const cycleRank = (v) => {
+  const i = CYCLE_ORDER.indexOf(String(v))
+  return i === -1 ? CYCLE_ORDER.length : i
 }
 
 /** Skrócona etykieta wartości (do opisu kursu): bez „°C"/„obr." żeby zmieścić w jednej linii. */
@@ -164,6 +176,8 @@ export function readWasherSettings(status, customLabels) {
     const def = WASHER_SETTINGS[setting]
     const raw = supportedValues(status, setting).filter((v) => v !== 'none')
     if (!raw.length) continue
+    // Programy: kolejność jak na pokrętle (CYCLE_ORDER), nie jak zwraca ST.
+    if (setting === 'cycle') raw.sort((a, b) => cycleRank(a) - cycleRank(b))
     const current = setting === 'cycle'
       ? courseCode(attr(status, def.capability, def.currentAttr))
       : attr(status, def.capability, def.currentAttr)
