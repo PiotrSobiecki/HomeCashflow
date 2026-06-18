@@ -1,6 +1,6 @@
 # Regulamin aplikacji HomeCashflow
 
-Data wejscia w zycie: 2026-04-06 (ostatnia aktualizacja: 2026-06-11)
+Data wejscia w zycie: 2026-04-06 (ostatnia aktualizacja: 2026-06-18)
 
 ## 1. Postanowienia ogolne
 
@@ -22,8 +22,9 @@ Data wejscia w zycie: 2026-04-06 (ostatnia aktualizacja: 2026-06-11)
    - prowadzenie budzetu domowego,
    - zapraszanie czlonkow gospodarstwa,
    - korzystanie z trybu goscia (bez konta),
-   - integracje z urzadzeniami smart home (Tuya): podglad statusu, sterowanie
-     i pomiary zuzycia energii,
+   - integracje z urzadzeniami smart home (Tuya oraz SmartThings/Samsung):
+     podglad statusu, sterowanie (w tym urzadzeniami AGD, np. pralka) i pomiary
+     zuzycia energii,
    - generowanie raportow zuzycia energii (PDF do pobrania lub wysylki na
      adres e-mail Uzytkownika).
 2. Funkcje moga byc rozwijane, zmieniane lub czasowo ograniczane.
@@ -46,13 +47,16 @@ Data wejscia w zycie: 2026-04-06 (ostatnia aktualizacja: 2026-06-11)
 2. Zaproszony Uzytkownik musi zalogowac sie adresem e-mail zgodnym z adresem zaproszenia.
 3. Wlasciciel moze usuwac czlonkow gospodarstwa zgodnie z dostepnymi funkcjami Aplikacji.
 
-## 7. Integracja z urzadzeniami smart home (Tuya)
+## 7. Integracja z urzadzeniami smart home (Tuya, SmartThings)
 
-1. Integracja jest opcjonalna i wymaga podania przez Wlasciciela gospodarstwa wlasnych poswiadczen API Tuya (Client ID i Client Secret z projektu na iot.tuya.com).
-2. Poswiadczenia Tuya sa szyfrowane przed zapisem do bazy danych.
-3. Sterowanie urzadzeniami i odczyt pomiarow odbywa sie za posrednictwem uslug chmurowych Tuya; Aplikacja nie odpowiada za ich dostepnosc ani dzialanie.
-4. Pomiary zuzycia energii, czasu poboru mocy oraz wyliczane koszty maja charakter szacunkowy i zaleza od danych raportowanych przez urzadzenia.
-5. Uzytkownik ponosi odpowiedzialnosc za skutki zdalnego sterowania urzadzeniami podlaczonymi do Aplikacji.
+1. Integracje z urzadzeniami smart home sa opcjonalne.
+2. Tuya: integracja wymaga podania przez Wlasciciela gospodarstwa wlasnych poswiadczen API Tuya (Client ID i Client Secret z projektu na iot.tuya.com). Poswiadczenia sa szyfrowane przed zapisem do bazy danych.
+3. SmartThings (Samsung): integracja wymaga polaczenia konta Samsung przez logowanie OAuth. Aplikacja przechowuje tokeny dostepu (access i refresh) w postaci zaszyfrowanej i wykorzystuje je wylacznie do odczytu statusu oraz sterowania urzadzeniami w zakresie nadanych uprawnien (scope).
+4. Polaczenie z Tuya lub SmartThings mozna w kazdej chwili odlaczyc w Aplikacji (co usuwa zapisane poswiadczenia/tokeny); dostep nadany przez OAuth mozna dodatkowo cofnac w ustawieniach konta Samsung lub Tuya.
+5. Sterowanie urzadzeniami i odczyt pomiarow odbywa sie za posrednictwem uslug chmurowych Tuya oraz Samsung/SmartThings; Aplikacja nie odpowiada za ich dostepnosc ani dzialanie.
+6. Pomiary zuzycia energii, czasu poboru mocy oraz wyliczane koszty maja charakter szacunkowy i zaleza od danych raportowanych przez urzadzenia.
+7. Nazwy programow urzadzen AGD (np. pralki) moga byc przyblizone lub edytowane przez Uzytkownika, poniewaz dostawcy nie zawsze udostepniaja ich oryginalne nazwy.
+8. Uzytkownik ponosi odpowiedzialnosc za skutki zdalnego sterowania urzadzeniami podlaczonymi do Aplikacji.
 
 ## 8. Zasady korzystania
 

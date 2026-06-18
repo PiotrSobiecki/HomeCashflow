@@ -37,7 +37,8 @@ Ta instrukcja opisuje szybki start i najwazniejsze scenariusze pracy z aplikacja
 ## 6. Inteligentne urzadzenia (zakladka "Urzadzenia")
 
 Zakladka pozwala podlaczyc urzadzenia smart home z chmury Tuya (np. gniazdka
-z pomiarem energii) i sledzic ich zuzycie pradu.
+z pomiarem energii) oraz urzadzenia SmartThings/Samsung (np. AGD: pralka,
+suszarka, zmywarka) i sledzic ich zuzycie pradu.
 
 ### 6.1 Polaczenie konta Tuya (tylko wlasciciel gospodarstwa)
 
@@ -48,18 +49,32 @@ z pomiarem energii) i sledzic ich zuzycie pradu.
 4. W formularzu "Zmien dane" mozesz ustawic cene za 1 kWh (w zl) - na jej
    podstawie aplikacja liczy koszty energii.
 
-### 6.2 Praca z urzadzeniami
+### 6.2 Polaczenie konta SmartThings (tylko wlasciciel gospodarstwa)
 
-1. Wlasciciel dodaje urzadzenia przyciskiem "Dodaj urzadzenie" (lista z konta Tuya).
+1. Urzadzenia musza byc wczesniej dodane w aplikacji SmartThings (Samsung).
+2. W zakladce "Urzadzenia" wybierz polaczenie SmartThings i zaloguj sie kontem
+   Samsung (OAuth) - zatwierdzasz zakres uprawnien do odczytu statusu i sterowania.
+3. Aplikacja przechowuje tokeny dostepu w postaci zaszyfrowanej; mozesz w kazdej
+   chwili odlaczyc konto, a dostep cofnac takze w ustawieniach konta Samsung.
+4. Pralka/AGD: sterowanie (start/pauza/stop, temperatura, wirowanie, plukanie,
+   namaczanie, program) dziala tylko przy wlaczonym na urzadzeniu "zdalnym
+   sterowaniu" i gdy urzadzenie nie jest w trakcie cyklu.
+5. Nazwy programow pralki mozna nadpisac wlasnymi (przycisk "Nazwy programow"),
+   bo SmartThings nie zawsze udostepnia ich oryginalne nazwy.
+
+### 6.3 Praca z urzadzeniami
+
+1. Wlasciciel dodaje urzadzenia przyciskiem "Dodaj urzadzenie" (lista z konta
+   Tuya lub SmartThings).
 2. Karta urzadzenia pokazuje status na zywo: moc, napiecie, zuzycie od polnocy
-   oraz szacowany czas poboru mocy w danym dniu.
+   oraz szacowany czas poboru mocy w danym dniu (dla AGD takze stan i ustawienia cyklu).
 3. Urzadzeniem mozna sterowac (np. wlaczyc/wylaczyc), o ile jest online.
 4. Wykres zuzycia ma zakresy 7/30/90 dni i 1 rok oraz kafelki: zuzycie w okresie,
    szczyt mocy i koszt (gdy ustawiona jest cena za 1 kWh).
 5. Status odswieza sie automatycznie co 30 sekund, wykresy co 10 minut;
    przycisk "Odswiez" wymusza natychmiastowe odswiezenie.
 
-### 6.3 Raport zuzycia (PDF)
+### 6.4 Raport zuzycia (PDF)
 
 1. Panel "Raport zuzycia" znajduje sie na dole zakladki.
 2. Wybierz zakres dat (maksymalnie rok) i urzadzenia z listy rozwijanej.
@@ -85,7 +100,12 @@ z pomiarem energii) i sledzic ich zuzycie pradu.
 4. Urzadzenie Tuya pokazuje "Brak polaczenia":
    - sprawdz, czy urzadzenie jest online w aplikacji Tuya Smart / Smart Life,
    - zweryfikuj poswiadczenia i region w panelu "Integracja Tuya".
-5. Brak kosztow w raporcie lub na wykresie:
+5. Urzadzenie SmartThings pokazuje "Brak polaczenia" lub nie da sie sterowac:
+   - sprawdz, czy urzadzenie jest online w aplikacji SmartThings,
+   - przy AGD wlacz "zdalne sterowanie" na urzadzeniu i upewnij sie, ze nie jest
+     w trakcie cyklu,
+   - jesli polaczenie wygaslo, odlacz i polacz konto Samsung ponownie.
+6. Brak kosztow w raporcie lub na wykresie:
    - ustaw cene za 1 kWh w formularzu "Zmien dane" panelu Tuya.
 
 ## 9. Dokumenty powiazane
