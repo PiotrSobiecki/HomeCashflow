@@ -47,7 +47,7 @@ import {
   writeFinanceToRelational,
 } from "./finance-relational.js";
 import { logAction } from "./action-log.js";
-import { geocodeCity } from "./weather.js";
+import { geocodeCity, getOutdoorTemp } from "./weather.js";
 
 // Snapshoty kolumn dla action_log — zachowujemy ciphertext bez deszyfrowania.
 // Pozwala undo zapisać te same bajty z powrotem do tabel docelowych.
@@ -2911,6 +2911,28 @@ app.get("/api/smart-devices/:id/thermostat", authMiddleware, async (c) => {
   `;
   if (!t) return c.json({ thermostat: null });
   return c.json({ thermostat: serializeThermostat(t) });
+});
+
+// Bieżąca temperatura na zewnątrz dla zapisanej lokalizacji termostatu (na żądanie z UI).
+app.get("/api/smart-devices/:id/thermostat/temperature", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+  const id = c.req.param("id");
+
+  const result = await loadDeviceInHousehold(sql, user.id, id);
+  if (result.error) return c.json(result.error.body, result.error.status);
+
+  const [t] = await sql`SELECT lat, lon FROM ac_thermostats WHERE device_id = ${id}`;
+  if (!t || t.lat == null || t.lon == null)
+    return c.json({ error: "no_location" }, 400);
+
+  try {
+    const temp = await getOutdoorTemp({ lat: Number(t.lat), lon: Number(t.lon) });
+    return c.json({ temp });
+  } catch (err) {
+    console.error("[thermostat] temperature fetch failed", err);
+    return c.json({ error: "weather_failed" }, 502);
+  }
 });
 
 // Zapis konfiguracji (upsert). Tylko klima IR. body: { enabled, locationLabel, lat, lon, tempOn, tempOff }.
