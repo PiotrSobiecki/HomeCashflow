@@ -7,6 +7,8 @@ import { collectEnergySnapshots } from './smart-devices-sync.js'
 import { fireDueTimers } from './device-timers.js'
 import { decodeFinanceDataKey } from './finance-crypto.js'
 import { refreshExpiringTokens } from './smartthings/credentials.js'
+import { runAcThermostats } from './ac-thermostat.js'
+import { getOutdoorTemp } from './weather.js'
 
 export default {
   fetch: app.fetch,
@@ -32,6 +34,16 @@ export default {
           console.log('[cron] energy snapshots', res)
         } catch (err) {
           console.error('[cron] energy snapshots failed', err)
+        }
+      }
+
+      // Termostat zewnętrzny klimy IR: sprawdzanie temperatury co 30 min (minuta % 30).
+      if (new Date(event.scheduledTime).getMinutes() % 30 === 0) {
+        try {
+          const res = await runAcThermostats(sql, rawKey, { readOutdoorTemp: getOutdoorTemp })
+          if (res.checked || res.switched || res.failed) console.log('[cron] ac thermostats', res)
+        } catch (err) {
+          console.error('[cron] ac thermostats failed', err)
         }
       }
 

@@ -134,6 +134,13 @@
       "when": 1781773646726,
       "tag": "0018_perpetual_star_brand",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1782108711602,
+      "tag": "0019_skinny_red_skull",
+      "breakpoints": true
     }
   ]
 }

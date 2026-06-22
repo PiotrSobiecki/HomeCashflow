@@ -3,20 +3,45 @@ import { cors } from "hono/cors";
 import { HTTPException } from "hono/http-exception";
 import { jwtVerify, SignJWT } from "jose";
 import { neon } from "@neondatabase/serverless";
-import { decodeFinanceDataKey, encryptField, decryptField } from "./finance-crypto.js";
 import {
-  getTuyaToken, getDeviceInfo, getDeviceFunctions, getDeviceStatus,
-  listProjectDevices, formatStatuses, sendCommands,
-  getAcStatus, sendAcCommand, formatAcStatus,
-  getRemoteKeys, sendRemoteKey,
+  decodeFinanceDataKey,
+  encryptField,
+  decryptField,
+} from "./finance-crypto.js";
+import {
+  getTuyaToken,
+  getDeviceInfo,
+  getDeviceFunctions,
+  getDeviceStatus,
+  listProjectDevices,
+  formatStatuses,
+  sendCommands,
+  getAcStatus,
+  sendAcCommand,
+  formatAcStatus,
+  getRemoteKeys,
+  sendRemoteKey,
 } from "./tuya/client.js";
 import { validateCommands, validateAcCommands } from "./tuya/commands.js";
-import { buildAuthorizeUrl, exchangeCodeForTokens } from "./smartthings/oauth.js";
+import {
+  buildAuthorizeUrl,
+  exchangeCodeForTokens,
+} from "./smartthings/oauth.js";
 import { saveTokens, getFreshAccessToken } from "./smartthings/credentials.js";
-import { getStDevices, getStDevice, getStDeviceStatus, sendStCommand } from "./smartthings/client.js";
+import {
+  getStDevices,
+  getStDevice,
+  getStDeviceStatus,
+  sendStCommand,
+} from "./smartthings/client.js";
 import { summarizeDevices, inferDeviceType } from "./smartthings/devices.js";
 import { mapStStatus } from "./smartthings/status.js";
-import { buildStCommand, allowedStActions, buildStSettingCommand, allowedStSetting } from "./smartthings/commands.js";
+import {
+  buildStCommand,
+  allowedStActions,
+  buildStSettingCommand,
+  allowedStSetting,
+} from "./smartthings/commands.js";
 import {
   readFinanceFromRelational,
   writeFinanceToRelational,
@@ -506,9 +531,10 @@ async function loadTransactionForMutation(sql, userId, id, ifMatch, rawKey) {
     };
   }
 
-  const updatedAtIso = row.updated_at instanceof Date
-    ? row.updated_at.toISOString()
-    : String(row.updated_at);
+  const updatedAtIso =
+    row.updated_at instanceof Date
+      ? row.updated_at.toISOString()
+      : String(row.updated_at);
 
   if (updatedAtIso !== ifMatch) {
     return {
@@ -638,7 +664,13 @@ app.patch("/api/transactions/:id", authMiddleware, async (c) => {
   const body = await c.req.json();
   const rawKey = getFinanceDataKey(c);
 
-  const result = await loadTransactionForMutation(sql, user.id, id, ifMatch, rawKey);
+  const result = await loadTransactionForMutation(
+    sql,
+    user.id,
+    id,
+    ifMatch,
+    rawKey,
+  );
   if (result.error) return c.json(result.error.body, result.error.status);
   const { row } = result;
   const permErr = assertCanMutateResource({
@@ -653,7 +685,8 @@ app.patch("/api/transactions/:id", authMiddleware, async (c) => {
   const nextTxnDate = body.txnDate !== undefined ? body.txnDate : null;
   if (
     nextTxnDate !== null &&
-    (typeof nextTxnDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(nextTxnDate))
+    (typeof nextTxnDate !== "string" ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(nextTxnDate))
   ) {
     return c.json({ error: "txnDate must be YYYY-MM-DD" }, 400);
   }
@@ -713,7 +746,13 @@ app.delete("/api/transactions/:id", authMiddleware, async (c) => {
   }
   const rawKey = getFinanceDataKey(c);
 
-  const result = await loadTransactionForMutation(sql, user.id, id, ifMatch, rawKey);
+  const result = await loadTransactionForMutation(
+    sql,
+    user.id,
+    id,
+    ifMatch,
+    rawKey,
+  );
   if (result.error) return c.json(result.error.body, result.error.status);
   const permErr = assertCanMutateResource({
     isOwner: result.row.household_owner_id === user.id,
@@ -741,8 +780,10 @@ app.delete("/api/transactions/:id", authMiddleware, async (c) => {
 
 function validateSavingsAccountInput(body) {
   if (!body || typeof body !== "object") return "Body must be a JSON object";
-  if (typeof body.name !== "string" || !body.name.trim()) return "name is required";
-  if (typeof body.amount !== "number" || !Number.isFinite(body.amount)) return "amount must be a finite number";
+  if (typeof body.name !== "string" || !body.name.trim())
+    return "name is required";
+  if (typeof body.amount !== "number" || !Number.isFinite(body.amount))
+    return "amount must be a finite number";
   return null;
 }
 
@@ -756,9 +797,17 @@ async function loadSavingsAccountForMutation(sql, userId, id, ifMatch, rawKey) {
   `;
   if (!row) {
     const [exists] = await sql`SELECT 1 FROM savings_accounts WHERE id = ${id}`;
-    return { error: { status: exists ? 403 : 404, body: { error: exists ? "forbidden" : "not found" } } };
+    return {
+      error: {
+        status: exists ? 403 : 404,
+        body: { error: exists ? "forbidden" : "not found" },
+      },
+    };
   }
-  const updatedAtIso = row.updated_at instanceof Date ? row.updated_at.toISOString() : String(row.updated_at);
+  const updatedAtIso =
+    row.updated_at instanceof Date
+      ? row.updated_at.toISOString()
+      : String(row.updated_at);
   if (updatedAtIso !== ifMatch) {
     return {
       error: {
@@ -784,7 +833,11 @@ app.post("/api/savings-accounts", authMiddleware, async (c) => {
   const sql = getDb(c);
 
   let body;
-  try { body = await c.req.json(); } catch { return c.json({ error: "Invalid JSON body" }, 400); }
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
   const validationError = validateSavingsAccountInput(body);
   if (validationError) return c.json({ error: validationError }, 400);
 
@@ -810,17 +863,26 @@ app.post("/api/savings-accounts", authMiddleware, async (c) => {
     resourceType: "savings_account",
     resourceId: row.id,
     before: null,
-    after: snapshotSavingsAccount({ id: row.id, name: nameEnc, amount: amountEnc, icon: body.icon ?? null, created_by: user.id }),
+    after: snapshotSavingsAccount({
+      id: row.id,
+      name: nameEnc,
+      amount: amountEnc,
+      icon: body.icon ?? null,
+      created_by: user.id,
+    }),
   });
 
-  return c.json({
-    id: row.id,
-    name: body.name,
-    amount: body.amount,
-    icon: body.icon ?? null,
-    createdBy: user.id,
-    updatedAt: row.updated_at,
-  }, 201);
+  return c.json(
+    {
+      id: row.id,
+      name: body.name,
+      amount: body.amount,
+      icon: body.icon ?? null,
+      createdBy: user.id,
+      updatedAt: row.updated_at,
+    },
+    201,
+  );
 });
 
 app.patch("/api/savings-accounts/:id", authMiddleware, async (c) => {
@@ -832,7 +894,13 @@ app.patch("/api/savings-accounts/:id", authMiddleware, async (c) => {
   const body = await c.req.json();
   const rawKey = getFinanceDataKey(c);
 
-  const result = await loadSavingsAccountForMutation(sql, user.id, id, ifMatch, rawKey);
+  const result = await loadSavingsAccountForMutation(
+    sql,
+    user.id,
+    id,
+    ifMatch,
+    rawKey,
+  );
   if (result.error) return c.json(result.error.body, result.error.status);
   const { row } = result;
   const permErr = assertCanMutateResource({
@@ -845,8 +913,10 @@ app.patch("/api/savings-accounts/:id", authMiddleware, async (c) => {
   const nextName = body.name !== undefined ? body.name : null;
   const nextAmount = body.amount !== undefined ? body.amount : null;
   const nextIcon = body.icon !== undefined ? body.icon : row.icon;
-  const nameEnc = nextName !== null ? await encryptField(nextName, rawKey) : row.name;
-  const amountEnc = nextAmount !== null ? await encryptField(nextAmount, rawKey) : row.amount;
+  const nameEnc =
+    nextName !== null ? await encryptField(nextName, rawKey) : row.name;
+  const amountEnc =
+    nextAmount !== null ? await encryptField(nextAmount, rawKey) : row.amount;
 
   const [updated] = await sql`
     UPDATE savings_accounts
@@ -862,7 +932,13 @@ app.patch("/api/savings-accounts/:id", authMiddleware, async (c) => {
     resourceType: "savings_account",
     resourceId: id,
     before: snapshotSavingsAccount(row),
-    after: snapshotSavingsAccount({ id, name: nameEnc, amount: amountEnc, icon: nextIcon, created_by: row.created_by }),
+    after: snapshotSavingsAccount({
+      id,
+      name: nameEnc,
+      amount: amountEnc,
+      icon: nextIcon,
+      created_by: row.created_by,
+    }),
   });
 
   return c.json({
@@ -883,7 +959,13 @@ app.delete("/api/savings-accounts/:id", authMiddleware, async (c) => {
   if (!ifMatch) return c.json({ error: "If-Match header is required" }, 400);
   const rawKey = getFinanceDataKey(c);
 
-  const result = await loadSavingsAccountForMutation(sql, user.id, id, ifMatch, rawKey);
+  const result = await loadSavingsAccountForMutation(
+    sql,
+    user.id,
+    id,
+    ifMatch,
+    rawKey,
+  );
   if (result.error) return c.json(result.error.body, result.error.status);
   const permErr = assertCanMutateResource({
     isOwner: result.row.household_owner_id === user.id,
@@ -911,8 +993,10 @@ app.delete("/api/savings-accounts/:id", authMiddleware, async (c) => {
 
 function validateCategoryBudgetInput(body) {
   if (!body || typeof body !== "object") return "Body must be a JSON object";
-  if (typeof body.name !== "string" || !body.name.trim()) return "name is required";
-  if (typeof body.limit !== "number" || !Number.isFinite(body.limit)) return "limit must be a finite number";
+  if (typeof body.name !== "string" || !body.name.trim())
+    return "name is required";
+  if (typeof body.limit !== "number" || !Number.isFinite(body.limit))
+    return "limit must be a finite number";
   return null;
 }
 
@@ -926,9 +1010,17 @@ async function loadCategoryBudgetForMutation(sql, userId, id, ifMatch, rawKey) {
   `;
   if (!row) {
     const [exists] = await sql`SELECT 1 FROM category_budgets WHERE id = ${id}`;
-    return { error: { status: exists ? 403 : 404, body: { error: exists ? "forbidden" : "not found" } } };
+    return {
+      error: {
+        status: exists ? 403 : 404,
+        body: { error: exists ? "forbidden" : "not found" },
+      },
+    };
   }
-  const updatedAtIso = row.updated_at instanceof Date ? row.updated_at.toISOString() : String(row.updated_at);
+  const updatedAtIso =
+    row.updated_at instanceof Date
+      ? row.updated_at.toISOString()
+      : String(row.updated_at);
   if (updatedAtIso !== ifMatch) {
     return {
       error: {
@@ -953,7 +1045,11 @@ app.post("/api/category-budgets", authMiddleware, async (c) => {
   const sql = getDb(c);
 
   let body;
-  try { body = await c.req.json(); } catch { return c.json({ error: "Invalid JSON body" }, 400); }
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
   const validationError = validateCategoryBudgetInput(body);
   if (validationError) return c.json({ error: validationError }, 400);
 
@@ -979,16 +1075,24 @@ app.post("/api/category-budgets", authMiddleware, async (c) => {
     resourceType: "category_budget",
     resourceId: row.id,
     before: null,
-    after: snapshotCategoryBudget({ id: row.id, name: nameEnc, monthly_limit: limitEnc, created_by: user.id }),
+    after: snapshotCategoryBudget({
+      id: row.id,
+      name: nameEnc,
+      monthly_limit: limitEnc,
+      created_by: user.id,
+    }),
   });
 
-  return c.json({
-    id: row.id,
-    name: body.name,
-    limit: body.limit,
-    createdBy: user.id,
-    updatedAt: row.updated_at,
-  }, 201);
+  return c.json(
+    {
+      id: row.id,
+      name: body.name,
+      limit: body.limit,
+      createdBy: user.id,
+      updatedAt: row.updated_at,
+    },
+    201,
+  );
 });
 
 app.patch("/api/category-budgets/:id", authMiddleware, async (c) => {
@@ -1000,7 +1104,13 @@ app.patch("/api/category-budgets/:id", authMiddleware, async (c) => {
   const body = await c.req.json();
   const rawKey = getFinanceDataKey(c);
 
-  const result = await loadCategoryBudgetForMutation(sql, user.id, id, ifMatch, rawKey);
+  const result = await loadCategoryBudgetForMutation(
+    sql,
+    user.id,
+    id,
+    ifMatch,
+    rawKey,
+  );
   if (result.error) return c.json(result.error.body, result.error.status);
   const { row } = result;
   const permErr = assertCanMutateResource({
@@ -1012,8 +1122,12 @@ app.patch("/api/category-budgets/:id", authMiddleware, async (c) => {
 
   const nextName = body.name !== undefined ? body.name : null;
   const nextLimit = body.limit !== undefined ? body.limit : null;
-  const nameEnc = nextName !== null ? await encryptField(nextName, rawKey) : row.name;
-  const limitEnc = nextLimit !== null ? await encryptField(nextLimit, rawKey) : row.monthly_limit;
+  const nameEnc =
+    nextName !== null ? await encryptField(nextName, rawKey) : row.name;
+  const limitEnc =
+    nextLimit !== null
+      ? await encryptField(nextLimit, rawKey)
+      : row.monthly_limit;
 
   const [updated] = await sql`
     UPDATE category_budgets
@@ -1029,7 +1143,12 @@ app.patch("/api/category-budgets/:id", authMiddleware, async (c) => {
     resourceType: "category_budget",
     resourceId: id,
     before: snapshotCategoryBudget(row),
-    after: snapshotCategoryBudget({ id, name: nameEnc, monthly_limit: limitEnc, created_by: row.created_by }),
+    after: snapshotCategoryBudget({
+      id,
+      name: nameEnc,
+      monthly_limit: limitEnc,
+      created_by: row.created_by,
+    }),
   });
 
   return c.json({
@@ -1049,7 +1168,13 @@ app.delete("/api/category-budgets/:id", authMiddleware, async (c) => {
   if (!ifMatch) return c.json({ error: "If-Match header is required" }, 400);
   const rawKey = getFinanceDataKey(c);
 
-  const result = await loadCategoryBudgetForMutation(sql, user.id, id, ifMatch, rawKey);
+  const result = await loadCategoryBudgetForMutation(
+    sql,
+    user.id,
+    id,
+    ifMatch,
+    rawKey,
+  );
   if (result.error) return c.json(result.error.body, result.error.status);
   const permErr = assertCanMutateResource({
     isOwner: result.row.household_owner_id === user.id,
@@ -1077,7 +1202,11 @@ app.delete("/api/category-budgets/:id", authMiddleware, async (c) => {
 
 function validateSavingsGoalInput(body) {
   if (!body || typeof body !== "object") return "Body must be a JSON object";
-  if (body.type !== "none" && body.type !== "monthly" && body.type !== "yearly") {
+  if (
+    body.type !== "none" &&
+    body.type !== "monthly" &&
+    body.type !== "yearly"
+  ) {
     return "type must be 'none' | 'monthly' | 'yearly'";
   }
   return null;
@@ -1088,7 +1217,11 @@ app.put("/api/savings-goal", authMiddleware, async (c) => {
   const sql = getDb(c);
 
   let body;
-  try { body = await c.req.json(); } catch { return c.json({ error: "Invalid JSON body" }, 400); }
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
   const validationError = validateSavingsGoalInput(body);
   if (validationError) return c.json({ error: validationError }, 400);
 
@@ -1108,7 +1241,9 @@ app.put("/api/savings-goal", authMiddleware, async (c) => {
   const rawKey = getFinanceDataKey(c);
   const monthlyEnc = await encryptField(body.monthlyAmount ?? 0, rawKey);
   const yearlyEnc = await encryptField(body.yearlyAmount ?? 0, rawKey);
-  const targetMonth = Number.isInteger(body.targetMonth) ? body.targetMonth : 11;
+  const targetMonth = Number.isInteger(body.targetMonth)
+    ? body.targetMonth
+    : 11;
 
   // Pobierz `before` przed upsertem — singleton, więc resource_id = household_id.
   const [existing] = await sql`
@@ -1160,14 +1295,25 @@ const TUYA_DATACENTERS = ["eu", "us", "cn", "in"];
 
 function validateTuyaCredentialsInput(body) {
   if (!body || typeof body !== "object") return "Body must be a JSON object";
-  if (typeof body.clientId !== "string" || !body.clientId.trim()) return "clientId is required";
-  if (typeof body.clientSecret !== "string" || !body.clientSecret.trim()) return "clientSecret is required";
-  if (body.datacenter !== undefined && !TUYA_DATACENTERS.includes(body.datacenter)) {
+  if (typeof body.clientId !== "string" || !body.clientId.trim())
+    return "clientId is required";
+  if (typeof body.clientSecret !== "string" || !body.clientSecret.trim())
+    return "clientSecret is required";
+  if (
+    body.datacenter !== undefined &&
+    !TUYA_DATACENTERS.includes(body.datacenter)
+  ) {
     return "datacenter must be one of eu|us|cn|in";
   }
   const price = body.energyPricePln;
-  if (price !== undefined && price !== null
-      && (typeof price !== "number" || !Number.isFinite(price) || price < 0 || price > 100)) {
+  if (
+    price !== undefined &&
+    price !== null &&
+    (typeof price !== "number" ||
+      !Number.isFinite(price) ||
+      price < 0 ||
+      price > 100)
+  ) {
     return "energyPricePln must be a number 0-100 or null";
   }
   return null;
@@ -1184,20 +1330,26 @@ async function getMembershipWithOwner(sql, userId) {
   return m ?? null;
 }
 
-const toIso = (v) => (v instanceof Date ? v.toISOString() : v == null ? null : String(v));
+const toIso = (v) =>
+  v instanceof Date ? v.toISOString() : v == null ? null : String(v);
 
 app.put("/api/tuya/credentials", authMiddleware, async (c) => {
   const user = c.get("user");
   const sql = getDb(c);
 
   let body;
-  try { body = await c.req.json(); } catch { return c.json({ error: "Invalid JSON body" }, 400); }
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
   const validationError = validateTuyaCredentialsInput(body);
   if (validationError) return c.json({ error: validationError }, 400);
 
   const membership = await getMembershipWithOwner(sql, user.id);
   if (!membership) return c.json({ error: "No household" }, 400);
-  if (membership.owner_id !== user.id) return c.json({ error: "forbidden_owner_only" }, 403);
+  if (membership.owner_id !== user.id)
+    return c.json({ error: "forbidden_owner_only" }, 403);
 
   const datacenter = body.datacenter ?? "eu";
 
@@ -1238,6 +1390,46 @@ app.put("/api/tuya/credentials", authMiddleware, async (c) => {
     configured: true,
     datacenter: row.datacenter,
     verifiedAt: toIso(row.verified_at),
+    energyPricePln:
+      row.energy_price_pln == null ? null : Number(row.energy_price_pln),
+  });
+});
+
+// Aktualizacja samej ceny kWh — bez ponownej weryfikacji poświadczeń (cena to
+// ustawienie domowe, nie sekret). Pozwala zmienić cenę bez wpisywania Client ID/Secret,
+// których front nigdy nie posiada (nie wracają z GET).
+app.patch("/api/tuya/credentials/price", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+
+  let body;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+
+  const membership = await getMembershipWithOwner(sql, user.id);
+  if (!membership) return c.json({ error: "No household" }, 400);
+  if (membership.owner_id !== user.id)
+    return c.json({ error: "forbidden_owner_only" }, 403);
+
+  const price = body?.energyPricePln ?? null;
+  if (
+    price !== null &&
+    (typeof price !== "number" || !Number.isFinite(price) || price < 0 || price > 100)
+  ) {
+    return c.json({ error: "energyPricePln must be a number 0-100 or null" }, 400);
+  }
+
+  const [row] = await sql`
+    UPDATE tuya_credentials
+    SET energy_price_pln = ${price}, updated_at = NOW()
+    WHERE household_id = ${membership.household_id}
+    RETURNING energy_price_pln
+  `;
+  if (!row) return c.json({ error: "not_configured" }, 400);
+  return c.json({
     energyPricePln: row.energy_price_pln == null ? null : Number(row.energy_price_pln),
   });
 });
@@ -1248,7 +1440,8 @@ app.get("/api/tuya/credentials", authMiddleware, async (c) => {
 
   const membership = await getMembershipWithOwner(sql, user.id);
   if (!membership) return c.json({ error: "No household" }, 400);
-  if (membership.owner_id !== user.id) return c.json({ error: "forbidden_owner_only" }, 403);
+  if (membership.owner_id !== user.id)
+    return c.json({ error: "forbidden_owner_only" }, 403);
 
   const [row] = await sql`
     SELECT datacenter, verified_at, energy_price_pln
@@ -1260,10 +1453,10 @@ app.get("/api/tuya/credentials", authMiddleware, async (c) => {
     configured: true,
     datacenter: row.datacenter,
     verifiedAt: toIso(row.verified_at),
-    energyPricePln: row.energy_price_pln == null ? null : Number(row.energy_price_pln),
+    energyPricePln:
+      row.energy_price_pln == null ? null : Number(row.energy_price_pln),
   });
 });
-
 
 app.delete("/api/tuya/credentials", authMiddleware, async (c) => {
   const user = c.get("user");
@@ -1271,7 +1464,8 @@ app.delete("/api/tuya/credentials", authMiddleware, async (c) => {
 
   const membership = await getMembershipWithOwner(sql, user.id);
   if (!membership) return c.json({ error: "No household" }, 400);
-  if (membership.owner_id !== user.id) return c.json({ error: "forbidden_owner_only" }, 403);
+  if (membership.owner_id !== user.id)
+    return c.json({ error: "forbidden_owner_only" }, 403);
 
   await sql`DELETE FROM tuya_credentials WHERE household_id = ${membership.household_id}`;
   return c.body(null, 204);
@@ -1286,7 +1480,10 @@ app.delete("/api/tuya/credentials", authMiddleware, async (c) => {
 const SMARTTHINGS_SCOPES = ["r:locations:*", "r:devices:*", "x:devices:*"];
 
 function smartthingsRedirectUri(c) {
-  return getEnv(c, "SMARTTHINGS_REDIRECT_URI") || `${getApiBaseUrl(c)}/api/smartthings/callback`;
+  return (
+    getEnv(c, "SMARTTHINGS_REDIRECT_URI") ||
+    `${getApiBaseUrl(c)}/api/smartthings/callback`
+  );
 }
 
 // Owner inicjuje OAuth → redirect na ekran zgody Samsung.
@@ -1295,7 +1492,8 @@ app.get("/api/smartthings/connect", authMiddleware, async (c) => {
   const sql = getDb(c);
   const membership = await getMembershipWithOwner(sql, user.id);
   if (!membership) return c.json({ error: "No household" }, 400);
-  if (membership.owner_id !== user.id) return c.json({ error: "forbidden_owner_only" }, 403);
+  if (membership.owner_id !== user.id)
+    return c.json({ error: "forbidden_owner_only" }, 403);
 
   const clientId = getEnv(c, "SMARTTHINGS_CLIENT_ID");
   if (!clientId) return c.json({ error: "config_smartthings" }, 500);
@@ -1368,7 +1566,8 @@ app.delete("/api/smartthings/disconnect", authMiddleware, async (c) => {
   const sql = getDb(c);
   const membership = await getMembershipWithOwner(sql, user.id);
   if (!membership) return c.json({ error: "No household" }, 400);
-  if (membership.owner_id !== user.id) return c.json({ error: "forbidden_owner_only" }, 403);
+  if (membership.owner_id !== user.id)
+    return c.json({ error: "forbidden_owner_only" }, 403);
   // Rozłączenie kasuje też urządzenia ST (RODO + nie zostawiamy martwych kart bez tokenów).
   // Urządzenia Tuya zostają nietknięte.
   await sql`DELETE FROM smart_devices WHERE household_id = ${membership.household_id} AND provider = 'smartthings'`;
@@ -1391,7 +1590,11 @@ async function loadTuyaContext(c, sql, householdId) {
   const rawKey = getFinanceDataKey(c);
   const clientId = await decryptField(cred.client_id_enc, rawKey);
   const clientSecret = await decryptField(cred.client_secret_enc, rawKey);
-  const { accessToken } = await getTuyaToken({ clientId, clientSecret, datacenter: cred.datacenter });
+  const { accessToken } = await getTuyaToken({
+    clientId,
+    clientSecret,
+    datacenter: cred.datacenter,
+  });
   return { clientId, clientSecret, datacenter: cred.datacenter, accessToken };
 }
 
@@ -1452,22 +1655,34 @@ const IR_PLUG_STANDBY_W = 20;
 
 async function readDeviceStatus(ctx, row, sql) {
   if (row.device_type === "ir_ac") {
-    const ac = formatAcStatus(await getAcStatus(ctx, row.ir_parent_id, row.tuya_device_id));
+    const ac = formatAcStatus(
+      await getAcStatus(ctx, row.ir_parent_id, row.tuya_device_id),
+    );
     return { ...deviceStatusPayload(row, { ac, switchOn: ac.power === 1 }) };
   }
   if (row.device_type === "ir_remote") {
     // Pilot IR jest bezstanowy. Jeśli powiązany z gniazdkiem — realny stan zestawu z poboru mocy.
     if (row.linked_plug_id && sql) {
-      const [plug] = await sql`SELECT tuya_device_id FROM smart_devices WHERE id = ${row.linked_plug_id}`;
+      const [plug] =
+        await sql`SELECT tuya_device_id FROM smart_devices WHERE id = ${row.linked_plug_id}`;
       if (plug) {
-        const f = formatStatuses(await getDeviceStatus(ctx, plug.tuya_device_id));
+        const f = formatStatuses(
+          await getDeviceStatus(ctx, plug.tuya_device_id),
+        );
         const w = f.powerW ?? 0;
-        return deviceStatusPayload(row, { plugW: w, switchOn: w > IR_PLUG_STANDBY_W, linked: true });
+        return deviceStatusPayload(row, {
+          plugW: w,
+          switchOn: w > IR_PLUG_STANDBY_W,
+          linked: true,
+        });
       }
     }
     return deviceStatusPayload(row, {});
   }
-  return deviceStatusPayload(row, formatStatuses(await getDeviceStatus(ctx, row.tuya_device_id)));
+  return deviceStatusPayload(
+    row,
+    formatStatuses(await getDeviceStatus(ctx, row.tuya_device_id)),
+  );
 }
 
 // Sync snapshotów mocy leci cronem co 15 min — czas działania szacujemy jako
@@ -1503,7 +1718,8 @@ async function getTodayStatsByDevice(sql, deviceIds) {
   const stats = {};
   for (const id of deviceIds) stats[id] = { kwh: 0, uptimeMin: 0 };
   for (const r of energyRows) stats[r.device_id].kwh = Number(r.kwh);
-  for (const r of uptimeRows) stats[r.device_id].uptimeMin = Number(r.on_samples) * SNAPSHOT_INTERVAL_MIN;
+  for (const r of uptimeRows)
+    stats[r.device_id].uptimeMin = Number(r.on_samples) * SNAPSHOT_INTERVAL_MIN;
   return stats;
 }
 
@@ -1513,7 +1729,8 @@ app.get("/api/smart-devices/discover", authMiddleware, async (c) => {
   const sql = getDb(c);
   const membership = await getMembershipWithOwner(sql, user.id);
   if (!membership) return c.json({ error: "No household" }, 400);
-  if (membership.owner_id !== user.id) return c.json({ error: "forbidden_owner_only" }, 403);
+  if (membership.owner_id !== user.id)
+    return c.json({ error: "forbidden_owner_only" }, 403);
 
   const ctx = await loadTuyaContext(c, sql, membership.household_id);
   if (!ctx) return c.json({ error: "tuya_not_configured" }, 400);
@@ -1568,7 +1785,13 @@ async function readStStatus(stCtx, row) {
 
 /** Payload urządzenia ST, które nie odpowiedziało (offline / błąd ST). */
 function stOfflinePayload(row) {
-  return { id: row.id, provider: "smartthings", externalDeviceId: row.external_device_id, ok: false, online: false };
+  return {
+    id: row.id,
+    provider: "smartthings",
+    externalDeviceId: row.external_device_id,
+    ok: false,
+    online: false,
+  };
 }
 
 /**
@@ -1577,14 +1800,26 @@ function stOfflinePayload(row) {
  */
 async function enrichStWithPlug(base, row, tuyaCtx, sql) {
   if (!row.linked_plug_id || !tuyaCtx) return base;
-  const [plug] = await sql`SELECT id, tuya_device_id FROM smart_devices WHERE id = ${row.linked_plug_id}`;
+  const [plug] =
+    await sql`SELECT id, tuya_device_id FROM smart_devices WHERE id = ${row.linked_plug_id}`;
   if (!plug) return base;
   try {
-    const f = formatStatuses(await getDeviceStatus(tuyaCtx, plug.tuya_device_id));
+    const f = formatStatuses(
+      await getDeviceStatus(tuyaCtx, plug.tuya_device_id),
+    );
     const today = await getTodayStatsByDevice(sql, [plug.id]);
-    return { ...base, linked: true, plugW: f.powerW ?? 0, todayKwh: today[plug.id]?.kwh ?? 0 };
+    return {
+      ...base,
+      linked: true,
+      plugW: f.powerW ?? 0,
+      todayKwh: today[plug.id]?.kwh ?? 0,
+    };
   } catch (err) {
-    console.error("[smart-devices] ST plug read failed", plug.tuya_device_id, err);
+    console.error(
+      "[smart-devices] ST plug read failed",
+      plug.tuya_device_id,
+      err,
+    );
     return base;
   }
 }
@@ -1595,7 +1830,11 @@ async function enrichStWithPlug(base, row, tuyaCtx, sql) {
  */
 async function runStCommand(c, sql, user, row) {
   let body;
-  try { body = await c.req.json(); } catch { return c.json({ error: "Invalid JSON body" }, 400); }
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
   const action = body?.action;
   // Dwa kontrakty: { action } (start/pauza/stop) lub { setting, value } (temperatura,
   // wirowanie, płukanie, namaczanie, program — tylko pralka).
@@ -1606,36 +1845,88 @@ async function runStCommand(c, sql, user, row) {
     ? buildStSettingCommand(row.device_type, body.setting, body.value)
     : buildStCommand(row.device_type, action);
   if (!cmd) {
-    return c.json({ error: "command_not_supported", message: "Tej akcji nie można wykonać na tym urządzeniu." }, 400);
+    return c.json(
+      {
+        error: "command_not_supported",
+        message: "Tej akcji nie można wykonać na tym urządzeniu.",
+      },
+      400,
+    );
   }
 
   const ctx = await loadStContext(c, sql, row.household_id);
-  if (!ctx) return c.json({ error: "smartthings_not_connected", message: "Konto SmartThings nie jest połączone." }, 400);
+  if (!ctx)
+    return c.json(
+      {
+        error: "smartthings_not_connected",
+        message: "Konto SmartThings nie jest połączone.",
+      },
+      400,
+    );
 
   let status;
   try {
     status = await getStDeviceStatus(ctx, row.external_device_id);
   } catch (err) {
     console.error("[smart-devices] ST status before command failed", err);
-    return c.json({ error: "device_unreachable", message: "Urządzenie nie odpowiada (offline)." }, 502);
+    return c.json(
+      {
+        error: "device_unreachable",
+        message: "Urządzenie nie odpowiada (offline).",
+      },
+      502,
+    );
   }
 
   // Bramka Samsung: bez fizycznie włączonego zdalnego sterowania ST odrzuca komendy.
   if (isSetting) {
-    const allowed = allowedStSetting(row.device_type, status, body.setting, body.value);
+    const allowed = allowedStSetting(
+      row.device_type,
+      status,
+      body.setting,
+      body.value,
+    );
     if (allowed.reason === "remote_control_disabled") {
-      return c.json({ error: "remote_control_disabled", message: "Włącz zdalne sterowanie na pralce, aby zmienić ustawienia z aplikacji." }, 409);
+      return c.json(
+        {
+          error: "remote_control_disabled",
+          message:
+            "Włącz zdalne sterowanie na pralce, aby zmienić ustawienia z aplikacji.",
+        },
+        409,
+      );
     }
     if (!allowed.ok) {
-      return c.json({ error: "setting_not_available", message: "Tej wartości nie można teraz ustawić (sprawdź program i stan pralki)." }, 409);
+      return c.json(
+        {
+          error: "setting_not_available",
+          message:
+            "Tej wartości nie można teraz ustawić (sprawdź program i stan pralki).",
+        },
+        409,
+      );
     }
   } else {
     const allowed = allowedStActions(row.device_type, status);
     if (!allowed.remoteControlEnabled) {
-      return c.json({ error: "remote_control_disabled", message: "Włącz zdalne sterowanie na pralce, aby sterować nią z aplikacji." }, 409);
+      return c.json(
+        {
+          error: "remote_control_disabled",
+          message:
+            "Włącz zdalne sterowanie na pralce, aby sterować nią z aplikacji.",
+        },
+        409,
+      );
     }
     if (!allowed.actions.includes(action)) {
-      return c.json({ error: "action_not_available", message: "Nie można teraz wykonać tej akcji (sprawdź stan urządzenia)." }, 409);
+      return c.json(
+        {
+          error: "action_not_available",
+          message:
+            "Nie można teraz wykonać tej akcji (sprawdź stan urządzenia).",
+        },
+        409,
+      );
     }
   }
 
@@ -1643,7 +1934,14 @@ async function runStCommand(c, sql, user, row) {
     await sendStCommand(ctx, row.external_device_id, cmd);
   } catch (err) {
     console.error("[smart-devices] ST command failed", err);
-    return c.json({ error: "command_failed", message: "Urządzenie nie przyjęło komendy (zajęte lub offline). Spróbuj ponownie." }, 502);
+    return c.json(
+      {
+        error: "command_failed",
+        message:
+          "Urządzenie nie przyjęło komendy (zajęte lub offline). Spróbuj ponownie.",
+      },
+      502,
+    );
   }
 
   // Audyt po udanym wysłaniu (kto/kiedy/co). Błąd logu nie wywala akcji.
@@ -1663,33 +1961,40 @@ async function runStCommand(c, sql, user, row) {
 
 // Discover ST: urządzenia z połączonego konta (owner-only). Już dodane w tym
 // gospodarstwie odfiltrowane. Statyczna ścieżka — bez kolizji z /:id (brak GET /:id).
-app.get("/api/smart-devices/discover-smartthings", authMiddleware, async (c) => {
-  const user = c.get("user");
-  const sql = getDb(c);
-  const membership = await getMembershipWithOwner(sql, user.id);
-  if (!membership) return c.json({ error: "No household" }, 400);
-  if (membership.owner_id !== user.id) return c.json({ error: "forbidden_owner_only" }, 403);
+app.get(
+  "/api/smart-devices/discover-smartthings",
+  authMiddleware,
+  async (c) => {
+    const user = c.get("user");
+    const sql = getDb(c);
+    const membership = await getMembershipWithOwner(sql, user.id);
+    if (!membership) return c.json({ error: "No household" }, 400);
+    if (membership.owner_id !== user.id)
+      return c.json({ error: "forbidden_owner_only" }, 403);
 
-  const ctx = await loadStContext(c, sql, membership.household_id);
-  if (!ctx) return c.json({ error: "smartthings_not_connected" }, 400);
+    const ctx = await loadStContext(c, sql, membership.household_id);
+    if (!ctx) return c.json({ error: "smartthings_not_connected" }, 400);
 
-  let raw;
-  try {
-    raw = await getStDevices(ctx);
-  } catch (err) {
-    console.error("[smart-devices] ST discover failed", err);
-    if (err?.status === 401) return c.json({ error: "reconnect" }, 400);
-    return c.json({ error: "smartthings_unavailable" }, 502);
-  }
+    let raw;
+    try {
+      raw = await getStDevices(ctx);
+    } catch (err) {
+      console.error("[smart-devices] ST discover failed", err);
+      if (err?.status === 401) return c.json({ error: "reconnect" }, 400);
+      return c.json({ error: "smartthings_unavailable" }, 502);
+    }
 
-  const added = await sql`
+    const added = await sql`
     SELECT external_device_id FROM smart_devices
     WHERE household_id = ${membership.household_id} AND provider = 'smartthings'
   `;
-  const addedIds = new Set(added.map((r) => r.external_device_id));
-  const devices = summarizeDevices({ items: raw }).filter((d) => !addedIds.has(d.deviceId));
-  return c.json({ devices });
-});
+    const addedIds = new Set(added.map((r) => r.external_device_id));
+    const devices = summarizeDevices({ items: raw }).filter(
+      (d) => !addedIds.has(d.deviceId),
+    );
+    return c.json({ devices });
+  },
+);
 
 // Dodanie urządzenia ST (owner-only): profil + snapshot capabilities → karta provider=smartthings.
 app.post("/api/smart-devices/smartthings", authMiddleware, async (c) => {
@@ -1697,15 +2002,23 @@ app.post("/api/smart-devices/smartthings", authMiddleware, async (c) => {
   const sql = getDb(c);
 
   let body;
-  try { body = await c.req.json(); } catch { return c.json({ error: "Invalid JSON body" }, 400); }
-  if (typeof body?.externalDeviceId !== "string" || !body.externalDeviceId.trim()) {
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+  if (
+    typeof body?.externalDeviceId !== "string" ||
+    !body.externalDeviceId.trim()
+  ) {
     return c.json({ error: "externalDeviceId is required" }, 400);
   }
   const externalDeviceId = body.externalDeviceId.trim();
 
   const membership = await getMembershipWithOwner(sql, user.id);
   if (!membership) return c.json({ error: "No household" }, 400);
-  if (membership.owner_id !== user.id) return c.json({ error: "forbidden_owner_only" }, 403);
+  if (membership.owner_id !== user.id)
+    return c.json({ error: "forbidden_owner_only" }, 403);
 
   // Duplikat (UNIQUE(provider, external_device_id)) — to samo urządzenie w jakimkolwiek gospodarstwie.
   const [dupe] = await sql`
@@ -1769,15 +2082,27 @@ app.get("/api/smart-devices/status", authMiddleware, async (c) => {
   if (tuyaRows.length > 0) {
     tuyaCtx = await loadTuyaContext(c, sql, membership.household_id);
     if (!tuyaCtx) return c.json({ error: "tuya_not_configured" }, 400);
-    const todayByDevice = await getTodayStatsByDevice(sql, tuyaRows.map((r) => r.id));
+    const todayByDevice = await getTodayStatsByDevice(
+      sql,
+      tuyaRows.map((r) => r.id),
+    );
     tuyaStatuses = await Promise.all(
       tuyaRows.map(async (r) => {
         try {
           const today = todayByDevice[r.id] ?? { kwh: 0, uptimeMin: 0 };
-          return { ...(await readDeviceStatus(tuyaCtx, r, sql)), todayKwh: today.kwh, todayUptimeMin: today.uptimeMin };
+          return {
+            ...(await readDeviceStatus(tuyaCtx, r, sql)),
+            todayKwh: today.kwh,
+            todayUptimeMin: today.uptimeMin,
+          };
         } catch (err) {
           console.error("[smart-devices] status failed", r.tuya_device_id, err);
-          return { id: r.id, tuyaDeviceId: r.tuya_device_id, ok: false, online: false };
+          return {
+            id: r.id,
+            tuyaDeviceId: r.tuya_device_id,
+            ok: false,
+            online: false,
+          };
         }
       }),
     );
@@ -1794,9 +2119,18 @@ app.get("/api/smart-devices/status", authMiddleware, async (c) => {
       stRows.map(async (r) => {
         if (!stCtx) return stOfflinePayload(r);
         try {
-          return await enrichStWithPlug(await readStStatus(stCtx, r), r, tuyaCtx, sql);
+          return await enrichStWithPlug(
+            await readStStatus(stCtx, r),
+            r,
+            tuyaCtx,
+            sql,
+          );
         } catch (err) {
-          console.error("[smart-devices] ST status failed", r.external_device_id, err);
+          console.error(
+            "[smart-devices] ST status failed",
+            r.external_device_id,
+            err,
+          );
           return stOfflinePayload(r);
         }
       }),
@@ -1818,8 +2152,17 @@ app.get("/api/smart-devices/:id/status", authMiddleware, async (c) => {
     const stCtx = await loadStContext(c, sql, result.row.household_id);
     if (!stCtx) return c.json({ error: "smartthings_not_connected" }, 400);
     try {
-      const tuyaCtx = result.row.linked_plug_id ? await loadTuyaContext(c, sql, result.row.household_id) : null;
-      return c.json(await enrichStWithPlug(await readStStatus(stCtx, result.row), result.row, tuyaCtx, sql));
+      const tuyaCtx = result.row.linked_plug_id
+        ? await loadTuyaContext(c, sql, result.row.household_id)
+        : null;
+      return c.json(
+        await enrichStWithPlug(
+          await readStStatus(stCtx, result.row),
+          result.row,
+          tuyaCtx,
+          sql,
+        ),
+      );
     } catch (err) {
       console.error("[smart-devices] single ST status failed", err);
       return c.json(stOfflinePayload(result.row));
@@ -1839,16 +2182,21 @@ app.get("/api/smart-devices/:id/status", authMiddleware, async (c) => {
     });
   } catch (err) {
     console.error("[smart-devices] single status failed", err);
-    return c.json({ id: result.row.id, tuyaDeviceId: result.row.tuya_device_id, ok: false, online: false });
+    return c.json({
+      id: result.row.id,
+      tuyaDeviceId: result.row.tuya_device_id,
+      ok: false,
+      online: false,
+    });
   }
 });
 
 // Historia zużycia (member+). Agregacja po stronie DB, bucket rośnie z zakresem.
 const HISTORY_RANGES = {
-  "1d": { interval: "1 day", bucketSec: 900 },       // co 15 min (częstotliwość crona)
-  "7d": { interval: "7 days", bucketSec: 3600 },     // godzinowo
-  "30d": { interval: "30 days", bucketSec: 21600 },  // co 6h
-  "90d": { interval: "90 days", bucketSec: 86400 },  // dziennie
+  "1d": { interval: "1 day", bucketSec: 900 }, // co 15 min (częstotliwość crona)
+  "7d": { interval: "7 days", bucketSec: 3600 }, // godzinowo
+  "30d": { interval: "30 days", bucketSec: 21600 }, // co 6h
+  "90d": { interval: "90 days", bucketSec: 86400 }, // dziennie
   "1y": { interval: "365 days", bucketSec: 604800 }, // tygodniowo
 };
 
@@ -1865,10 +2213,11 @@ app.get("/api/smart-devices/:id/history", authMiddleware, async (c) => {
 
   // Zapytania są od siebie niezależne — lecą równolegle (sterownik HTTP Neona,
   // każde to osobny request; sekwencyjnie sumowały się round-tripy).
-  const [series, [rangeEnergy], [lastHour], [peak], [priceRow]] = await Promise.all([
-    // Wykres mocy: średnia/szczyt power_w per bucket (po recorded_at), wyrównany do
-    // czasu warszawskiego (granice na czyste lokalne godziny/północe), nie do epoki UTC.
-    sql`
+  const [series, [rangeEnergy], [lastHour], [peak], [priceRow]] =
+    await Promise.all([
+      // Wykres mocy: średnia/szczyt power_w per bucket (po recorded_at), wyrównany do
+      // czasu warszawskiego (granice na czyste lokalne godziny/północe), nie do epoki UTC.
+      sql`
       SELECT (to_timestamp(floor(extract(epoch from (recorded_at AT TIME ZONE 'Europe/Warsaw')) / ${cfg.bucketSec}::float8) * ${cfg.bucketSec}::float8)
                 AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Warsaw') AS bucket,
              avg(power_w)::float8 AS avg_w,
@@ -1878,9 +2227,9 @@ app.get("/api/smart-devices/:id/history", authMiddleware, async (c) => {
       GROUP BY bucket
       ORDER BY bucket ASC
     `,
-    // Energia z DISTINCT paczek add_ele (po energy_reported_at = event_time z logów),
-    // każda raz. Zużycie w wybranym zakresie + w ostatniej godzinie (niezależne od zakresu).
-    sql`
+      // Energia z DISTINCT paczek add_ele (po energy_reported_at = event_time z logów),
+      // każda raz. Zużycie w wybranym zakresie + w ostatniej godzinie (niezależne od zakresu).
+      sql`
       SELECT COALESCE(SUM(energy_kwh), 0)::float8 AS kwh FROM (
         SELECT DISTINCT ON (energy_reported_at) energy_kwh
         FROM device_energy_snapshots
@@ -1889,7 +2238,7 @@ app.get("/api/smart-devices/:id/history", authMiddleware, async (c) => {
         ORDER BY energy_reported_at, recorded_at
       ) s
     `,
-    sql`
+      sql`
       SELECT COALESCE(SUM(energy_kwh), 0)::float8 AS kwh FROM (
         SELECT DISTINCT ON (energy_reported_at) energy_kwh
         FROM device_energy_snapshots
@@ -1898,16 +2247,19 @@ app.get("/api/smart-devices/:id/history", authMiddleware, async (c) => {
         ORDER BY energy_reported_at, recorded_at
       ) s
     `,
-    sql`
+      sql`
       SELECT max(power_w)::float8 AS peak_w
       FROM device_energy_snapshots
       WHERE device_id = ${id} AND recorded_at >= NOW() - ${cfg.interval}::interval
     `,
-    sql`
+      sql`
       SELECT energy_price_pln FROM tuya_credentials WHERE household_id = ${result.row.household_id}
     `,
-  ]);
-  const pricePln = priceRow?.energy_price_pln == null ? null : Number(priceRow.energy_price_pln);
+    ]);
+  const pricePln =
+    priceRow?.energy_price_pln == null
+      ? null
+      : Number(priceRow.energy_price_pln);
 
   const energyKwh = rangeEnergy?.kwh == null ? 0 : Number(rangeEnergy.kwh);
   return c.json({
@@ -1938,7 +2290,8 @@ app.get("/api/smart-devices/report", authMiddleware, async (c) => {
   if (!REPORT_DATE_RE.test(from ?? "") || !REPORT_DATE_RE.test(to ?? "")) {
     return c.json({ error: "from and to must be YYYY-MM-DD" }, 400);
   }
-  const spanDays = Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 1;
+  const spanDays =
+    Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 1;
   if (!(spanDays >= 1 && spanDays <= 366)) {
     return c.json({ error: "range must be 1-366 days, from <= to" }, 400);
   }
@@ -1949,14 +2302,18 @@ app.get("/api/smart-devices/report", authMiddleware, async (c) => {
   if (!membership) return c.json({ error: "No household" }, 400);
 
   // Filtr urządzeń — id spoza gospodarstwa po prostu odpadają w WHERE.
-  const requestedIds = (c.req.query("deviceIds") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-  const devices = requestedIds.length === 0
-    ? await sql`
+  const requestedIds = (c.req.query("deviceIds") ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const devices =
+    requestedIds.length === 0
+      ? await sql`
         SELECT id, display_name FROM smart_devices
         WHERE household_id = ${membership.household_id} AND is_active = true
         ORDER BY created_at ASC
       `
-    : await sql`
+      : await sql`
         SELECT id, display_name FROM smart_devices
         WHERE household_id = ${membership.household_id} AND id = ANY(${requestedIds})
         ORDER BY created_at ASC
@@ -1965,10 +2322,16 @@ app.get("/api/smart-devices/report", authMiddleware, async (c) => {
   const [priceRow] = await sql`
     SELECT energy_price_pln FROM tuya_credentials WHERE household_id = ${membership.household_id}
   `;
-  const pricePln = priceRow?.energy_price_pln == null ? null : Number(priceRow.energy_price_pln);
+  const pricePln =
+    priceRow?.energy_price_pln == null
+      ? null
+      : Number(priceRow.energy_price_pln);
 
   // Granice zakresu: lokalna północ warszawska dnia `from` do północy po dniu `to`.
-  const energyRows = ids.length === 0 ? [] : await sql`
+  const energyRows =
+    ids.length === 0
+      ? []
+      : await sql`
     SELECT device_id, COALESCE(SUM(energy_kwh), 0)::float8 AS kwh FROM (
       SELECT DISTINCT ON (device_id, energy_reported_at) device_id, energy_kwh
       FROM device_energy_snapshots
@@ -1978,7 +2341,10 @@ app.get("/api/smart-devices/report", authMiddleware, async (c) => {
       ORDER BY device_id, energy_reported_at, recorded_at
     ) s GROUP BY device_id
   `;
-  const peakRows = ids.length === 0 ? [] : await sql`
+  const peakRows =
+    ids.length === 0
+      ? []
+      : await sql`
     SELECT device_id, max(power_w)::float8 AS peak_w
     FROM device_energy_snapshots
     WHERE device_id = ANY(${ids})
@@ -1986,7 +2352,10 @@ app.get("/api/smart-devices/report", authMiddleware, async (c) => {
       AND recorded_at < (${to}::date + 1) AT TIME ZONE 'Europe/Warsaw'
     GROUP BY device_id
   `;
-  const uptimeRows = ids.length === 0 ? [] : await sql`
+  const uptimeRows =
+    ids.length === 0
+      ? []
+      : await sql`
     SELECT device_id, count(*)::int AS on_samples
     FROM device_energy_snapshots
     WHERE device_id = ANY(${ids}) AND energy_reported_at IS NULL
@@ -1996,7 +2365,10 @@ app.get("/api/smart-devices/report", authMiddleware, async (c) => {
     GROUP BY device_id
   `;
   // Zużycie dzienne łącznie (daty warszawskie) — tabela w raporcie.
-  const dailyRows = ids.length === 0 ? [] : await sql`
+  const dailyRows =
+    ids.length === 0
+      ? []
+      : await sql`
     SELECT day, COALESCE(SUM(energy_kwh), 0)::float8 AS kwh FROM (
       SELECT DISTINCT ON (device_id, energy_reported_at)
         (energy_reported_at AT TIME ZONE 'Europe/Warsaw')::date AS day, energy_kwh
@@ -2008,9 +2380,15 @@ app.get("/api/smart-devices/report", authMiddleware, async (c) => {
     ) s GROUP BY day ORDER BY day ASC
   `;
 
-  const kwhBy = Object.fromEntries(energyRows.map((r) => [r.device_id, Number(r.kwh)]));
-  const peakBy = Object.fromEntries(peakRows.map((r) => [r.device_id, Number(r.peak_w)]));
-  const samplesBy = Object.fromEntries(uptimeRows.map((r) => [r.device_id, Number(r.on_samples)]));
+  const kwhBy = Object.fromEntries(
+    energyRows.map((r) => [r.device_id, Number(r.kwh)]),
+  );
+  const peakBy = Object.fromEntries(
+    peakRows.map((r) => [r.device_id, Number(r.peak_w)]),
+  );
+  const samplesBy = Object.fromEntries(
+    uptimeRows.map((r) => [r.device_id, Number(r.on_samples)]),
+  );
 
   return c.json({
     from,
@@ -2029,7 +2407,10 @@ app.get("/api/smart-devices/report", authMiddleware, async (c) => {
       };
     }),
     daily: dailyRows.map((r) => ({
-      date: typeof r.day === "string" ? r.day : new Date(r.day).toISOString().slice(0, 10),
+      date:
+        typeof r.day === "string"
+          ? r.day
+          : new Date(r.day).toISOString().slice(0, 10),
       kwh: Number(r.kwh),
     })),
   });
@@ -2043,14 +2424,23 @@ app.post("/api/smart-devices/report/email", authMiddleware, async (c) => {
   const user = c.get("user");
 
   let body;
-  try { body = await c.req.json(); } catch { return c.json({ error: "Invalid JSON body" }, 400); }
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
   const { pdfBase64, from, to } = body ?? {};
   if (typeof pdfBase64 !== "string" || pdfBase64.length === 0) {
     return c.json({ error: "pdfBase64 is required" }, 400);
   }
-  if (pdfBase64.length > REPORT_PDF_MAX_BASE64_CHARS) return c.json({ error: "pdf_too_large" }, 413);
-  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(pdfBase64)) return c.json({ error: "pdfBase64 must be base64" }, 400);
-  const period = REPORT_DATE_RE.test(from ?? "") && REPORT_DATE_RE.test(to ?? "") ? `${from} – ${to}` : null;
+  if (pdfBase64.length > REPORT_PDF_MAX_BASE64_CHARS)
+    return c.json({ error: "pdf_too_large" }, 413);
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(pdfBase64))
+    return c.json({ error: "pdfBase64 must be base64" }, 400);
+  const period =
+    REPORT_DATE_RE.test(from ?? "") && REPORT_DATE_RE.test(to ?? "")
+      ? `${from} – ${to}`
+      : null;
 
   const resendKey = getEnv(c, "RESEND_API_KEY");
   if (!resendKey) return c.json({ error: "email_not_configured" }, 503);
@@ -2067,11 +2457,17 @@ app.post("/api/smart-devices/report/email", authMiddleware, async (c) => {
       to: [user.email],
       subject: period ? `Raport energii ${period}` : "Raport energii",
       html: `<p>Cześć${user.name ? ` ${user.name}` : ""}!</p><p>W załączniku raport zużycia energii${period ? ` za okres ${period}` : ""} wygenerowany w HomeCashflow.</p>`,
-      attachments: [{ filename: `raport-energii-${dateStr}.pdf`, content: pdfBase64 }],
+      attachments: [
+        { filename: `raport-energii-${dateStr}.pdf`, content: pdfBase64 },
+      ],
     }),
   });
   if (!res.ok) {
-    console.error("[report-email] Resend error", res.status, await res.text().catch(() => ""));
+    console.error(
+      "[report-email] Resend error",
+      res.status,
+      await res.text().catch(() => ""),
+    );
     return c.json({ error: "email_send_failed" }, 502);
   }
   return c.json({ sent: true, to: user.email });
@@ -2082,7 +2478,11 @@ app.post("/api/smart-devices", authMiddleware, async (c) => {
   const sql = getDb(c);
 
   let body;
-  try { body = await c.req.json(); } catch { return c.json({ error: "Invalid JSON body" }, 400); }
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
   if (typeof body?.tuyaDeviceId !== "string" || !body.tuyaDeviceId.trim()) {
     return c.json({ error: "tuyaDeviceId is required" }, 400);
   }
@@ -2090,10 +2490,12 @@ app.post("/api/smart-devices", authMiddleware, async (c) => {
 
   const membership = await getMembershipWithOwner(sql, user.id);
   if (!membership) return c.json({ error: "No household" }, 400);
-  if (membership.owner_id !== user.id) return c.json({ error: "forbidden_owner_only" }, 403);
+  if (membership.owner_id !== user.id)
+    return c.json({ error: "forbidden_owner_only" }, 403);
 
   // Duplikat (UNIQUE globalnie) — to samo urządzenie w jakimkolwiek gospodarstwie.
-  const [dupe] = await sql`SELECT 1 FROM smart_devices WHERE tuya_device_id = ${tuyaDeviceId}`;
+  const [dupe] =
+    await sql`SELECT 1 FROM smart_devices WHERE tuya_device_id = ${tuyaDeviceId}`;
   if (dupe) return c.json({ error: "device_already_linked" }, 409);
 
   const ctx = await loadTuyaContext(c, sql, membership.household_id);
@@ -2157,7 +2559,12 @@ async function loadDeviceInHousehold(sql, userId, id) {
   `;
   if (!row) {
     const [exists] = await sql`SELECT 1 FROM smart_devices WHERE id = ${id}`;
-    return { error: { status: exists ? 403 : 404, body: { error: exists ? "forbidden" : "not found" } } };
+    return {
+      error: {
+        status: exists ? 403 : 404,
+        body: { error: exists ? "forbidden" : "not found" },
+      },
+    };
   }
   return { ok: true, row };
 }
@@ -2168,24 +2575,32 @@ app.patch("/api/smart-devices/:id", authMiddleware, async (c) => {
   const id = c.req.param("id");
 
   let body;
-  try { body = await c.req.json(); } catch { return c.json({ error: "Invalid JSON body" }, 400); }
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
 
   const result = await loadDeviceInHousehold(sql, user.id, id);
   if (result.error) return c.json(result.error.body, result.error.status);
-  if (result.row.household_owner_id !== user.id) return c.json({ error: "forbidden_owner_only" }, 403);
+  if (result.row.household_owner_id !== user.id)
+    return c.json({ error: "forbidden_owner_only" }, 403);
 
   const nextName =
     typeof body.displayName === "string" && body.displayName.trim()
       ? body.displayName.trim()
       : result.row.display_name;
-  const nextActive = typeof body.isActive === "boolean" ? body.isActive : result.row.is_active;
+  const nextActive =
+    typeof body.isActive === "boolean" ? body.isActive : result.row.is_active;
 
   // Powiązanie z gniazdkiem: piloty IR (realny stan zestawu z poboru) oraz urządzenia
   // SmartThings (koszt cyklu — pralka ST nie mierzy kWh sama, dane z gniazdka Tuya).
   // Gniazdko musi być w tym samym gospodarstwie i być gniazdkiem. `null` rozłącza.
   let nextPlug = result.row.linked_plug_id;
   if ("linkedPlugId" in body) {
-    const canLink = IR_TIMER_TYPES.has(result.row.device_type) || result.row.provider === "smartthings";
+    const canLink =
+      IR_TIMER_TYPES.has(result.row.device_type) ||
+      result.row.provider === "smartthings";
     if (!canLink) return c.json({ error: "link_not_supported" }, 400);
     if (body.linkedPlugId == null) {
       nextPlug = null;
@@ -2195,7 +2610,8 @@ app.patch("/api/smart-devices/:id", authMiddleware, async (c) => {
         WHERE id = ${body.linkedPlugId} AND household_id = ${result.row.household_id}
       `;
       if (!plug) return c.json({ error: "plug_not_found" }, 400);
-      if (plug.device_type && plug.device_type !== "plug") return c.json({ error: "not_a_plug" }, 400);
+      if (plug.device_type && plug.device_type !== "plug")
+        return c.json({ error: "not_a_plug" }, 400);
       nextPlug = plug.id;
     }
   }
@@ -2236,7 +2652,8 @@ app.delete("/api/smart-devices/:id", authMiddleware, async (c) => {
 
   const result = await loadDeviceInHousehold(sql, user.id, id);
   if (result.error) return c.json(result.error.body, result.error.status);
-  if (result.row.household_owner_id !== user.id) return c.json({ error: "forbidden_owner_only" }, 403);
+  if (result.row.household_owner_id !== user.id)
+    return c.json({ error: "forbidden_owner_only" }, 403);
 
   // Usuwamy tylko z naszej DB — w chmurze Tuya urządzenie zostaje.
   await sql`DELETE FROM smart_devices WHERE id = ${id}`;
@@ -2259,14 +2676,22 @@ app.post("/api/smart-devices/:id/commands", authMiddleware, async (c) => {
   }
 
   let body;
-  try { body = await c.req.json(); } catch { return c.json({ error: "Invalid JSON body" }, 400); }
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
 
   const commands = body?.commands;
   const isIrAc = result.row.device_type === "ir_ac";
   const validationError = isIrAc
     ? validateAcCommands(commands)
     : validateCommands(result.row.functions_json, commands);
-  if (validationError) return c.json({ error: "command_not_allowed", detail: validationError }, 400);
+  if (validationError)
+    return c.json(
+      { error: "command_not_allowed", detail: validationError },
+      400,
+    );
 
   const ctx = await loadTuyaContext(c, sql, result.row.household_id);
   if (!ctx) return c.json({ error: "tuya_not_configured" }, 400);
@@ -2275,7 +2700,13 @@ app.post("/api/smart-devices/:id/commands", authMiddleware, async (c) => {
     if (isIrAc) {
       // AC API przyjmuje jedną komendę naraz — wysyłamy po kolei.
       for (const cmd of commands) {
-        await sendAcCommand(ctx, result.row.ir_parent_id, result.row.tuya_device_id, cmd.code, cmd.value);
+        await sendAcCommand(
+          ctx,
+          result.row.ir_parent_id,
+          result.row.tuya_device_id,
+          cmd.code,
+          cmd.value,
+        );
       }
     } else {
       await sendCommands(ctx, result.row.tuya_device_id, commands);
@@ -2308,14 +2739,22 @@ app.get("/api/smart-devices/:id/ir-keys", authMiddleware, async (c) => {
 
   const result = await loadDeviceInHousehold(sql, user.id, id);
   if (result.error) return c.json(result.error.body, result.error.status);
-  if (result.row.device_type !== "ir_remote") return c.json({ error: "not_ir_remote" }, 400);
+  if (result.row.device_type !== "ir_remote")
+    return c.json({ error: "not_ir_remote" }, 400);
 
   const ctx = await loadTuyaContext(c, sql, result.row.household_id);
   if (!ctx) return c.json({ error: "tuya_not_configured" }, 400);
 
   try {
-    const r = await getRemoteKeys(ctx, result.row.ir_parent_id, result.row.tuya_device_id);
-    return c.json({ categoryId: r?.category_id ?? null, keys: r?.key_list ?? [] });
+    const r = await getRemoteKeys(
+      ctx,
+      result.row.ir_parent_id,
+      result.row.tuya_device_id,
+    );
+    return c.json({
+      categoryId: r?.category_id ?? null,
+      keys: r?.key_list ?? [],
+    });
   } catch (err) {
     console.error("[smart-devices] ir-keys failed", err);
     return c.json({ error: "ir_keys_failed" }, 502);
@@ -2329,22 +2768,33 @@ app.post("/api/smart-devices/:id/ir-key", authMiddleware, async (c) => {
   const id = c.req.param("id");
 
   let body;
-  try { body = await c.req.json(); } catch { return c.json({ error: "Invalid JSON body" }, 400); }
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
 
   const result = await loadDeviceInHousehold(sql, user.id, id);
   if (result.error) return c.json(result.error.body, result.error.status);
-  if (result.row.device_type !== "ir_remote") return c.json({ error: "not_ir_remote" }, 400);
+  if (result.row.device_type !== "ir_remote")
+    return c.json({ error: "not_ir_remote" }, 400);
 
   const key = typeof body?.key === "string" ? body.key : null;
   const keyId = typeof body?.keyId === "number" ? body.keyId : null;
-  const categoryId = typeof body?.categoryId === "number" ? body.categoryId : null;
+  const categoryId =
+    typeof body?.categoryId === "number" ? body.categoryId : null;
   if (!key && keyId == null) return c.json({ error: "key_required" }, 400);
 
   const ctx = await loadTuyaContext(c, sql, result.row.household_id);
   if (!ctx) return c.json({ error: "tuya_not_configured" }, 400);
 
   try {
-    await sendRemoteKey(ctx, result.row.ir_parent_id, result.row.tuya_device_id, { categoryId, key, keyId });
+    await sendRemoteKey(
+      ctx,
+      result.row.ir_parent_id,
+      result.row.tuya_device_id,
+      { categoryId, key, keyId },
+    );
   } catch (err) {
     console.error("[smart-devices] ir-key failed", err);
     return c.json({ error: "command_failed" }, 502);
@@ -2381,7 +2831,10 @@ app.get("/api/smart-devices/:id/timer", authMiddleware, async (c) => {
     ORDER BY fire_at ASC LIMIT 1
   `;
   if (!t) return c.json({ timer: null });
-  const minutesLeft = Math.max(0, Math.round((new Date(t.fire_at).getTime() - Date.now()) / 60000));
+  const minutesLeft = Math.max(
+    0,
+    Math.round((new Date(t.fire_at).getTime() - Date.now()) / 60000),
+  );
   return c.json({ timer: { fireAt: toIso(t.fire_at), minutesLeft } });
 });
 
@@ -2392,14 +2845,20 @@ app.post("/api/smart-devices/:id/timer", authMiddleware, async (c) => {
   const id = c.req.param("id");
 
   let body;
-  try { body = await c.req.json(); } catch { return c.json({ error: "Invalid JSON body" }, 400); }
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
 
   const result = await loadDeviceInHousehold(sql, user.id, id);
   if (result.error) return c.json(result.error.body, result.error.status);
-  if (!IR_TIMER_TYPES.has(result.row.device_type)) return c.json({ error: "timer_not_supported" }, 400);
+  if (!IR_TIMER_TYPES.has(result.row.device_type))
+    return c.json({ error: "timer_not_supported" }, 400);
 
   const minutes = Number(body?.minutes);
-  if (!Number.isFinite(minutes)) return c.json({ error: "minutes_required" }, 400);
+  if (!Number.isFinite(minutes))
+    return c.json({ error: "minutes_required" }, 400);
 
   // Zawsze czyścimy poprzedni aktywny timer (partial unique pilnuje jednego pending).
   await sql`UPDATE device_timers SET status = 'canceled' WHERE device_id = ${id} AND status = 'pending'`;
@@ -2413,6 +2872,96 @@ app.post("/api/smart-devices/:id/timer", authMiddleware, async (c) => {
     RETURNING fire_at
   `;
   return c.json({ timer: { fireAt: toIso(t.fire_at), minutesLeft: clamped } });
+});
+
+// ====== Termostat zewnętrzny dla klimy IR (Tuya ir_ac) ======
+// Automatyka włącza/wyłącza klimę wg temperatury zewnętrznej (cron co 30 min).
+// Minimalna strefa martwa między progami — chroni przed ciągłym przełączaniem.
+const THERMOSTAT_MIN_DEADZONE = 1;
+
+function serializeThermostat(t) {
+  const num = (v) => (v == null ? null : Number(v));
+  return {
+    enabled: t.enabled,
+    locationLabel: t.location_label,
+    lat: num(t.lat),
+    lon: num(t.lon),
+    tempOn: num(t.temp_on),
+    tempOff: num(t.temp_off),
+    lastAction: t.last_action,
+    lastOutdoorTemp: num(t.last_outdoor_temp),
+    lastCheckedAt: t.last_checked_at ? toIso(t.last_checked_at) : null,
+  };
+}
+
+// Konfiguracja termostatu urządzenia (lub null).
+app.get("/api/smart-devices/:id/thermostat", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+  const id = c.req.param("id");
+
+  const result = await loadDeviceInHousehold(sql, user.id, id);
+  if (result.error) return c.json(result.error.body, result.error.status);
+
+  const [t] = await sql`
+    SELECT enabled, location_label, lat, lon, temp_on, temp_off,
+           last_action, last_outdoor_temp, last_checked_at
+    FROM ac_thermostats WHERE device_id = ${id}
+  `;
+  if (!t) return c.json({ thermostat: null });
+  return c.json({ thermostat: serializeThermostat(t) });
+});
+
+// Zapis konfiguracji (upsert). Tylko klima IR. body: { enabled, locationLabel, lat, lon, tempOn, tempOff }.
+app.put("/api/smart-devices/:id/thermostat", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+  const id = c.req.param("id");
+
+  let body;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+
+  const result = await loadDeviceInHousehold(sql, user.id, id);
+  if (result.error) return c.json(result.error.body, result.error.status);
+  if (result.row.device_type !== "ir_ac")
+    return c.json({ error: "thermostat_not_supported" }, 400);
+
+  const tempOn = Number(body?.tempOn);
+  const tempOff = Number(body?.tempOff);
+  if (!Number.isFinite(tempOn) || !Number.isFinite(tempOff))
+    return c.json({ error: "thresholds_required" }, 400);
+  if (tempOn - tempOff < THERMOSTAT_MIN_DEADZONE)
+    return c.json({ error: "threshold_order" }, 400);
+
+  const enabled = body?.enabled === true;
+  const locationLabel =
+    typeof body?.locationLabel === "string" ? body.locationLabel.trim() || null : null;
+  const lat = body?.lat == null ? null : Number(body.lat);
+  const lon = body?.lon == null ? null : Number(body.lon);
+  if ((lat != null && !Number.isFinite(lat)) || (lon != null && !Number.isFinite(lon)))
+    return c.json({ error: "invalid_coordinates" }, 400);
+
+  const [t] = await sql`
+    INSERT INTO ac_thermostats
+      (device_id, household_id, enabled, location_label, lat, lon, temp_on, temp_off)
+    VALUES
+      (${id}, ${result.row.household_id}, ${enabled}, ${locationLabel}, ${lat}, ${lon}, ${tempOn}, ${tempOff})
+    ON CONFLICT (device_id) DO UPDATE SET
+      enabled = EXCLUDED.enabled,
+      location_label = EXCLUDED.location_label,
+      lat = EXCLUDED.lat,
+      lon = EXCLUDED.lon,
+      temp_on = EXCLUDED.temp_on,
+      temp_off = EXCLUDED.temp_off,
+      updated_at = NOW()
+    RETURNING enabled, location_label, lat, lon, temp_on, temp_off,
+              last_action, last_outdoor_temp, last_checked_at
+  `;
+  return c.json({ thermostat: serializeThermostat(t) });
 });
 
 // ============ ACTION LOG (undo Phase 4) ============
@@ -2459,17 +3008,28 @@ app.get("/api/action-log", authMiddleware, async (c) => {
     const snapshotForLabel = parseSnapshot(r.after ?? r.before);
     let label = null;
     if (snapshotForLabel.name) {
-      try { label = await decryptField(snapshotForLabel.name, rawKey); }
-      catch { label = null; }
+      try {
+        label = await decryptField(snapshotForLabel.name, rawKey);
+      } catch {
+        label = null;
+      }
     }
     let amount = null;
     if (snapshotForLabel.amount != null) {
-      try { amount = Number(await decryptField(snapshotForLabel.amount, rawKey)); }
-      catch { amount = null; }
+      try {
+        amount = Number(await decryptField(snapshotForLabel.amount, rawKey));
+      } catch {
+        amount = null;
+      }
     }
     if (amount == null && snapshotForLabel.monthly_limit != null) {
-      try { amount = Number(await decryptField(snapshotForLabel.monthly_limit, rawKey)); }
-      catch { amount = null; }
+      try {
+        amount = Number(
+          await decryptField(snapshotForLabel.monthly_limit, rawKey),
+        );
+      } catch {
+        amount = null;
+      }
     }
     const txnKind =
       r.resource_type === "transaction" && snapshotForLabel.kind
@@ -2479,7 +3039,10 @@ app.get("/api/action-log", authMiddleware, async (c) => {
     const monthNum =
       monthRaw != null && monthRaw !== "" ? Number(monthRaw) : NaN;
     const month =
-      r.resource_type === "transaction" && Number.isInteger(monthNum) && monthNum >= 0 && monthNum <= 11
+      r.resource_type === "transaction" &&
+      Number.isInteger(monthNum) &&
+      monthNum >= 0 &&
+      monthNum <= 11
         ? monthNum
         : null;
     entries.push({
@@ -2490,9 +3053,12 @@ app.get("/api/action-log", authMiddleware, async (c) => {
       resourceId: r.resource_id,
       actorId: r.actor_id,
       actorName: r.actor_name ?? r.actor_email ?? null,
-      undoneAt: r.undone_at == null
-        ? null
-        : (r.undone_at instanceof Date ? r.undone_at.toISOString() : String(r.undone_at)),
+      undoneAt:
+        r.undone_at == null
+          ? null
+          : r.undone_at instanceof Date
+            ? r.undone_at.toISOString()
+            : String(r.undone_at),
       undoneBy: r.undone_by ?? null,
       undoneByName: r.undone_by_name ?? null,
       undoesEntryId: r.undoes_entry_id ?? null,
@@ -2550,7 +3116,11 @@ app.post("/api/action-log/:id/undo", authMiddleware, async (c) => {
 
   // Idempotencja: już cofnięte
   if (entry.undone_at != null) {
-    return c.json({ ok: true, alreadyUndone: true, notice: "Akcja była już cofnięta" });
+    return c.json({
+      ok: true,
+      alreadyUndone: true,
+      notice: "Akcja była już cofnięta",
+    });
   }
   // Nie cofamy wpisów typu UNDO
   if (entry.operation === "UNDO") {
@@ -2558,9 +3128,15 @@ app.post("/api/action-log/:id/undo", authMiddleware, async (c) => {
   }
   // Okno czasowe: 1h od `at`. Po wygaśnięciu wpis zostaje w logu (audit),
   // ale juz go nie cofniesz — chroni przed "odkopaniem" starej zmiany.
-  const entryAtMs = entry.at instanceof Date ? entry.at.getTime() : new Date(entry.at).getTime();
+  const entryAtMs =
+    entry.at instanceof Date
+      ? entry.at.getTime()
+      : new Date(entry.at).getTime();
   if (Number.isFinite(entryAtMs) && Date.now() - entryAtMs > UNDO_WINDOW_MS) {
-    return c.json({ error: "undo_window_expired", notice: "Okno cofania (24h) wygasło" }, 400);
+    return c.json(
+      { error: "undo_window_expired", notice: "Okno cofania (24h) wygasło" },
+      400,
+    );
   }
 
   const before = entry.before; // jsonb deserializowany przez Neon
@@ -2572,13 +3148,27 @@ app.post("/api/action-log/:id/undo", authMiddleware, async (c) => {
 
   try {
     if (op === "CREATE") {
-      const deleted = await applyCreateRevert(sql, rt, entry.household_id, resourceId);
-      if (!deleted) notice = "Zasób już nie istniał — wpis oznaczony jako cofnięty.";
+      const deleted = await applyCreateRevert(
+        sql,
+        rt,
+        entry.household_id,
+        resourceId,
+      );
+      if (!deleted)
+        notice = "Zasób już nie istniał — wpis oznaczony jako cofnięty.";
     } else if (op === "UPDATE") {
-      if (!before) return c.json({ error: "Cannot undo UPDATE without 'before' snapshot" }, 500);
+      if (!before)
+        return c.json(
+          { error: "Cannot undo UPDATE without 'before' snapshot" },
+          500,
+        );
       await applyUpdateRevert(sql, rt, entry.household_id, resourceId, before);
     } else if (op === "DELETE") {
-      if (!before) return c.json({ error: "Cannot undo DELETE without 'before' snapshot" }, 500);
+      if (!before)
+        return c.json(
+          { error: "Cannot undo DELETE without 'before' snapshot" },
+          500,
+        );
       await applyDeleteRevert(sql, rt, entry.household_id, before);
     } else {
       return c.json({ error: `Unsupported operation: ${op}` }, 400);
@@ -2614,19 +3204,22 @@ async function applyCreateRevert(sql, rt, householdId, resourceId) {
     return true;
   }
   if (rt === "transaction") {
-    const [exists] = await sql`SELECT 1 FROM transactions WHERE id = ${resourceId}`;
+    const [exists] =
+      await sql`SELECT 1 FROM transactions WHERE id = ${resourceId}`;
     if (!exists) return false;
     await sql`DELETE FROM transactions WHERE id = ${resourceId}`;
     return true;
   }
   if (rt === "savings_account") {
-    const [exists] = await sql`SELECT 1 FROM savings_accounts WHERE id = ${resourceId}`;
+    const [exists] =
+      await sql`SELECT 1 FROM savings_accounts WHERE id = ${resourceId}`;
     if (!exists) return false;
     await sql`DELETE FROM savings_accounts WHERE id = ${resourceId}`;
     return true;
   }
   if (rt === "category_budget") {
-    const [exists] = await sql`SELECT 1 FROM category_budgets WHERE id = ${resourceId}`;
+    const [exists] =
+      await sql`SELECT 1 FROM category_budgets WHERE id = ${resourceId}`;
     if (!exists) return false;
     await sql`DELETE FROM category_budgets WHERE id = ${resourceId}`;
     return true;
@@ -2636,7 +3229,8 @@ async function applyCreateRevert(sql, rt, householdId, resourceId) {
 
 async function applyUpdateRevert(sql, rt, householdId, resourceId, before) {
   if (rt === "transaction") {
-    const [exists] = await sql`SELECT 1 FROM transactions WHERE id = ${resourceId}`;
+    const [exists] =
+      await sql`SELECT 1 FROM transactions WHERE id = ${resourceId}`;
     if (!exists) return; // no-op
     await sql`
       UPDATE transactions
@@ -2652,7 +3246,8 @@ async function applyUpdateRevert(sql, rt, householdId, resourceId, before) {
       WHERE id = ${resourceId}
     `;
   } else if (rt === "savings_account") {
-    const [exists] = await sql`SELECT 1 FROM savings_accounts WHERE id = ${resourceId}`;
+    const [exists] =
+      await sql`SELECT 1 FROM savings_accounts WHERE id = ${resourceId}`;
     if (!exists) return;
     await sql`
       UPDATE savings_accounts
@@ -2660,7 +3255,8 @@ async function applyUpdateRevert(sql, rt, householdId, resourceId, before) {
       WHERE id = ${resourceId}
     `;
   } else if (rt === "category_budget") {
-    const [exists] = await sql`SELECT 1 FROM category_budgets WHERE id = ${resourceId}`;
+    const [exists] =
+      await sql`SELECT 1 FROM category_budgets WHERE id = ${resourceId}`;
     if (!exists) return;
     await sql`
       UPDATE category_budgets
@@ -2685,7 +3281,8 @@ async function applyUpdateRevert(sql, rt, householdId, resourceId, before) {
 async function applyDeleteRevert(sql, rt, householdId, before) {
   // Spróbuj z tym samym id; jeśli już zajęte przez inny rekord → insert bez id (auto-gen).
   if (rt === "transaction") {
-    const [exists] = await sql`SELECT 1 FROM transactions WHERE id = ${before.id}`;
+    const [exists] =
+      await sql`SELECT 1 FROM transactions WHERE id = ${before.id}`;
     if (!exists) {
       await sql`
         INSERT INTO transactions (id, household_id, kind, name, amount, txn_date, year, month, is_fixed, category, created_by)
@@ -2700,14 +3297,16 @@ async function applyDeleteRevert(sql, rt, householdId, before) {
       `;
     }
   } else if (rt === "savings_account") {
-    const [exists] = await sql`SELECT 1 FROM savings_accounts WHERE id = ${before.id}`;
+    const [exists] =
+      await sql`SELECT 1 FROM savings_accounts WHERE id = ${before.id}`;
     if (!exists) {
       await sql`INSERT INTO savings_accounts (id, household_id, name, amount, icon) VALUES (${before.id}, ${householdId}, ${before.name}, ${before.amount}, ${before.icon ?? null})`;
     } else {
       await sql`INSERT INTO savings_accounts (household_id, name, amount, icon) VALUES (${householdId}, ${before.name}, ${before.amount}, ${before.icon ?? null})`;
     }
   } else if (rt === "category_budget") {
-    const [exists] = await sql`SELECT 1 FROM category_budgets WHERE id = ${before.id}`;
+    const [exists] =
+      await sql`SELECT 1 FROM category_budgets WHERE id = ${before.id}`;
     if (!exists) {
       await sql`INSERT INTO category_budgets (id, household_id, name, monthly_limit) VALUES (${before.id}, ${householdId}, ${before.name}, ${before.monthly_limit})`;
     } else {
