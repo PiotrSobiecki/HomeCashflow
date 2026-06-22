@@ -313,14 +313,17 @@ export const acThermostats = pgTable('ac_thermostats', {
   deviceId: uuid('device_id').notNull().unique().references(() => smartDevices.id, { onDelete: 'cascade' }),
   householdId: uuid('household_id').notNull().references(() => households.id, { onDelete: 'cascade' }),
   enabled: boolean('enabled').notNull().default(false),
+  // cool: włącz gdy temp ≥ temp_on, wyłącz gdy temp ≤ temp_off (temp_on > temp_off).
+  // heat: włącz gdy temp ≤ temp_on, wyłącz gdy temp ≥ temp_off (temp_off > temp_on).
+  climateMode: text('climate_mode').notNull().default('cool'),
   // Miejscowość: etykieta do wyświetlenia + współrzędne (geocoding w Fazie 3).
   locationLabel: text('location_label'),
   lat: numeric('lat', { precision: 8, scale: 5 }),
   lon: numeric('lon', { precision: 8, scale: 5 }),
-  // Progi histerezy: włącz gdy temp ≥ temp_on, wyłącz gdy temp ≤ temp_off.
+  // Progi histerezy — znaczenie zależy od mode (patrz komentarz wyżej).
   tempOn: numeric('temp_on', { precision: 4, scale: 1 }).notNull(),
   tempOff: numeric('temp_off', { precision: 4, scale: 1 }).notNull(),
-  // Ostatnia akcja automatyki (NULL = jeszcze nie działała). Klucz edge-triggera.
+  // Ostatnia akcja automatyki — tylko gdy faktycznie wysłano komendę (nie przy synchronizacji ze stanem Tuya).
   lastAction: text('last_action'),
   lastOutdoorTemp: numeric('last_outdoor_temp', { precision: 4, scale: 1 }),
   lastCheckedAt: timestamp('last_checked_at', { withTimezone: true }),
@@ -328,7 +331,11 @@ export const acThermostats = pgTable('ac_thermostats', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 }, (t) => ({
   byEnabled: index('idx_ac_thermostats_enabled').on(t.enabled),
-  thresholdCheck: check('ac_thermostats_threshold_check', sql`${t.tempOn} > ${t.tempOff}`),
+  modeCheck: check('ac_thermostats_climate_mode_check', sql`${t.climateMode} IN ('cool', 'heat')`),
+  thresholdCheck: check(
+    'ac_thermostats_threshold_check',
+    sql`(${t.climateMode} = 'cool' AND ${t.tempOn} > ${t.tempOff}) OR (${t.climateMode} = 'heat' AND ${t.tempOff} > ${t.tempOn})`,
+  ),
   lastActionCheck: check('ac_thermostats_last_action_check', sql`${t.lastAction} IS NULL OR ${t.lastAction} IN ('on', 'off')`),
 }))
 

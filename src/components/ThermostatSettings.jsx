@@ -8,6 +8,8 @@ import {
   AlertTriangle,
   MapPin,
   RefreshCw,
+  Snowflake,
+  Flame,
 } from "lucide-react";
 import {
   fetchThermostat,
@@ -18,8 +20,10 @@ import {
 const ERRORS = {
   geocode_no_result: "Nie znaleziono takiej miejscowości.",
   geocode_failed: "Nie udało się pobrać lokalizacji. Spróbuj ponownie.",
-  threshold_order:
-    "Próg włączenia musi być wyższy od wyłączenia (min. 1°C odstępu).",
+  threshold_order_cool:
+    "Chłodzenie: próg włączenia musi być wyższy od wyłączenia (min. 1°C odstępu).",
+  threshold_order_heat:
+    "Grzanie: próg wyłączenia musi być wyższy od włączenia (min. 1°C odstępu).",
   thresholds_required: "Podaj oba progi temperatury.",
 };
 
@@ -41,10 +45,38 @@ const fmtTime = (iso) => {
 };
 
 const lastActionLabel = (a) =>
-  a === "on" ? "włączyła klimę" : a === "off" ? "wyłączyła klimę" : "—";
+  a === "on" ? "ostatnio włączyła" : a === "off" ? "ostatnio wyłączyła" : "—";
+
+/** Tekst automatyki tylko gdy ostatnia komenda zgadza się ze stanem klimy z Tuya. */
+const automationStatusText = (lastAction, acPower) => {
+  const acOn = acPower === 1;
+  const acOff = acPower === 0;
+  if (lastAction === "on" && acOn) return lastActionLabel("on");
+  if (lastAction === "off" && acOff) return lastActionLabel("off");
+  return null;
+};
+
+const acPowerLabel = (acPower) => {
+  if (acPower === 1) return "włączona";
+  if (acPower === 0) return "wyłączona";
+  return null;
+};
 
 // Z etykiety „Wrocław, Dolnośląskie, Polska" robimy samą nazwę miasta.
 const cityName = (label) => (label ?? "").split(",")[0].trim();
+
+const thresholdGap = (mode, on, off) =>
+  mode === "heat" ? off - on : on - off;
+
+const thresholdLabels = (mode) =>
+  mode === "heat"
+    ? { on: "Włącz poniżej", off: "Wyłącz powyżej" }
+    : { on: "Włącz powyżej", off: "Wyłącz poniżej" };
+
+const modeWarning = (mode) =>
+  mode === "heat"
+    ? "Włączenie używa ostatniego trybu z pilota — ustaw klimę na grzanie, zanim zostawisz automatykę."
+    : "Włączenie używa ostatniego trybu z pilota — ustaw klimę na chłodzenie, zanim zostawisz automatykę.";
 
 const fieldClass =
   "w-full px-2.5 py-1.5 bg-slate-900/60 border border-slate-600 rounded-lg text-white text-xs placeholder-slate-500 focus:outline-none focus:border-indigo-500 disabled:opacity-50";
@@ -55,11 +87,13 @@ const fieldClass =
  * temperatura na zewnątrz jest zawsze widoczna (nad zwijaniem).
  * @param {string} deviceId
  * @param {boolean} disabled
+ * @param {number|undefined} acPower — 0/1 z odczytu Tuya (jak przycisk Włączona/Wyłączona)
  */
-export const ThermostatSettings = ({ deviceId, disabled }) => {
+export const ThermostatSettings = ({ deviceId, disabled, acPower }) => {
   const [open, setOpen] = useState(false);
   const [cfg, setCfg] = useState(null);
   const [enabled, setEnabled] = useState(false);
+  const [mode, setMode] = useState("cool");
   const [city, setCity] = useState("");
   const [tempOn, setTempOn] = useState("26");
   const [tempOff, setTempOff] = useState("24");
@@ -79,6 +113,7 @@ export const ThermostatSettings = ({ deviceId, disabled }) => {
       if (thermostat) {
         setCfg(thermostat);
         setEnabled(thermostat.enabled);
+        setMode(thermostat.mode === "heat" ? "heat" : "cool");
         setCity(cityName(thermostat.locationLabel));
         if (thermostat.tempOn != null) setTempOn(String(thermostat.tempOn));
         if (thermostat.tempOff != null) setTempOff(String(thermostat.tempOff));
@@ -155,11 +190,37 @@ export const ThermostatSettings = ({ deviceId, disabled }) => {
     setMsg("");
   };
 
+  const onModeChange = (next) => {
+    if (next === mode) return;
+    const on = Number(String(tempOn).replace(",", "."));
+    const off = Number(String(tempOff).replace(",", "."));
+    setMode(next);
+    setMsg("");
+    // Zamień progi, jeśli kolejność nie pasuje do nowego trybu.
+    if (Number.isFinite(on) && Number.isFinite(off)) {
+      if (next === "heat" && on >= off) {
+        setTempOn(String(off));
+        setTempOff(String(on));
+      } else if (next === "cool" && on <= off) {
+        setTempOn(String(off));
+        setTempOff(String(on));
+      }
+    }
+  };
+
   const save = async () => {
     const on = Number(String(tempOn).replace(",", "."));
     const off = Number(String(tempOff).replace(",", "."));
     if (!Number.isFinite(on) || !Number.isFinite(off)) {
       setMsg(ERRORS.thresholds_required);
+      return;
+    }
+    if (thresholdGap(mode, on, off) < 1) {
+      setMsg(
+        mode === "heat"
+          ? ERRORS.threshold_order_heat
+          : ERRORS.threshold_order_cool,
+      );
       return;
     }
     if (enabled && !city.trim() && cfg?.lat == null) {
@@ -170,7 +231,7 @@ export const ThermostatSettings = ({ deviceId, disabled }) => {
     setSaving(true);
     setMsg("");
     try {
-      const body = { enabled, tempOn: on, tempOff: off };
+      const body = { enabled, mode, tempOn: on, tempOff: off };
       if (picked) {
         // Wybrano z podpowiedzi — mamy dokładne współrzędne, bez ponownego geokodowania.
         body.lat = picked.lat;
@@ -186,11 +247,18 @@ export const ThermostatSettings = ({ deviceId, disabled }) => {
       }
       const { thermostat } = await saveThermostat(deviceId, body);
       setCfg(thermostat);
+      setMode(thermostat.mode === "heat" ? "heat" : "cool");
       setCity(cityName(thermostat.locationLabel));
       setPicked(null);
       setMsg("Zapisano ✓");
     } catch (err) {
-      setMsg(ERRORS[err.code] || "Nie udało się zapisać.");
+      setMsg(
+        err.code === "threshold_order"
+          ? mode === "heat"
+            ? ERRORS.threshold_order_heat
+            : ERRORS.threshold_order_cool
+          : ERRORS[err.code] || "Nie udało się zapisać.",
+      );
     } finally {
       setSaving(false);
     }
@@ -199,6 +267,9 @@ export const ThermostatSettings = ({ deviceId, disabled }) => {
   const lastTemp = cfg?.lastOutdoorTemp;
   const lastAt = fmtTime(cfg?.lastCheckedAt);
   const saved = msg.includes("✓");
+  const powerLabel = acPowerLabel(acPower);
+  const autoStatus = automationStatusText(cfg?.lastAction, acPower);
+  const labels = thresholdLabels(mode);
 
   return (
     <div className="pt-3 mt-1 border-t border-slate-700/40">
@@ -276,6 +347,36 @@ export const ThermostatSettings = ({ deviceId, disabled }) => {
           </label>
 
           <div className="space-y-1">
+            <span className="text-[11px] text-slate-400">Tryb automatyki</span>
+            <div className="grid grid-cols-2 gap-1.5">
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={() => onModeChange("cool")}
+                className={`flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 ${
+                  mode === "cool"
+                    ? "bg-sky-500/20 text-sky-300 border border-sky-500/40"
+                    : "bg-slate-800/60 text-slate-400 border border-slate-700/50 hover:text-slate-200"
+                }`}
+              >
+                <Snowflake className="w-3.5 h-3.5" /> Chłodzenie
+              </button>
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={() => onModeChange("heat")}
+                className={`flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 ${
+                  mode === "heat"
+                    ? "bg-orange-500/20 text-orange-300 border border-orange-500/40"
+                    : "bg-slate-800/60 text-slate-400 border border-slate-700/50 hover:text-slate-200"
+                }`}
+              >
+                <Flame className="w-3.5 h-3.5" /> Grzanie
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-1">
             <label
               htmlFor={`thermo-city-${deviceId}`}
               className="text-[11px] text-slate-400"
@@ -319,7 +420,7 @@ export const ThermostatSettings = ({ deviceId, disabled }) => {
                 htmlFor={`thermo-on-${deviceId}`}
                 className="text-[11px] text-slate-400"
               >
-                Włącz powyżej
+                {labels.on}
               </label>
               <div className="flex items-center gap-1.5">
                 <input
@@ -342,7 +443,7 @@ export const ThermostatSettings = ({ deviceId, disabled }) => {
                 htmlFor={`thermo-off-${deviceId}`}
                 className="text-[11px] text-slate-400"
               >
-                Wyłącz poniżej
+                {labels.off}
               </label>
               <div className="flex items-center gap-1.5">
                 <input
@@ -365,8 +466,7 @@ export const ThermostatSettings = ({ deviceId, disabled }) => {
           {enabled && (
             <p className="flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-2.5 py-2 text-[11px] leading-snug text-amber-200/90">
               <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-              Włączenie używa ostatniego trybu z pilota — ustaw klimę na
-              chłodzenie, zanim zostawisz automatykę.
+              {modeWarning(mode)}
             </p>
           )}
 
@@ -400,11 +500,24 @@ export const ThermostatSettings = ({ deviceId, disabled }) => {
                 {lastTemp != null ? `${lastTemp}°C` : "—"}
               </span>
               {lastAt && <span className="text-slate-600"> · {lastAt}</span>}
-              <br />
-              Automatyka:{" "}
-              <span className="text-slate-400">
-                {lastActionLabel(cfg.lastAction)}
-              </span>
+              {(powerLabel || autoStatus) && (
+                <>
+                  <br />
+                  {powerLabel && (
+                    <>
+                      Klima:{" "}
+                      <span className="text-slate-400">{powerLabel}</span>
+                    </>
+                  )}
+                  {autoStatus && (
+                    <>
+                      {powerLabel && <span className="text-slate-600"> · </span>}
+                      Automatyka:{" "}
+                      <span className="text-slate-400">{autoStatus}</span>
+                    </>
+                  )}
+                </>
+              )}
             </p>
           )}
         </div>

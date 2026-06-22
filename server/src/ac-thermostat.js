@@ -1,24 +1,37 @@
 import { decryptField } from './finance-crypto.js'
-import { getTuyaToken, sendAcCommand } from './tuya/client.js'
+import { getTuyaToken, sendAcCommand, getAcStatus, formatAcStatus } from './tuya/client.js'
 
 /**
  * Termostat zewnętrzny dla klimy IR (Tuya `ir_ac`).
  *
  * `decide` to czysta funkcja decyzyjna z histerezą dwuprogową i edge-triggerem:
  * zwraca komendę do wysłania tylko gdy temperatura zewnętrzna realnie przekroczy próg
- * (zmiana względem ostatniej akcji automatyki). W strefie martwej nie rusza klimy,
- * by nie nadpisywać ręcznych zmian użytkownika.
+ * **i** docelowy stan różni się od bieżącego zasilania klimy (jeśli znane z Tuya).
+ * W strefie martwej nie rusza klimy, by nie nadpisywać ręcznych zmian użytkownika.
  *
- * @param {{ temp:number, tempOn:number, tempOff:number, lastAction:('on'|'off'|null) }} args
- * @returns {'on' | 'off' | null} komenda do wysłania (+ zapisania jako last_action) lub null = nic
+/**
+ * @param {{ temp:number, tempOn:number, tempOff:number, lastAction:('on'|'off'|null), acPowerOn:(boolean|null), mode?:('cool'|'heat') }} args
+ * @returns {'on' | 'off' | null}
  */
-export function decide({ temp, tempOn, tempOff, lastAction }) {
+export function decide({ temp, tempOn, tempOff, lastAction, acPowerOn = null, mode = 'cool' }) {
   let desired = null
-  if (temp >= tempOn) desired = 'on'
-  else if (temp <= tempOff) desired = 'off'
+  if (mode === 'heat') {
+    if (temp <= tempOn) desired = 'on'
+    else if (temp >= tempOff) desired = 'off'
+  } else {
+    if (temp >= tempOn) desired = 'on'
+    else if (temp <= tempOff) desired = 'off'
+  }
 
-  // Strefa martwa lub stan już osiągnięty → brak komendy (nie nadpisujemy ręcznych zmian).
-  if (desired === null || desired === lastAction) return null
+  if (desired === null) return null
+
+  // Preferujemy rzeczywisty stan z Tuya (ten sam co front „Włączona/Wyłączona”).
+  const current =
+    acPowerOn === true ? 'on'
+      : acPowerOn === false ? 'off'
+        : lastAction
+
+  if (desired === current) return null
   return desired
 }
 
@@ -39,7 +52,7 @@ export function decide({ temp, tempOn, tempOff, lastAction }) {
 export async function runAcThermostats(sql, rawKey, { readOutdoorTemp }) {
   const rows = await sql`
     SELECT th.id, th.household_id, th.device_id, th.lat, th.lon,
-           th.temp_on, th.temp_off, th.last_action,
+           th.climate_mode, th.temp_on, th.temp_off, th.last_action,
            sd.tuya_device_id, sd.ir_parent_id,
            tc.client_id_enc, tc.client_secret_enc, tc.datacenter
     FROM ac_thermostats th
@@ -62,22 +75,34 @@ export async function runAcThermostats(sql, rawKey, { readOutdoorTemp }) {
         continue
       }
 
+      let ctx = ctxByHousehold.get(r.household_id)
+      if (!ctx) {
+        const clientId = await decryptField(r.client_id_enc, rawKey)
+        const clientSecret = await decryptField(r.client_secret_enc, rawKey)
+        const { accessToken } = await getTuyaToken({ clientId, clientSecret, datacenter: r.datacenter })
+        ctx = { clientId, clientSecret, datacenter: r.datacenter, accessToken }
+        ctxByHousehold.set(r.household_id, ctx)
+      }
+
+      let acPowerOn = null
+      try {
+        const ac = formatAcStatus(await getAcStatus(ctx, r.ir_parent_id, r.tuya_device_id))
+        if (ac.power === 1) acPowerOn = true
+        else if (ac.power === 0) acPowerOn = false
+      } catch (err) {
+        console.warn('[ac-thermostat] AC status read failed, falling back to last_action', r.tuya_device_id, err)
+      }
+
       const action = decide({
         temp,
         tempOn: Number(r.temp_on),
         tempOff: Number(r.temp_off),
         lastAction: r.last_action,
+        acPowerOn,
+        mode: r.climate_mode === 'heat' ? 'heat' : 'cool',
       })
 
       if (action) {
-        let ctx = ctxByHousehold.get(r.household_id)
-        if (!ctx) {
-          const clientId = await decryptField(r.client_id_enc, rawKey)
-          const clientSecret = await decryptField(r.client_secret_enc, rawKey)
-          const { accessToken } = await getTuyaToken({ clientId, clientSecret, datacenter: r.datacenter })
-          ctx = { clientId, clientSecret, datacenter: r.datacenter, accessToken }
-          ctxByHousehold.set(r.household_id, ctx)
-        }
         await sendAcCommand(ctx, r.ir_parent_id, r.tuya_device_id, 'power', action === 'on' ? 1 : 0)
         await sql`
           UPDATE ac_thermostats
@@ -101,4 +126,9 @@ export async function runAcThermostats(sql, rawKey, { readOutdoorTemp }) {
   }
 
   return { checked, switched, failed }
+}
+
+/** Min. odstęp między progami (°C) — cool: tempOn > tempOff; heat: tempOff > tempOn. */
+export function thermostatThresholdGap(mode, tempOn, tempOff) {
+  return mode === 'heat' ? tempOff - tempOn : tempOn - tempOff
 }

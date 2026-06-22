@@ -8,10 +8,12 @@ vi.mock('./tuya/client.js', async () => {
     getDeviceInfo: vi.fn(),
     getDeviceFunctions: vi.fn(),
     getDeviceStatus: vi.fn(),
+    getAcStatus: vi.fn(),
     listProjectDevices: vi.fn(),
     sendCommands: vi.fn(),
     sendAcCommand: vi.fn(),
     formatStatuses: actual.formatStatuses,
+    formatAcStatus: actual.formatAcStatus,
   }
 })
 
@@ -22,7 +24,7 @@ vi.mock('./weather.js', () => ({
 }))
 
 import { app, upsertUserAndHousehold } from './app.js'
-import { getTuyaToken, sendAcCommand } from './tuya/client.js'
+import { getTuyaToken, sendAcCommand, getAcStatus } from './tuya/client.js'
 import { geocodeCity, getOutdoorTemp } from './weather.js'
 import { runAcThermostats } from './ac-thermostat.js'
 import { decodeFinanceDataKey } from './finance-crypto.js'
@@ -93,8 +95,11 @@ beforeEach(() => {
   createdUserIds = []
   vi.mocked(getTuyaToken).mockReset()
   vi.mocked(sendAcCommand).mockReset()
+  vi.mocked(getAcStatus).mockReset()
   vi.mocked(geocodeCity).mockReset()
   vi.mocked(getOutdoorTemp).mockReset()
+  // Domyślnie: stan klimy nieznany (runner używa last_action jak wcześniej).
+  vi.mocked(getAcStatus).mockResolvedValue({ power: undefined })
 })
 
 afterEach(async () => {
@@ -130,8 +135,8 @@ describe('runner termostatu — cron → decyzja → komenda Tuya', () => {
     const hh = await householdOf(owner.user.id)
     const dev = await addIrAc(hh, owner.user.id)
     await putThermostat(owner.token, dev.id, { enabled: true, lat: 51.1, lon: 17.03, tempOn: 26, tempOff: 24 })
-    // ustaw last_action='on', żeby wyłączenie było realnym przekroczeniem progu
     await sql`UPDATE ac_thermostats SET last_action = 'on' WHERE device_id = ${dev.id}`
+    vi.mocked(getAcStatus).mockResolvedValue({ power: '1' })
 
     const res = await runAcThermostats(sql, rawKey, { readOutdoorTemp: vi.fn().mockResolvedValue(22) })
 
@@ -139,6 +144,22 @@ describe('runner termostatu — cron → decyzja → komenda Tuya', () => {
     expect(sendAcCommand).toHaveBeenCalledWith(expect.anything(), dev.parent, dev.tuyaId, 'power', 0)
     const [t] = await sql`SELECT last_action FROM ac_thermostats WHERE device_id = ${dev.id}`
     expect(t.last_action).toBe('off')
+  })
+
+  it('nie wysyła power=0, gdy Tuya zgłasza że klima już jest wyłączona', async () => {
+    const owner = await createOwnerWithCreds()
+    const hh = await householdOf(owner.user.id)
+    const dev = await addIrAc(hh, owner.user.id)
+    await putThermostat(owner.token, dev.id, { enabled: true, lat: 51.1, lon: 17.03, tempOn: 26, tempOff: 24 })
+    await sql`UPDATE ac_thermostats SET last_action = 'on' WHERE device_id = ${dev.id}`
+    vi.mocked(getAcStatus).mockResolvedValue({ power: '0' })
+
+    const res = await runAcThermostats(sql, rawKey, { readOutdoorTemp: vi.fn().mockResolvedValue(22) })
+
+    expect(res).toMatchObject({ checked: 1, switched: 0 })
+    expect(sendAcCommand).not.toHaveBeenCalled()
+    const [t] = await sql`SELECT last_action FROM ac_thermostats WHERE device_id = ${dev.id}`
+    expect(t.last_action).toBe('on')
   })
 
   it('w strefie martwej nie wysyła komendy, ale zapisuje last_checked_at i temperaturę', async () => {
@@ -188,14 +209,39 @@ describe('runner termostatu — cron → decyzja → komenda Tuya', () => {
 })
 
 describe('PUT /api/smart-devices/:id/thermostat — walidacja', () => {
-  it('odrzuca tempOn <= tempOff (za mała strefa martwa)', async () => {
+  it('odrzuca tempOn <= tempOff w trybie chłodzenia (za mała strefa martwa)', async () => {
     const owner = await createOwnerWithCreds()
     const hh = await householdOf(owner.user.id)
     const dev = await addIrAc(hh, owner.user.id)
 
-    const res = await putThermostat(owner.token, dev.id, { enabled: true, tempOn: 24, tempOff: 24 })
+    const res = await putThermostat(owner.token, dev.id, { enabled: true, mode: 'cool', tempOn: 24, tempOff: 24 })
     expect(res.status).toBe(400)
     expect((await res.json()).error).toBe('threshold_order')
+  })
+
+  it('odrzuca tempOff <= tempOn w trybie grzania', async () => {
+    const owner = await createOwnerWithCreds()
+    const hh = await householdOf(owner.user.id)
+    const dev = await addIrAc(hh, owner.user.id)
+
+    const res = await putThermostat(owner.token, dev.id, { enabled: true, mode: 'heat', tempOn: 8, tempOff: 5 })
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe('threshold_order')
+  })
+
+  it('grzanie: zimno na zewnątrz włącza klimę (power=1)', async () => {
+    const owner = await createOwnerWithCreds()
+    const hh = await householdOf(owner.user.id)
+    const dev = await addIrAc(hh, owner.user.id)
+    await putThermostat(owner.token, dev.id, {
+      enabled: true, mode: 'heat', lat: 51.1, lon: 17.03, tempOn: 5, tempOff: 8,
+    })
+    vi.mocked(getAcStatus).mockResolvedValue({ power: '0' })
+
+    const res = await runAcThermostats(sql, rawKey, { readOutdoorTemp: vi.fn().mockResolvedValue(3) })
+
+    expect(res).toMatchObject({ checked: 1, switched: 1 })
+    expect(sendAcCommand).toHaveBeenCalledWith(expect.anything(), dev.parent, dev.tuyaId, 'power', 1)
   })
 
   it('odrzuca konfigurację dla urządzenia nie będącego klimą IR', async () => {

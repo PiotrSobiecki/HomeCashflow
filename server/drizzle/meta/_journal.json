@@ -141,6 +141,20 @@
       "when": 1782108711602,
       "tag": "0019_skinny_red_skull",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1782200000000,
+      "tag": "0020_ac_thermostat_mode",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1782200000001,
+      "tag": "0021_rename_thermostat_mode",
+      "breakpoints": true
     }
   ]
 }

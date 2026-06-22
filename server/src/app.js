@@ -48,6 +48,7 @@ import {
 } from "./finance-relational.js";
 import { logAction } from "./action-log.js";
 import { geocodeCity, getOutdoorTemp } from "./weather.js";
+import { thermostatThresholdGap } from "./ac-thermostat.js";
 
 // Snapshoty kolumn dla action_log — zachowujemy ciphertext bez deszyfrowania.
 // Pozwala undo zapisać te same bajty z powrotem do tabel docelowych.
@@ -2884,6 +2885,7 @@ function serializeThermostat(t) {
   const num = (v) => (v == null ? null : Number(v));
   return {
     enabled: t.enabled,
+    mode: t.climate_mode === "heat" ? "heat" : "cool",
     locationLabel: t.location_label,
     lat: num(t.lat),
     lon: num(t.lon),
@@ -2905,7 +2907,7 @@ app.get("/api/smart-devices/:id/thermostat", authMiddleware, async (c) => {
   if (result.error) return c.json(result.error.body, result.error.status);
 
   const [t] = await sql`
-    SELECT enabled, location_label, lat, lon, temp_on, temp_off,
+    SELECT enabled, climate_mode, location_label, lat, lon, temp_on, temp_off,
            last_action, last_outdoor_temp, last_checked_at
     FROM ac_thermostats WHERE device_id = ${id}
   `;
@@ -2957,7 +2959,9 @@ app.put("/api/smart-devices/:id/thermostat", authMiddleware, async (c) => {
   const tempOff = Number(body?.tempOff);
   if (!Number.isFinite(tempOn) || !Number.isFinite(tempOff))
     return c.json({ error: "thresholds_required" }, 400);
-  if (tempOn - tempOff < THERMOSTAT_MIN_DEADZONE)
+
+  const mode = body?.mode === "heat" ? "heat" : "cool";
+  if (thermostatThresholdGap(mode, tempOn, tempOff) < THERMOSTAT_MIN_DEADZONE)
     return c.json({ error: "threshold_order" }, 400);
 
   const enabled = body?.enabled === true;
@@ -2986,18 +2990,19 @@ app.put("/api/smart-devices/:id/thermostat", authMiddleware, async (c) => {
 
   const [t] = await sql`
     INSERT INTO ac_thermostats
-      (device_id, household_id, enabled, location_label, lat, lon, temp_on, temp_off)
+      (device_id, household_id, enabled, climate_mode, location_label, lat, lon, temp_on, temp_off)
     VALUES
-      (${id}, ${result.row.household_id}, ${enabled}, ${locationLabel}, ${lat}, ${lon}, ${tempOn}, ${tempOff})
+      (${id}, ${result.row.household_id}, ${enabled}, ${mode}, ${locationLabel}, ${lat}, ${lon}, ${tempOn}, ${tempOff})
     ON CONFLICT (device_id) DO UPDATE SET
       enabled = EXCLUDED.enabled,
+      climate_mode = EXCLUDED.climate_mode,
       location_label = EXCLUDED.location_label,
       lat = EXCLUDED.lat,
       lon = EXCLUDED.lon,
       temp_on = EXCLUDED.temp_on,
       temp_off = EXCLUDED.temp_off,
       updated_at = NOW()
-    RETURNING enabled, location_label, lat, lon, temp_on, temp_off,
+    RETURNING enabled, climate_mode, location_label, lat, lon, temp_on, temp_off,
               last_action, last_outdoor_temp, last_checked_at
   `;
   return c.json({ thermostat: serializeThermostat(t) });
