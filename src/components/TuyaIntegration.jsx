@@ -219,13 +219,23 @@ export const TuyaIntegration = () => {
             />
             <span className="text-sm text-slate-400">zł</span>
             {configured && (
-              <button
-                type="button" onClick={handleSavePrice} disabled={priceSaving}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-indigo-300 hover:text-white hover:bg-indigo-500/20 border border-indigo-500/40 rounded-lg transition-colors disabled:opacity-50"
-              >
-                {priceSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                Zapisz cenę
-              </button>
+              <>
+                <button
+                  type="button" onClick={handleSavePrice} disabled={priceSaving}
+                  className="p-1 text-emerald-400 hover:bg-emerald-500/20 rounded disabled:opacity-50"
+                  aria-label="Zapisz cenę"
+                >
+                  {priceSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                </button>
+                <button
+                  type="button" disabled={priceSaving}
+                  onClick={() => { setField('energyPrice')({ target: { value: status.energyPricePln != null ? String(status.energyPricePln) : '' } }); setPriceMsg('') }}
+                  className="p-1 text-slate-400 hover:bg-slate-600 rounded disabled:opacity-50"
+                  aria-label="Cofnij zmianę ceny"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </>
             )}
             {priceMsg && (
               <span className={`text-xs ${priceMsg.includes('✓') ? 'text-emerald-400' : 'text-rose-400'}`}>{priceMsg}</span>
