@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Thermometer,
   ChevronDown,
@@ -19,9 +19,10 @@ const ERRORS = {
   geocode_no_result: "Nie znaleziono takiej miejscowości.",
   geocode_failed: "Nie udało się pobrać lokalizacji. Spróbuj ponownie.",
   threshold_order_cool:
-    "Chłodzenie: próg włączenia musi być wyższy od wyłączenia (min. 1°C odstępu).",
+    "„Włącz powyżej” musi być większe od „Wyłącz poniżej”.",
   threshold_order_heat:
-    "Grzanie: próg wyłączenia musi być wyższy od włączenia (min. 1°C odstępu).",
+    "„Włącz poniżej” musi być mniejsze od „Wyłącz powyżej”.",
+  threshold_gap: "Min. 1°C odstępu między progami.",
   thresholds_required: "Podaj oba progi temperatury.",
 };
 
@@ -50,6 +51,17 @@ const cityName = (label) => (label ?? "").split(",")[0].trim();
 
 const thresholdGap = (mode, on, off) =>
   mode === "heat" ? off - on : on - off;
+
+const thresholdError = (mode, on, off) => {
+  if (!Number.isFinite(on) || !Number.isFinite(off))
+    return ERRORS.thresholds_required;
+  if (mode === "heat" && on >= off) return ERRORS.threshold_order_heat;
+  if (mode === "cool" && on <= off) return ERRORS.threshold_order_cool;
+  if (thresholdGap(mode, on, off) < 1) return ERRORS.threshold_gap;
+  return null;
+};
+
+const parseTemp = (s) => Number(String(s).replace(",", "."));
 
 const thresholdLabels = (mode) =>
   mode === "heat"
@@ -179,20 +191,44 @@ export const ThermostatSettings = ({ deviceId, disabled, acMode }) => {
   };
 
   const climateMode = climateModeFromAc(acMode, cfg?.mode);
+  const prevClimateMode = useRef(climateMode);
+
+  // Po przełączeniu Trybu u góry (chłodzenie ↔ grzanie) zamień progi, jeśli kolejność jest odwrotna.
+  useEffect(() => {
+    if (prevClimateMode.current === climateMode) return;
+    const on = parseTemp(tempOn);
+    const off = parseTemp(tempOff);
+    if (Number.isFinite(on) && Number.isFinite(off) && thresholdGap(climateMode, on, off) < 1) {
+      setTempOn(String(off));
+      setTempOff(String(on));
+      setMsg("");
+    }
+    prevClimateMode.current = climateMode;
+  }, [climateMode, tempOn, tempOff]);
+
+  const parsedOn = parseTemp(tempOn);
+  const parsedOff = parseTemp(tempOff);
+  const thresholdErr =
+    tempOn.trim() && tempOff.trim()
+      ? thresholdError(climateMode, parsedOn, parsedOff)
+      : null;
+  const invalidThresholds = thresholdErr != null && thresholdErr !== ERRORS.thresholds_required;
+  const onOrderInvalid =
+    invalidThresholds &&
+    Number.isFinite(parsedOn) &&
+    Number.isFinite(parsedOff) &&
+    (climateMode === "heat"
+      ? parsedOn >= parsedOff
+      : climateMode === "cool"
+        ? parsedOn <= parsedOff
+        : false);
 
   const save = async () => {
-    const on = Number(String(tempOn).replace(",", "."));
-    const off = Number(String(tempOff).replace(",", "."));
-    if (!Number.isFinite(on) || !Number.isFinite(off)) {
-      setMsg(ERRORS.thresholds_required);
-      return;
-    }
-    if (thresholdGap(climateMode, on, off) < 1) {
-      setMsg(
-        climateMode === "heat"
-          ? ERRORS.threshold_order_heat
-          : ERRORS.threshold_order_cool,
-      );
+    const on = parsedOn;
+    const off = parsedOff;
+    const err = thresholdError(climateMode, on, off);
+    if (err) {
+      setMsg(err);
       return;
     }
     if (enabled && !city.trim() && cfg?.lat == null) {
@@ -373,10 +409,20 @@ export const ThermostatSettings = ({ deviceId, disabled, acMode }) => {
                     setTempOn(e.target.value);
                     setMsg("");
                   }}
-                  className={`${fieldClass} text-center tabular-nums`}
+                  className={`${fieldClass} text-center tabular-nums${onOrderInvalid ? " border-rose-500/70 focus:border-rose-500" : ""}`}
                 />
                 <span className="text-xs text-slate-500 shrink-0">°C</span>
               </div>
+              {onOrderInvalid && climateMode === "heat" && (
+                <p className="text-[10px] text-rose-400 leading-snug">
+                  Musi być mniejsze od „Wyłącz powyżej”.
+                </p>
+              )}
+              {onOrderInvalid && climateMode === "cool" && (
+                <p className="text-[10px] text-rose-400 leading-snug">
+                  Musi być większe od „Wyłącz poniżej”.
+                </p>
+              )}
             </div>
             <div className="space-y-1">
               <label
@@ -396,12 +442,16 @@ export const ThermostatSettings = ({ deviceId, disabled, acMode }) => {
                     setTempOff(e.target.value);
                     setMsg("");
                   }}
-                  className={`${fieldClass} text-center tabular-nums`}
+                  className={`${fieldClass} text-center tabular-nums${invalidThresholds && !onOrderInvalid ? " border-rose-500/70 focus:border-rose-500" : ""}`}
                 />
                 <span className="text-xs text-slate-500 shrink-0">°C</span>
               </div>
             </div>
           </div>
+
+          {invalidThresholds && thresholdErr === ERRORS.threshold_gap && (
+            <p className="text-[11px] text-rose-400 leading-snug">{thresholdErr}</p>
+          )}
 
           {enabled && (
             <p className="flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-2.5 py-2 text-[11px] leading-snug text-amber-200/90">
@@ -414,7 +464,7 @@ export const ThermostatSettings = ({ deviceId, disabled, acMode }) => {
             <button
               type="button"
               onClick={save}
-              disabled={disabled || saving}
+              disabled={disabled || saving || invalidThresholds}
               className="w-full flex items-center justify-center gap-1.5 px-3 py-2 bg-indigo-500 hover:bg-indigo-600 text-white text-xs font-medium rounded-lg transition-colors disabled:opacity-50"
             >
               {saving ? (
