@@ -23,7 +23,7 @@ vi.mock('./weather.js', () => ({
 
 import { app, upsertUserAndHousehold } from './app.js'
 import { getTuyaToken, sendAcCommand } from './tuya/client.js'
-import { geocodeCity } from './weather.js'
+import { geocodeCity, getOutdoorTemp } from './weather.js'
 import { runAcThermostats } from './ac-thermostat.js'
 import { decodeFinanceDataKey } from './finance-crypto.js'
 import { neon } from '@neondatabase/serverless'
@@ -94,6 +94,7 @@ beforeEach(() => {
   vi.mocked(getTuyaToken).mockReset()
   vi.mocked(sendAcCommand).mockReset()
   vi.mocked(geocodeCity).mockReset()
+  vi.mocked(getOutdoorTemp).mockReset()
 })
 
 afterEach(async () => {
@@ -244,5 +245,48 @@ describe('PUT /api/smart-devices/:id/thermostat — walidacja', () => {
     const res = await putThermostat(owner.token, dev.id, { enabled: true, city: 'Xyzzyland', tempOn: 26, tempOff: 24 })
     expect(res.status).toBe(400)
     expect((await res.json()).error).toBe('geocode_no_result')
+  })
+})
+
+describe('GET /api/smart-devices/:id/thermostat/temperature — aktualna temp na zewnątrz', () => {
+  function getTemp(token, deviceId) {
+    return app.request(`/api/smart-devices/${deviceId}/thermostat/temperature`, {
+      headers: { cookie: `token=${token}` },
+    })
+  }
+
+  it('zwraca bieżącą temperaturę dla zapisanej lokalizacji', async () => {
+    vi.mocked(getOutdoorTemp).mockResolvedValue(19.4)
+    const owner = await createOwnerWithCreds()
+    const hh = await householdOf(owner.user.id)
+    const dev = await addIrAc(hh, owner.user.id)
+    await putThermostat(owner.token, dev.id, { enabled: true, lat: 51.1, lon: 17.03, tempOn: 26, tempOff: 24 })
+
+    const res = await getTemp(owner.token, dev.id)
+    expect(res.status).toBe(200)
+    expect((await res.json()).temp).toBe(19.4)
+    expect(vi.mocked(getOutdoorTemp)).toHaveBeenCalledWith({ lat: 51.1, lon: 17.03 })
+  })
+
+  it('zwraca 400 gdy termostat nie ma ustawionej lokalizacji', async () => {
+    const owner = await createOwnerWithCreds()
+    const hh = await householdOf(owner.user.id)
+    const dev = await addIrAc(hh, owner.user.id)
+    await putThermostat(owner.token, dev.id, { enabled: false, tempOn: 26, tempOff: 24 })
+
+    const res = await getTemp(owner.token, dev.id)
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe('no_location')
+  })
+
+  it('zwraca 502 gdy Open-Meteo nie odpowie', async () => {
+    vi.mocked(getOutdoorTemp).mockRejectedValue(new Error('open-meteo down'))
+    const owner = await createOwnerWithCreds()
+    const hh = await householdOf(owner.user.id)
+    const dev = await addIrAc(hh, owner.user.id)
+    await putThermostat(owner.token, dev.id, { enabled: true, lat: 51.1, lon: 17.03, tempOn: 26, tempOff: 24 })
+
+    const res = await getTemp(owner.token, dev.id)
+    expect(res.status).toBe(502)
   })
 })

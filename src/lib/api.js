@@ -462,6 +462,14 @@ export const fetchThermostat = async (id) => {
   return jsonOrThrow(res, 'GET /api/smart-devices/thermostat');
 };
 
+export const fetchThermostatTemperature = async (id) => {
+  const res = await fetch(`${API_URL}/api/smart-devices/${id}/thermostat/temperature`, {
+    credentials: 'include',
+    headers: { Accept: 'application/json' },
+  });
+  return jsonOrThrow(res, 'GET /api/smart-devices/thermostat/temperature');
+};
+
 export const saveThermostat = async (id, body) => {
   const res = await fetch(`${API_URL}/api/smart-devices/${id}/thermostat`, {
     method: 'PUT',
