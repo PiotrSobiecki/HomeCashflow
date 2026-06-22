@@ -14,7 +14,7 @@ import {
   saveThermostat,
   fetchThermostatTemperature,
 } from "../lib/api";
-import { usePolling } from "../hooks/usePolling";
+import { useAlignedPolling } from "../hooks/useAlignedPolling";
 
 const ERRORS = {
   geocode_no_result: "Nie znaleziono takiej miejscowości.",
@@ -29,6 +29,10 @@ const ERRORS = {
 
 // Podpowiedzi miejscowości pojawiają się po wpisaniu tylu liter.
 const MIN_QUERY = 3;
+// Zgodne z worker.js (cron co 5 min, termostat gdy minute % 30 === 0) — minuty UTC.
+const THERMO_CRON_MARKS = [0, 30];
+const OUTDOOR_NOW_MARKS = [0, 15, 30, 45];
+const CRON_SETTLE_MS = 5000; // chwila po :00/:30 UTC — cron zdąży zapisać odczyt
 
 const fmtTime = (iso) => {
   if (!iso) return null;
@@ -129,10 +133,10 @@ export const ThermostatSettings = ({ deviceId, disabled, acMode }) => {
     load();
   }, [load]);
 
-  // Cron zapisuje last_checked_at / last_outdoor_temp co 30 min — odświeżamy konfigurację
-  // w tle (jak status urządzeń), żeby stopka nie wisiała na starym czasie.
-  usePolling({
-    intervalMs: 30000,
+  // Stopka — zsynchronizowana z odczytem crona (:00/:30 UTC + 5 s).
+  useAlignedPolling({
+    marks: THERMO_CRON_MARKS,
+    settleMs: CRON_SETTLE_MS,
     enabled: !!deviceId,
     onTick: load,
     isBlocked: () => saving,
@@ -154,10 +158,18 @@ export const ThermostatSettings = ({ deviceId, disabled, acMode }) => {
     }
   }, [deviceId, cfg?.lat, cfg?.lon]);
 
-  // Bieżąca temp pobierana gdy jest lokalizacja — niezależnie od zwinięcia (ma być zawsze widoczna).
+  // Bieżąca temp — start + co 15 min (:00/:15/:30/:45 UTC).
   useEffect(() => {
     if (hasCoords) loadNow();
   }, [hasCoords, loadNow]);
+
+  useAlignedPolling({
+    marks: OUTDOOR_NOW_MARKS,
+    settleMs: 0,
+    enabled: hasCoords,
+    onTick: loadNow,
+    isBlocked: () => nowLoading,
+  });
 
   // Podpowiedzi miejscowości z Open-Meteo (debounce). Nie szukamy zapisanej już nazwy ani po wyborze.
   useEffect(() => {
