@@ -111,6 +111,7 @@ function StDeviceBody({ status, online }) {
 }
 import { DeviceControls } from './DeviceControls'
 import { AcControls } from './AcControls'
+import { ThermostatSettings } from './ThermostatSettings'
 import { RemoteControls } from './RemoteControls'
 import { WasherSettings } from './WasherSettings'
 import { DeviceTimer } from './DeviceTimer'
@@ -273,6 +274,7 @@ export const SmartDeviceCard = ({
       {isIrAc ? (
         <AcControls ac={status?.ac} onSend={handleSend} disabled={!online}>
           <DeviceTimer deviceId={device.id} disabled={!online} />
+          <ThermostatSettings deviceId={device.id} disabled={!online} />
         </AcControls>
       ) : isIrRemote ? (
         <RemoteControls
@@ -363,6 +365,7 @@ export const SmartDeviceCard = ({
                 ) : rd.deviceType === 'ir_ac' ? (
                   <AcControls ac={rs?.ac} onSend={sendRd} disabled={!online}>
                     <DeviceTimer deviceId={rd.id} disabled={!online} />
+                    <ThermostatSettings deviceId={rd.id} disabled={!online} />
                   </AcControls>
                 ) : (
                   <RemoteControls deviceId={rd.id} disabled={!online} powerOn={setOn} plugW={status?.powerW}>

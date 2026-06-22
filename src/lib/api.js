@@ -454,6 +454,31 @@ export const setDeviceTimer = async (id, minutes) => {
   return jsonOrThrow(res, 'POST /api/smart-devices/timer');
 };
 
+export const fetchThermostat = async (id) => {
+  const res = await fetch(`${API_URL}/api/smart-devices/${id}/thermostat`, {
+    credentials: 'include',
+    headers: { Accept: 'application/json' },
+  });
+  return jsonOrThrow(res, 'GET /api/smart-devices/thermostat');
+};
+
+export const saveThermostat = async (id, body) => {
+  const res = await fetch(`${API_URL}/api/smart-devices/${id}/thermostat`, {
+    method: 'PUT',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(data.error || `PUT /api/smart-devices/thermostat: ${res.status}`);
+    err.code = data.error;
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+};
+
 export const fetchDeviceHistory = async (id, range) => {
   const res = await fetch(`${API_URL}/api/smart-devices/${id}/history?range=${range}`, {
     credentials: 'include',
