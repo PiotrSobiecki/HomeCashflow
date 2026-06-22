@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
-  Thermometer, ChevronDown, ChevronRight, Loader2, Check, AlertTriangle, RefreshCw,
+  Thermometer, ChevronDown, ChevronRight, Loader2, Check, AlertTriangle, MapPin, RefreshCw,
 } from 'lucide-react'
 import { fetchThermostat, saveThermostat, fetchThermostatTemperature } from '../lib/api'
 
@@ -11,16 +11,8 @@ const ERRORS = {
   thresholds_required: 'Podaj oba progi temperatury.',
 }
 
-// Lista rozwijana miejscowości (większe miasta PL). Wybór trafia do geokodowania po stronie backendu.
-const CITIES = [
-  'Białystok', 'Bielsko-Biała', 'Bydgoszcz', 'Bytom', 'Chorzów', 'Częstochowa',
-  'Dąbrowa Górnicza', 'Elbląg', 'Gdańsk', 'Gdynia', 'Gliwice', 'Gorzów Wielkopolski',
-  'Grudziądz', 'Jaworzno', 'Jelenia Góra', 'Kalisz', 'Katowice', 'Kielce', 'Konin',
-  'Koszalin', 'Kraków', 'Legnica', 'Leszno', 'Lublin', 'Łódź', 'Olsztyn', 'Opole',
-  'Ostrów Wielkopolski', 'Płock', 'Poznań', 'Radom', 'Ruda Śląska', 'Rybnik', 'Rzeszów',
-  'Siedlce', 'Słupsk', 'Sosnowiec', 'Szczecin', 'Tarnów', 'Toruń', 'Tychy', 'Wałbrzych',
-  'Warszawa', 'Włocławek', 'Wrocław', 'Zabrze', 'Zamość', 'Zielona Góra',
-]
+// Podpowiedzi miejscowości pojawiają się po wpisaniu tylu liter.
+const MIN_QUERY = 3
 
 const fmtTime = (iso) => {
   if (!iso) return null
@@ -33,7 +25,7 @@ const fmtTime = (iso) => {
 
 const lastActionLabel = (a) => (a === 'on' ? 'włączyła klimę' : a === 'off' ? 'wyłączyła klimę' : '—')
 
-// Z etykiety „Wrocław, Dolnośląskie, Polska" robimy samą nazwę miasta (wartość selecta).
+// Z etykiety „Wrocław, Dolnośląskie, Polska" robimy samą nazwę miasta.
 const cityName = (label) => (label ?? '').split(',')[0].trim()
 
 const fieldClass =
@@ -41,8 +33,8 @@ const fieldClass =
 
 /**
  * Sekcja „Termostat zewnętrzny" dla klimy IR (ir_ac). Pozwala włączyć automatykę,
- * wybrać miejscowość i dwa progi histerezy; bieżąca temperatura na zewnątrz jest zawsze
- * widoczna (nad zwijaniem), a pod zwijaniem reszta ustawień + ostatni odczyt/akcja.
+ * wpisać miejscowość (z podpowiedziami z Open-Meteo) i dwa progi histerezy; bieżąca
+ * temperatura na zewnątrz jest zawsze widoczna (nad zwijaniem).
  * @param {string} deviceId
  * @param {boolean} disabled
  */
@@ -55,6 +47,9 @@ export const ThermostatSettings = ({ deviceId, disabled }) => {
   const [tempOff, setTempOff] = useState('24')
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
+  // Podpowiedzi miejscowości + wybrana (precyzyjne lat/lon, bez ponownego geokodowania).
+  const [suggestions, setSuggestions] = useState([])
+  const [picked, setPicked] = useState(null)
   // Bieżąca temperatura na zewnątrz.
   const [now, setNow] = useState(null)
   const [nowLoading, setNowLoading] = useState(false)
@@ -97,24 +92,70 @@ export const ThermostatSettings = ({ deviceId, disabled }) => {
     if (hasCoords) loadNow()
   }, [hasCoords, loadNow])
 
+  // Podpowiedzi miejscowości z Open-Meteo (debounce). Nie szukamy zapisanej już nazwy ani po wyborze.
+  useEffect(() => {
+    const q = city.trim()
+    if (q.length < MIN_QUERY || picked || q === cityName(cfg?.locationLabel)) {
+      setSuggestions([])
+      return
+    }
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch(
+          `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=5&language=pl&format=json`,
+        )
+        const data = await res.json()
+        setSuggestions(
+          (data?.results ?? []).map((r) => ({
+            id: r.id ?? `${r.latitude}-${r.longitude}`,
+            name: r.name,
+            lat: r.latitude,
+            lon: r.longitude,
+            label: [r.name, r.admin1, r.country].filter(Boolean).join(', '),
+          })),
+        )
+      } catch {
+        setSuggestions([])
+      }
+    }, 300)
+    return () => clearTimeout(t)
+  }, [city, picked, cfg?.locationLabel])
+
+  const onCityChange = (e) => {
+    setCity(e.target.value)
+    setPicked(null)
+    setMsg('')
+  }
+
+  const pickCity = (s) => {
+    setCity(s.name)
+    setPicked({ lat: s.lat, lon: s.lon, label: s.label })
+    setSuggestions([])
+    setMsg('')
+  }
+
   const save = async () => {
     const on = Number(String(tempOn).replace(',', '.'))
     const off = Number(String(tempOff).replace(',', '.'))
     if (!Number.isFinite(on) || !Number.isFinite(off)) { setMsg(ERRORS.thresholds_required); return }
-    if (enabled && !city && cfg?.lat == null) { setMsg('Wybierz miejscowość, żeby włączyć automatykę.'); return }
+    if (enabled && !city.trim() && cfg?.lat == null) { setMsg('Podaj miejscowość, żeby włączyć automatykę.'); return }
 
     setSaving(true); setMsg('')
     try {
       const body = { enabled, tempOn: on, tempOff: off }
-      // Geokodujemy tylko gdy wybrano inne miasto niż zapisane (raz na zmianę).
-      if (city && city !== cityName(cfg?.locationLabel)) {
-        body.city = city
+      if (picked) {
+        // Wybrano z podpowiedzi — mamy dokładne współrzędne, bez ponownego geokodowania.
+        body.lat = picked.lat; body.lon = picked.lon; body.locationLabel = picked.label
+      } else if (city.trim() && city.trim() !== cityName(cfg?.locationLabel)) {
+        // Wpisano ręcznie i nie wybrano — backend zgeokoduje nazwę.
+        body.city = city.trim()
       } else if (cfg?.lat != null) {
         body.lat = cfg.lat; body.lon = cfg.lon; body.locationLabel = cfg.locationLabel
       }
       const { thermostat } = await saveThermostat(deviceId, body)
       setCfg(thermostat)
       setCity(cityName(thermostat.locationLabel))
+      setPicked(null)
       setMsg('Zapisano ✓')
     } catch (err) {
       setMsg(ERRORS[err.code] || 'Nie udało się zapisać.')
@@ -126,8 +167,6 @@ export const ThermostatSettings = ({ deviceId, disabled }) => {
   const lastTemp = cfg?.lastOutdoorTemp
   const lastAt = fmtTime(cfg?.lastCheckedAt)
   const saved = msg.includes('✓')
-  // Miasto spoza listy (np. zapisane wcześniej) dokładamy jako opcję, żeby select je pokazał.
-  const cityOptions = city && !CITIES.includes(city) ? [city, ...CITIES] : CITIES
 
   return (
     <div className="pt-3 mt-1 border-t border-slate-700/40">
@@ -189,18 +228,35 @@ export const ThermostatSettings = ({ deviceId, disabled }) => {
             <label htmlFor={`thermo-city-${deviceId}`} className="text-[11px] text-slate-400">
               Miejscowość
             </label>
-            <select
-              id={`thermo-city-${deviceId}`}
-              value={city}
-              disabled={disabled}
-              onChange={(e) => { setCity(e.target.value); setMsg('') }}
-              className={fieldClass}
-            >
-              <option value="">— wybierz miejscowość —</option>
-              {cityOptions.map((c) => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
+            <div className="relative">
+              <MapPin className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500 pointer-events-none z-10" />
+              <input
+                id={`thermo-city-${deviceId}`}
+                type="text"
+                value={city}
+                disabled={disabled}
+                onChange={onCityChange}
+                placeholder="np. Wrocław"
+                autoComplete="off"
+                className={`${fieldClass} pl-8`}
+              />
+              {suggestions.length > 0 && (
+                <ul className="absolute z-20 left-0 right-0 mt-1 max-h-44 overflow-auto rounded-lg border border-slate-600 bg-slate-900 shadow-xl">
+                  {suggestions.map((s) => (
+                    <li key={s.id}>
+                      <button
+                        type="button"
+                        onClick={() => pickCity(s)}
+                        className="w-full flex items-center gap-1.5 text-left px-2.5 py-1.5 text-xs text-slate-200 hover:bg-indigo-500/20"
+                      >
+                        <MapPin className="w-3 h-3 text-slate-500 shrink-0" />
+                        <span className="truncate">{s.label}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-2">
