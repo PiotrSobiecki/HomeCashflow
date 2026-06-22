@@ -150,10 +150,10 @@
       "breakpoints": true
     },
     {
-      "idx": 21,
+      "idx": 22,
       "version": "7",
-      "when": 1782200000001,
-      "tag": "0021_rename_thermostat_mode",
+      "when": 1782200000002,
+      "tag": "0022_ac_thermostat_last_check_action",
       "breakpoints": true
     }
   ]

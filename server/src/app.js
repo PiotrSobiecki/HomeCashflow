@@ -2892,6 +2892,7 @@ function serializeThermostat(t) {
     tempOn: num(t.temp_on),
     tempOff: num(t.temp_off),
     lastAction: t.last_action,
+    lastCheckAction: t.last_check_action,
     lastOutdoorTemp: num(t.last_outdoor_temp),
     lastCheckedAt: t.last_checked_at ? toIso(t.last_checked_at) : null,
   };
@@ -2908,7 +2909,7 @@ app.get("/api/smart-devices/:id/thermostat", authMiddleware, async (c) => {
 
   const [t] = await sql`
     SELECT enabled, climate_mode, location_label, lat, lon, temp_on, temp_off,
-           last_action, last_outdoor_temp, last_checked_at
+           last_action, last_check_action, last_outdoor_temp, last_checked_at
     FROM ac_thermostats WHERE device_id = ${id}
   `;
   if (!t) return c.json({ thermostat: null });
@@ -3003,7 +3004,7 @@ app.put("/api/smart-devices/:id/thermostat", authMiddleware, async (c) => {
       temp_off = EXCLUDED.temp_off,
       updated_at = NOW()
     RETURNING enabled, climate_mode, location_label, lat, lon, temp_on, temp_off,
-              last_action, last_outdoor_temp, last_checked_at
+              last_action, last_check_action, last_outdoor_temp, last_checked_at
   `;
   return c.json({ thermostat: serializeThermostat(t) });
 });

@@ -125,8 +125,9 @@ describe('runner termostatu — cron → decyzja → komenda Tuya', () => {
     expect(res).toMatchObject({ checked: 1, switched: 1 })
     expect(sendAcCommand).toHaveBeenCalledWith(expect.anything(), dev.parent, dev.tuyaId, 'power', 1)
 
-    const [t] = await sql`SELECT last_action, last_outdoor_temp FROM ac_thermostats WHERE device_id = ${dev.id}`
+    const [t] = await sql`SELECT last_action, last_check_action, last_outdoor_temp FROM ac_thermostats WHERE device_id = ${dev.id}`
     expect(t.last_action).toBe('on')
+    expect(t.last_check_action).toBe('on')
     expect(Number(t.last_outdoor_temp)).toBe(28)
   })
 
@@ -142,8 +143,9 @@ describe('runner termostatu — cron → decyzja → komenda Tuya', () => {
 
     expect(res).toMatchObject({ switched: 1 })
     expect(sendAcCommand).toHaveBeenCalledWith(expect.anything(), dev.parent, dev.tuyaId, 'power', 0)
-    const [t] = await sql`SELECT last_action FROM ac_thermostats WHERE device_id = ${dev.id}`
+    const [t] = await sql`SELECT last_action, last_check_action FROM ac_thermostats WHERE device_id = ${dev.id}`
     expect(t.last_action).toBe('off')
+    expect(t.last_check_action).toBe('off')
   })
 
   it('nie wysyła power=0, gdy Tuya zgłasza że klima już jest wyłączona', async () => {
@@ -158,8 +160,9 @@ describe('runner termostatu — cron → decyzja → komenda Tuya', () => {
 
     expect(res).toMatchObject({ checked: 1, switched: 0 })
     expect(sendAcCommand).not.toHaveBeenCalled()
-    const [t] = await sql`SELECT last_action FROM ac_thermostats WHERE device_id = ${dev.id}`
+    const [t] = await sql`SELECT last_action, last_check_action FROM ac_thermostats WHERE device_id = ${dev.id}`
     expect(t.last_action).toBe('on')
+    expect(t.last_check_action).toBe(null)
   })
 
   it('w strefie martwej nie wysyła komendy, ale zapisuje last_checked_at i temperaturę', async () => {
@@ -172,8 +175,9 @@ describe('runner termostatu — cron → decyzja → komenda Tuya', () => {
 
     expect(res).toMatchObject({ checked: 1, switched: 0 })
     expect(sendAcCommand).not.toHaveBeenCalled()
-    const [t] = await sql`SELECT last_action, last_outdoor_temp, last_checked_at FROM ac_thermostats WHERE device_id = ${dev.id}`
+    const [t] = await sql`SELECT last_action, last_check_action, last_outdoor_temp, last_checked_at FROM ac_thermostats WHERE device_id = ${dev.id}`
     expect(t.last_action).toBe(null)
+    expect(t.last_check_action).toBe(null)
     expect(Number(t.last_outdoor_temp)).toBe(25)
     expect(t.last_checked_at).not.toBe(null)
   })
@@ -265,7 +269,7 @@ describe('PUT /api/smart-devices/:id/thermostat — walidacja', () => {
     await putThermostat(owner.token, dev.id, { enabled: true, locationLabel: 'Wrocław', lat: 51.1, lon: 17.03, tempOn: 26, tempOff: 24 })
 
     const t = (await (await getThermostat(owner.token, dev.id)).json()).thermostat
-    expect(t).toMatchObject({ enabled: true, locationLabel: 'Wrocław', tempOn: 26, tempOff: 24, lastAction: null })
+    expect(t).toMatchObject({ enabled: true, locationLabel: 'Wrocław', tempOn: 26, tempOff: 24, lastAction: null, lastCheckAction: null })
   })
 
   it('po podaniu miasta geokoduje raz i zapisuje lat/lon + etykietę', async () => {

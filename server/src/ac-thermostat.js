@@ -116,15 +116,16 @@ export async function runAcThermostats(sql, rawKey, { readOutdoorTemp }) {
         await sendAcCommand(ctx, r.ir_parent_id, r.tuya_device_id, 'power', action === 'on' ? 1 : 0)
         await sql`
           UPDATE ac_thermostats
-          SET last_action = ${action}, last_outdoor_temp = ${temp}, last_checked_at = NOW()
+          SET last_action = ${action}, last_check_action = ${action},
+              last_outdoor_temp = ${temp}, last_checked_at = NOW()
           WHERE id = ${r.id}
         `
         switched++
       } else {
-        // Strefa martwa / stan już osiągnięty: zapisujemy że sprawdziliśmy, klimy nie ruszamy.
+        // Strefa martwa / stan już osiągnięty: zapisujemy odczyt, bez opisu akcji w UI.
         await sql`
           UPDATE ac_thermostats
-          SET last_outdoor_temp = ${temp}, last_checked_at = NOW()
+          SET last_check_action = NULL, last_outdoor_temp = ${temp}, last_checked_at = NOW()
           WHERE id = ${r.id}
         `
       }

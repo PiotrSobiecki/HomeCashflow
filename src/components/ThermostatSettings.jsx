@@ -44,13 +44,9 @@ const fmtTime = (iso) => {
   }
 };
 
-/** Ostatnia komenda wysłana przez cron (nie „teraz" — zmienia się tylko przy przełączeniu). */
-const lastActionLabel = (a) =>
-  a === "on"
-    ? "ostatnio włączyła klimę"
-    : a === "off"
-      ? "ostatnio wyłączyła klimę"
-      : null;
+/** Etykieta tylko gdy przy ostatnim odczycie cron faktycznie przełączył klimę. */
+const lastCheckActionLabel = (a) =>
+  a === "on" ? "włączyła klimę" : a === "off" ? "wyłączyła klimę" : null;
 
 // Z etykiety „Wrocław, Dolnośląskie, Polska" robimy samą nazwę miasta.
 const cityName = (label) => (label ?? "").split(",")[0].trim();
@@ -290,7 +286,7 @@ export const ThermostatSettings = ({ deviceId, disabled, acMode }) => {
   const lastAt = fmtTime(cfg?.lastCheckedAt);
   const saved = msg.includes("✓");
   const labels = thresholdLabels(climateMode);
-  const autoLabel = lastActionLabel(cfg?.lastAction);
+  const autoLabel = lastCheckActionLabel(cfg?.lastCheckAction);
 
   return (
     <div className="pt-3 mt-1 border-t border-slate-700/40">

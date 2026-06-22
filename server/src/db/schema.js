@@ -323,8 +323,10 @@ export const acThermostats = pgTable('ac_thermostats', {
   // Progi histerezy — znaczenie zależy od mode (patrz komentarz wyżej).
   tempOn: numeric('temp_on', { precision: 4, scale: 1 }).notNull(),
   tempOff: numeric('temp_off', { precision: 4, scale: 1 }).notNull(),
-  // Ostatnia akcja automatyki — tylko gdy faktycznie wysłano komendę (nie przy synchronizacji ze stanem Tuya).
+  // Ostatnia akcja automatyki — edge-trigger (stan docelowy dla decide()).
   lastAction: text('last_action'),
+  // Akcja z ostatniego cyklu crona — tylko gdy przy tym odczycie wysłano komendę (UI stopki).
+  lastCheckAction: text('last_check_action'),
   lastOutdoorTemp: numeric('last_outdoor_temp', { precision: 4, scale: 1 }),
   lastCheckedAt: timestamp('last_checked_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
@@ -337,6 +339,7 @@ export const acThermostats = pgTable('ac_thermostats', {
     sql`(${t.climateMode} = 'cool' AND ${t.tempOn} > ${t.tempOff}) OR (${t.climateMode} = 'heat' AND ${t.tempOff} > ${t.tempOn})`,
   ),
   lastActionCheck: check('ac_thermostats_last_action_check', sql`${t.lastAction} IS NULL OR ${t.lastAction} IN ('on', 'off')`),
+  lastCheckActionCheck: check('ac_thermostats_last_check_action_check', sql`${t.lastCheckAction} IS NULL OR ${t.lastCheckAction} IN ('on', 'off')`),
 }))
 
 // ====== Pomiary zużycia w czasie (Slice 4 — wykresy) ======
