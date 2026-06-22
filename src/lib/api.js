@@ -210,6 +210,24 @@ export const deleteTuyaCredentials = async () => {
   return true;
 };
 
+/** PATCH samej ceny kWh — bez ruszania poświadczeń (te nie wracają z backendu). */
+export const updateTuyaEnergyPrice = async (energyPricePln) => {
+  const res = await fetch(`${API_URL}/api/tuya/credentials/price`, {
+    method: 'PATCH',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ energyPricePln }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(data.error || `PATCH /api/tuya/credentials/price: ${res.status}`);
+    err.code = data.error;
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+};
+
 // ===== SmartThings (OAuth-In, Faza 1) =====
 
 /** GET status połączenia SmartThings → { connected, verifiedAt }. */

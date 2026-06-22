@@ -301,6 +301,37 @@ export const deviceTimers = pgTable('device_timers', {
   uniqPending: uniqueIndex('uniq_device_timer_pending').on(t.deviceId).where(sql`${t.status} = 'pending'`),
 }))
 
+// ====== Termostat zewnętrzny dla klimy IR (Tuya ir_ac) ======
+//
+// Per urządzenie ir_ac: automatyka włącza/wyłącza klimę wg temperatury zewnętrznej
+// z danej miejscowości. Cron co 30 min odczytuje temp i woła decide() (histereza +
+// edge-trigger). last_action to ostatnia komenda wysłana przez automatykę — służy do
+// edge-triggera (nie ponawiamy, nie nadpisujemy ręcznych zmian w strefie martwej).
+// Jeden termostat per urządzenie (UNIQUE device_id).
+export const acThermostats = pgTable('ac_thermostats', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  deviceId: uuid('device_id').notNull().unique().references(() => smartDevices.id, { onDelete: 'cascade' }),
+  householdId: uuid('household_id').notNull().references(() => households.id, { onDelete: 'cascade' }),
+  enabled: boolean('enabled').notNull().default(false),
+  // Miejscowość: etykieta do wyświetlenia + współrzędne (geocoding w Fazie 3).
+  locationLabel: text('location_label'),
+  lat: numeric('lat', { precision: 8, scale: 5 }),
+  lon: numeric('lon', { precision: 8, scale: 5 }),
+  // Progi histerezy: włącz gdy temp ≥ temp_on, wyłącz gdy temp ≤ temp_off.
+  tempOn: numeric('temp_on', { precision: 4, scale: 1 }).notNull(),
+  tempOff: numeric('temp_off', { precision: 4, scale: 1 }).notNull(),
+  // Ostatnia akcja automatyki (NULL = jeszcze nie działała). Klucz edge-triggera.
+  lastAction: text('last_action'),
+  lastOutdoorTemp: numeric('last_outdoor_temp', { precision: 4, scale: 1 }),
+  lastCheckedAt: timestamp('last_checked_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  byEnabled: index('idx_ac_thermostats_enabled').on(t.enabled),
+  thresholdCheck: check('ac_thermostats_threshold_check', sql`${t.tempOn} > ${t.tempOff}`),
+  lastActionCheck: check('ac_thermostats_last_action_check', sql`${t.lastAction} IS NULL OR ${t.lastAction} IN ('on', 'off')`),
+}))
+
 // ====== Pomiary zużycia w czasie (Slice 4 — wykresy) ======
 //
 // Dwa rodzaje wierszy w jednej tabeli:
