@@ -274,7 +274,7 @@ export const SmartDeviceCard = ({
       {isIrAc ? (
         <AcControls ac={status?.ac} onSend={handleSend} disabled={!online}>
           <DeviceTimer deviceId={device.id} disabled={!online} />
-          <ThermostatSettings deviceId={device.id} disabled={!online} acMode={status?.ac?.mode} />
+          <ThermostatSettings deviceId={device.id} disabled={!online} acMode={status?.ac?.mode} statusRefreshKey={refreshKey} statusUpdatedAt={status?.updatedAt} />
         </AcControls>
       ) : isIrRemote ? (
         <RemoteControls
@@ -365,7 +365,7 @@ export const SmartDeviceCard = ({
                 ) : rd.deviceType === 'ir_ac' ? (
                   <AcControls ac={rs?.ac} onSend={sendRd} disabled={!online}>
                     <DeviceTimer deviceId={rd.id} disabled={!online} />
-                    <ThermostatSettings deviceId={rd.id} disabled={!online} acMode={rs?.ac?.mode} />
+                    <ThermostatSettings deviceId={rd.id} disabled={!online} acMode={rs?.ac?.mode} statusUpdatedAt={rs?.updatedAt} />
                   </AcControls>
                 ) : (
                   <RemoteControls deviceId={rd.id} disabled={!online} powerOn={setOn} plugW={status?.powerW}>

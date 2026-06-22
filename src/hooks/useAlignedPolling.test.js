@@ -46,4 +46,26 @@ describe("useAlignedPolling", () => {
     vi.advanceTimersByTime(30 * 60 * 1000);
     expect(onTick).toHaveBeenCalledTimes(3);
   });
+
+  it("rerender rodzica nie resetuje timera", () => {
+    const onTick = vi.fn();
+    const { rerender } = renderHook(
+      ({ n }) =>
+        useAlignedPolling({
+          marks: CRON_MARKS,
+          settleMs: 0,
+          enabled: true,
+          onTick,
+          isBlocked: () => false,
+          followUpMs: [1000],
+        }),
+      { initialProps: { n: 0 } },
+    );
+
+    vi.advanceTimersByTime(15 * 60 * 1000);
+    rerender({ n: 1 });
+    rerender({ n: 2 });
+    vi.advanceTimersByTime(5 * 60 * 1000);
+    expect(onTick).toHaveBeenCalledTimes(1);
+  });
 });

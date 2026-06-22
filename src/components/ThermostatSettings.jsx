@@ -34,6 +34,7 @@ const THERMO_CRON_MARKS = [0, 30];
 const OUTDOOR_NOW_MARKS = [0, 15, 30, 45];
 const CRON_SETTLE_MS = 5000; // chwila po :00/:30 UTC — cron zdąży zapisać odczyt
 const CRON_FOLLOWUP_MS = 25000; // drugi odczyt stopki, gdy cron skończy później
+const CRON_FOLLOW_UPS = [CRON_FOLLOWUP_MS];
 
 const fmtTime = (iso) => {
   if (!iso) return null;
@@ -97,8 +98,16 @@ const fieldClass =
  * @param {string} deviceId
  * @param {boolean} disabled
  * @param {number|undefined} acMode — tryb z dropdownu Tryb (0=chłodzenie, 1=grzanie)
+ * @param {number} [statusRefreshKey] — inkrementowany przy „Odśwież" na karcie urządzenia
+ * @param {string} [statusUpdatedAt] — zmienia się co ~30 s przy pollingu statusu karty
  */
-export const ThermostatSettings = ({ deviceId, disabled, acMode }) => {
+export const ThermostatSettings = ({
+  deviceId,
+  disabled,
+  acMode,
+  statusRefreshKey = 0,
+  statusUpdatedAt,
+}) => {
   const [open, setOpen] = useState(false);
   const [cfg, setCfg] = useState(null);
   const [enabled, setEnabled] = useState(false);
@@ -114,12 +123,14 @@ export const ThermostatSettings = ({ deviceId, disabled, acMode }) => {
   const [now, setNow] = useState(null);
   const [nowLoading, setNowLoading] = useState(false);
   const [nowError, setNowError] = useState(false);
+  const cfgReady = useRef(false);
 
   const load = useCallback(async (syncForm = false) => {
     try {
       const { thermostat } = await fetchThermostat(deviceId);
       if (thermostat) {
         setCfg(thermostat);
+        cfgReady.current = true;
         if (syncForm) {
           setEnabled(thermostat.enabled);
           setCity(cityName(thermostat.locationLabel));
@@ -136,11 +147,22 @@ export const ThermostatSettings = ({ deviceId, disabled, acMode }) => {
     load(true);
   }, [load]);
 
-  // Stopka — zsynchronizowana z odczytem crona (:00/:30 UTC + 5 s).
+  // Po ręcznym „Odśwież" na karcie — dograj stopkę z bazy (bez nadpisywania formularza).
+  useEffect(() => {
+    if (statusRefreshKey > 0) load(false);
+  }, [statusRefreshKey, load]);
+
+  // Polling statusu karty (co ~30 s) — stopka dogania cron bez przełączania strony.
+  useEffect(() => {
+    if (!statusUpdatedAt || !cfgReady.current) return;
+    load(false);
+  }, [statusUpdatedAt, load]);
+
+  // Stopka — dodatkowo zsynchronizowana z :00/:30 UTC (cron + 5 s).
   useAlignedPolling({
     marks: THERMO_CRON_MARKS,
     settleMs: CRON_SETTLE_MS,
-    followUpMs: [CRON_FOLLOWUP_MS],
+    followUpMs: CRON_FOLLOW_UPS,
     enabled: !!deviceId,
     onTick: () => load(false),
     isBlocked: () => saving,
