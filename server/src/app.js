@@ -47,6 +47,7 @@ import {
   writeFinanceToRelational,
 } from "./finance-relational.js";
 import { logAction } from "./action-log.js";
+import { geocodeCity } from "./weather.js";
 
 // Snapshoty kolumn dla action_log — zachowujemy ciphertext bez deszyfrowania.
 // Pozwala undo zapisać te same bajty z powrotem do tabel docelowych.
@@ -2938,10 +2939,26 @@ app.put("/api/smart-devices/:id/thermostat", authMiddleware, async (c) => {
     return c.json({ error: "threshold_order" }, 400);
 
   const enabled = body?.enabled === true;
-  const locationLabel =
+  let locationLabel =
     typeof body?.locationLabel === "string" ? body.locationLabel.trim() || null : null;
-  const lat = body?.lat == null ? null : Number(body.lat);
-  const lon = body?.lon == null ? null : Number(body.lon);
+  let lat = body?.lat == null ? null : Number(body.lat);
+  let lon = body?.lon == null ? null : Number(body.lon);
+
+  // Geocoding: jeśli podano nazwę miasta, zamieniamy ją raz na lat/lon + etykietę.
+  if (typeof body?.city === "string" && body.city.trim()) {
+    let geo;
+    try {
+      geo = await geocodeCity(body.city);
+    } catch (err) {
+      console.error("[thermostat] geocoding failed", err);
+      return c.json({ error: "geocode_failed" }, 502);
+    }
+    if (!geo) return c.json({ error: "geocode_no_result" }, 400);
+    lat = geo.lat;
+    lon = geo.lon;
+    locationLabel = geo.label;
+  }
+
   if ((lat != null && !Number.isFinite(lat)) || (lon != null && !Number.isFinite(lon)))
     return c.json({ error: "invalid_coordinates" }, 400);
 

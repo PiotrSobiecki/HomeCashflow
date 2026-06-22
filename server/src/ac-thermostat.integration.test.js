@@ -15,8 +15,15 @@ vi.mock('./tuya/client.js', async () => {
   }
 })
 
+// Granica: geocoding Open-Meteo. Mock, żeby endpoint nie bił w realne API w teście.
+vi.mock('./weather.js', () => ({
+  geocodeCity: vi.fn(),
+  getOutdoorTemp: vi.fn(),
+}))
+
 import { app, upsertUserAndHousehold } from './app.js'
 import { getTuyaToken, sendAcCommand } from './tuya/client.js'
+import { geocodeCity } from './weather.js'
 import { runAcThermostats } from './ac-thermostat.js'
 import { decodeFinanceDataKey } from './finance-crypto.js'
 import { neon } from '@neondatabase/serverless'
@@ -86,6 +93,7 @@ beforeEach(() => {
   createdUserIds = []
   vi.mocked(getTuyaToken).mockReset()
   vi.mocked(sendAcCommand).mockReset()
+  vi.mocked(geocodeCity).mockReset()
 })
 
 afterEach(async () => {
@@ -211,5 +219,30 @@ describe('PUT /api/smart-devices/:id/thermostat — walidacja', () => {
 
     const t = (await (await getThermostat(owner.token, dev.id)).json()).thermostat
     expect(t).toMatchObject({ enabled: true, locationLabel: 'Wrocław', tempOn: 26, tempOff: 24, lastAction: null })
+  })
+
+  it('po podaniu miasta geokoduje raz i zapisuje lat/lon + etykietę', async () => {
+    vi.mocked(geocodeCity).mockResolvedValue({ lat: 51.1, lon: 17.03, label: 'Wrocław, Dolnośląskie, Polska' })
+    const owner = await createOwnerWithCreds()
+    const hh = await householdOf(owner.user.id)
+    const dev = await addIrAc(hh, owner.user.id)
+
+    const res = await putThermostat(owner.token, dev.id, { enabled: true, city: 'Wrocław', tempOn: 26, tempOff: 24 })
+    expect(res.status).toBe(200)
+    expect(vi.mocked(geocodeCity)).toHaveBeenCalledWith('Wrocław')
+
+    const t = (await res.json()).thermostat
+    expect(t).toMatchObject({ lat: 51.1, lon: 17.03, locationLabel: 'Wrocław, Dolnośląskie, Polska' })
+  })
+
+  it('zwraca 400 gdy geocoding nie znajdzie miasta', async () => {
+    vi.mocked(geocodeCity).mockResolvedValue(null)
+    const owner = await createOwnerWithCreds()
+    const hh = await householdOf(owner.user.id)
+    const dev = await addIrAc(hh, owner.user.id)
+
+    const res = await putThermostat(owner.token, dev.id, { enabled: true, city: 'Xyzzyland', tempOn: 26, tempOff: 24 })
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe('geocode_no_result')
   })
 })
