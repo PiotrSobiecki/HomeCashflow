@@ -114,15 +114,17 @@ export const ThermostatSettings = ({ deviceId, disabled, acMode }) => {
   const [nowLoading, setNowLoading] = useState(false);
   const [nowError, setNowError] = useState(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (syncForm = false) => {
     try {
       const { thermostat } = await fetchThermostat(deviceId);
       if (thermostat) {
         setCfg(thermostat);
-        setEnabled(thermostat.enabled);
-        setCity(cityName(thermostat.locationLabel));
-        if (thermostat.tempOn != null) setTempOn(String(thermostat.tempOn));
-        if (thermostat.tempOff != null) setTempOff(String(thermostat.tempOff));
+        if (syncForm) {
+          setEnabled(thermostat.enabled);
+          setCity(cityName(thermostat.locationLabel));
+          if (thermostat.tempOn != null) setTempOn(String(thermostat.tempOn));
+          if (thermostat.tempOff != null) setTempOff(String(thermostat.tempOff));
+        }
       }
     } catch {
       // cicho — automatyka to nie krytyczna ścieżka
@@ -130,7 +132,7 @@ export const ThermostatSettings = ({ deviceId, disabled, acMode }) => {
   }, [deviceId]);
 
   useEffect(() => {
-    load();
+    load(true);
   }, [load]);
 
   // Stopka — zsynchronizowana z odczytem crona (:00/:30 UTC + 5 s).
@@ -138,7 +140,7 @@ export const ThermostatSettings = ({ deviceId, disabled, acMode }) => {
     marks: THERMO_CRON_MARKS,
     settleMs: CRON_SETTLE_MS,
     enabled: !!deviceId,
-    onTick: load,
+    onTick: () => load(false),
     isBlocked: () => saving,
   });
 
@@ -245,6 +247,21 @@ export const ThermostatSettings = ({ deviceId, disabled, acMode }) => {
       : climateMode === "cool"
         ? parsedOn <= parsedOff
         : false);
+
+  const savedMode = cfg?.mode === "heat" ? "heat" : "cool";
+  const hasChanges =
+    !cfg
+      ? enabled ||
+        picked != null ||
+        city.trim() !== "" ||
+        tempOn !== "26" ||
+        tempOff !== "24"
+      : enabled !== !!cfg.enabled ||
+        climateMode !== savedMode ||
+        picked != null ||
+        city.trim() !== cityName(cfg.locationLabel) ||
+        parsedOn !== Number(cfg.tempOn) ||
+        parsedOff !== Number(cfg.tempOff);
 
   const save = async () => {
     const on = parsedOn;
@@ -487,7 +504,7 @@ export const ThermostatSettings = ({ deviceId, disabled, acMode }) => {
             <button
               type="button"
               onClick={save}
-              disabled={disabled || saving || invalidThresholds}
+              disabled={disabled || saving || invalidThresholds || !hasChanges}
               className="w-full flex items-center justify-center gap-1.5 px-3 py-2 bg-indigo-500 hover:bg-indigo-600 text-white text-xs font-medium rounded-lg transition-colors disabled:opacity-50"
             >
               {saving ? (
