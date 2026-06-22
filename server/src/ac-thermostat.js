@@ -1,6 +1,13 @@
 import { decryptField } from './finance-crypto.js'
 import { getTuyaToken, sendAcCommand, getAcStatus, formatAcStatus } from './tuya/client.js'
 
+/** Tuya IR AC: 0 = chłodzenie, 1 = grzanie (jak dropdown Tryb w UI). */
+export function climateModeFromAc(acMode, stored = 'cool') {
+  if (acMode === 1) return 'heat'
+  if (acMode === 0) return 'cool'
+  return stored === 'heat' ? 'heat' : 'cool'
+}
+
 /**
  * Termostat zewnętrzny dla klimy IR (Tuya `ir_ac`).
  *
@@ -9,7 +16,6 @@ import { getTuyaToken, sendAcCommand, getAcStatus, formatAcStatus } from './tuya
  * **i** docelowy stan różni się od bieżącego zasilania klimy (jeśli znane z Tuya).
  * W strefie martwej nie rusza klimy, by nie nadpisywać ręcznych zmian użytkownika.
  *
-/**
  * @param {{ temp:number, tempOn:number, tempOff:number, lastAction:('on'|'off'|null), acPowerOn:(boolean|null), mode?:('cool'|'heat') }} args
  * @returns {'on' | 'off' | null}
  */
@@ -85,13 +91,17 @@ export async function runAcThermostats(sql, rawKey, { readOutdoorTemp }) {
       }
 
       let acPowerOn = null
+      let acModeNum = null
       try {
         const ac = formatAcStatus(await getAcStatus(ctx, r.ir_parent_id, r.tuya_device_id))
         if (ac.power === 1) acPowerOn = true
         else if (ac.power === 0) acPowerOn = false
+        if (ac.mode === 0 || ac.mode === 1) acModeNum = ac.mode
       } catch (err) {
         console.warn('[ac-thermostat] AC status read failed, falling back to last_action', r.tuya_device_id, err)
       }
+
+      const climateMode = climateModeFromAc(acModeNum, r.climate_mode)
 
       const action = decide({
         temp,
@@ -99,7 +109,7 @@ export async function runAcThermostats(sql, rawKey, { readOutdoorTemp }) {
         tempOff: Number(r.temp_off),
         lastAction: r.last_action,
         acPowerOn,
-        mode: r.climate_mode === 'heat' ? 'heat' : 'cool',
+        mode: climateMode,
       })
 
       if (action) {

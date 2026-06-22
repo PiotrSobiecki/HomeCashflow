@@ -1,5 +1,14 @@
 import { describe, it, expect } from 'vitest'
-import { decide } from './ac-thermostat.js'
+import { decide, climateModeFromAc } from './ac-thermostat.js'
+
+describe('climateModeFromAc', () => {
+  it('mapuje tryb Tuya na cool/heat', () => {
+    expect(climateModeFromAc(0)).toBe('cool')
+    expect(climateModeFromAc(1)).toBe('heat')
+    expect(climateModeFromAc(2, 'heat')).toBe('heat')
+    expect(climateModeFromAc(undefined, 'cool')).toBe('cool')
+  })
+})
 
 describe('decide — termostat zewnętrzny klimy IR (histereza + edge-trigger)', () => {
   it('włącza, gdy temp osiąga górny próg, a klima była wyłączona', () => {
