@@ -1,5 +1,6 @@
 import { decryptField } from './finance-crypto.js'
 import { getTuyaToken, sendAcCommand, getAcStatus, formatAcStatus } from './tuya/client.js'
+import { acPowerOnFromPlugW, readPlugPowerW } from './ir-plug-power.js'
 
 /** Tuya IR AC: 0 = chłodzenie, 1 = grzanie (jak dropdown Tryb w UI). */
 export function climateModeFromAc(acMode, stored = 'cool') {
@@ -59,10 +60,12 @@ export async function runAcThermostats(sql, rawKey, { readOutdoorTemp }) {
   const rows = await sql`
     SELECT th.id, th.household_id, th.device_id, th.lat, th.lon,
            th.climate_mode, th.temp_on, th.temp_off, th.last_action,
-           sd.tuya_device_id, sd.ir_parent_id,
+           sd.tuya_device_id, sd.ir_parent_id, sd.linked_plug_id,
+           plug.tuya_device_id AS plug_tuya_id,
            tc.client_id_enc, tc.client_secret_enc, tc.datacenter
     FROM ac_thermostats th
     JOIN smart_devices sd ON sd.id = th.device_id
+    LEFT JOIN smart_devices plug ON plug.id = sd.linked_plug_id
     JOIN tuya_credentials tc ON tc.household_id = th.household_id
     WHERE th.enabled = true AND sd.device_type = 'ir_ac'
   `
@@ -92,10 +95,22 @@ export async function runAcThermostats(sql, rawKey, { readOutdoorTemp }) {
 
       let acPowerOn = null
       let acModeNum = null
+
+      // Gniazdko wie o realnym poborze — po włączeniu z pilota fizycznego IR często zgłasza power=0.
+      if (r.plug_tuya_id) {
+        try {
+          acPowerOn = acPowerOnFromPlugW(await readPlugPowerW(ctx, r.plug_tuya_id))
+        } catch (err) {
+          console.warn('[ac-thermostat] plug power read failed', r.plug_tuya_id, err)
+        }
+      }
+
       try {
         const ac = formatAcStatus(await getAcStatus(ctx, r.ir_parent_id, r.tuya_device_id))
-        if (ac.power === 1) acPowerOn = true
-        else if (ac.power === 0) acPowerOn = false
+        if (acPowerOn === null) {
+          if (ac.power === 1) acPowerOn = true
+          else if (ac.power === 0) acPowerOn = false
+        }
         if (ac.mode === 0 || ac.mode === 1) acModeNum = ac.mode
       } catch (err) {
         console.warn('[ac-thermostat] AC status read failed, falling back to last_action', r.tuya_device_id, err)

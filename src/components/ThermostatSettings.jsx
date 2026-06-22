@@ -33,6 +33,7 @@ const MIN_QUERY = 3;
 const THERMO_CRON_MARKS = [0, 30];
 const OUTDOOR_NOW_MARKS = [0, 15, 30, 45];
 const CRON_SETTLE_MS = 5000; // chwila po :00/:30 UTC — cron zdąży zapisać odczyt
+const CRON_FOLLOWUP_MS = 25000; // drugi odczyt stopki, gdy cron skończy później
 
 const fmtTime = (iso) => {
   if (!iso) return null;
@@ -139,6 +140,7 @@ export const ThermostatSettings = ({ deviceId, disabled, acMode }) => {
   useAlignedPolling({
     marks: THERMO_CRON_MARKS,
     settleMs: CRON_SETTLE_MS,
+    followUpMs: [CRON_FOLLOWUP_MS],
     enabled: !!deviceId,
     onTick: () => load(false),
     isBlocked: () => saving,

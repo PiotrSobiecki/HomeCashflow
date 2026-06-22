@@ -24,7 +24,7 @@ vi.mock('./weather.js', () => ({
 }))
 
 import { app, upsertUserAndHousehold } from './app.js'
-import { getTuyaToken, sendAcCommand, getAcStatus } from './tuya/client.js'
+import { getTuyaToken, sendAcCommand, getAcStatus, getDeviceStatus } from './tuya/client.js'
 import { geocodeCity, getOutdoorTemp } from './weather.js'
 import { runAcThermostats } from './ac-thermostat.js'
 import { decodeFinanceDataKey } from './finance-crypto.js'
@@ -77,6 +77,16 @@ async function addIrAc(householdId, ownerId, { extId = `irac-${uniq()}`, parent 
   return { id: d.id, tuyaId: extId, parent }
 }
 
+async function addPlug(householdId, ownerId, { extId = `plug-${uniq()}` } = {}) {
+  const [d] = await sql`
+    INSERT INTO smart_devices (household_id, provider, external_device_id, tuya_device_id,
+      display_name, device_type, created_by)
+    VALUES (${householdId}, 'tuya', ${extId}, ${extId}, 'Gniazdko', 'plug', ${ownerId})
+    RETURNING id
+  `
+  return { id: d.id, tuyaId: extId }
+}
+
 function putThermostat(token, deviceId, body) {
   return app.request(`/api/smart-devices/${deviceId}/thermostat`, {
     method: 'PUT',
@@ -96,6 +106,7 @@ beforeEach(() => {
   vi.mocked(getTuyaToken).mockReset()
   vi.mocked(sendAcCommand).mockReset()
   vi.mocked(getAcStatus).mockReset()
+  vi.mocked(getDeviceStatus).mockReset()
   vi.mocked(geocodeCity).mockReset()
   vi.mocked(getOutdoorTemp).mockReset()
   // Domyślnie: stan klimy nieznany (runner używa last_action jak wcześniej).
@@ -163,6 +174,24 @@ describe('runner termostatu — cron → decyzja → komenda Tuya', () => {
     const [t] = await sql`SELECT last_action, last_check_action FROM ac_thermostats WHERE device_id = ${dev.id}`
     expect(t.last_action).toBe('on')
     expect(t.last_check_action).toBe(null)
+  })
+
+  it('gdy IR mówi wył., ale gniazdko pobiera prąd — wyłącza przy temp poniżej progu', async () => {
+    const owner = await createOwnerWithCreds()
+    const hh = await householdOf(owner.user.id)
+    const plug = await addPlug(hh, owner.user.id)
+    const dev = await addIrAc(hh, owner.user.id)
+    await sql`UPDATE smart_devices SET linked_plug_id = ${plug.id} WHERE id = ${dev.id}`
+    await putThermostat(owner.token, dev.id, { enabled: true, lat: 51.1, lon: 17.03, tempOn: 26, tempOff: 24 })
+    vi.mocked(getAcStatus).mockResolvedValue({ power: '0' })
+    vi.mocked(getDeviceStatus).mockResolvedValue([{ code: 'cur_power', value: 450 }])
+
+    const res = await runAcThermostats(sql, rawKey, { readOutdoorTemp: vi.fn().mockResolvedValue(22) })
+
+    expect(res).toMatchObject({ checked: 1, switched: 1 })
+    expect(sendAcCommand).toHaveBeenCalledWith(expect.anything(), dev.parent, dev.tuyaId, 'power', 0)
+    const [t] = await sql`SELECT last_check_action FROM ac_thermostats WHERE device_id = ${dev.id}`
+    expect(t.last_check_action).toBe('off')
   })
 
   it('w strefie martwej nie wysyła komendy, ale zapisuje last_checked_at i temperaturę', async () => {

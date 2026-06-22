@@ -49,6 +49,12 @@ import {
 import { logAction } from "./action-log.js";
 import { geocodeCity, getOutdoorTemp } from "./weather.js";
 import { thermostatThresholdGap } from "./ac-thermostat.js";
+import {
+  IR_PLUG_STANDBY_W,
+  acPowerOnFromPlugW,
+  readPlugPowerW,
+  reconcileAcPower,
+} from "./ir-plug-power.js";
 
 // Snapshoty kolumn dla action_log — zachowujemy ciphertext bez deszyfrowania.
 // Pozwala undo zapisać te same bajty z powrotem do tabel docelowych.
@@ -1652,15 +1658,36 @@ function deviceStatusPayload(row, formatted) {
  * Klima IR nie ma DP — jej stan idzie z AC API i ląduje w polu `ac` { power, mode, temp, wind }.
  * @returns {Promise<object>} payload statusu (bez statystyk dziennych — dokłada caller)
  */
-// Próg powyżej którego uznajemy zestaw na gniazdku za włączony (poniżej = standby/wyłączony).
-const IR_PLUG_STANDBY_W = 20;
-
 async function readDeviceStatus(ctx, row, sql) {
   if (row.device_type === "ir_ac") {
-    const ac = formatAcStatus(
+    let ac = formatAcStatus(
       await getAcStatus(ctx, row.ir_parent_id, row.tuya_device_id),
     );
-    return { ...deviceStatusPayload(row, { ac, switchOn: ac.power === 1 }) };
+    let switchOn = ac.power === 1;
+    let plugW;
+    if (row.linked_plug_id && sql) {
+      try {
+        const [plug] =
+          await sql`SELECT tuya_device_id FROM smart_devices WHERE id = ${row.linked_plug_id}`;
+        if (plug) {
+          plugW = await readPlugPowerW(ctx, plug.tuya_device_id);
+          const plugOn = acPowerOnFromPlugW(plugW);
+          if (plugOn != null) {
+            switchOn = plugOn;
+            ac = reconcileAcPower(ac, plugOn);
+          }
+        }
+      } catch (err) {
+        console.warn("[smart-devices] ir_ac plug read failed", row.id, err);
+      }
+    }
+    return {
+      ...deviceStatusPayload(row, {
+        ac,
+        switchOn,
+        ...(plugW != null ? { plugW, linked: true } : {}),
+      }),
+    };
   }
   if (row.device_type === "ir_remote") {
     // Pilot IR jest bezstanowy. Jeśli powiązany z gniazdkiem — realny stan zestawu z poboru mocy.

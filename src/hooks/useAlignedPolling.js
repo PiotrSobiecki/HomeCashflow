@@ -8,6 +8,7 @@ import { msUntilNextUtcMinuteMarks, periodMsForMarks } from "../lib/cronAlign";
 export function useAlignedPolling({
   marks,
   settleMs = 5000,
+  followUpMs = [],
   enabled,
   onTick,
   isBlocked,
@@ -19,6 +20,7 @@ export function useAlignedPolling({
   );
   const timeoutRef = useRef(null);
   const intervalRef = useRef(null);
+  const followUpRef = useRef([]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -29,11 +31,23 @@ export function useAlignedPolling({
       onTickRef.current();
     };
 
+    const scheduleFollowUps = () => {
+      for (const id of followUpRef.current) clearTimeout(id);
+      followUpRef.current = [];
+      for (const delay of followUpMs) {
+        followUpRef.current.push(
+          setTimeout(() => tick(), delay),
+        );
+      }
+    };
+
     const period = periodMsForMarks(marks);
 
     const clear = () => {
       clearTimeout(timeoutRef.current);
       clearInterval(intervalRef.current);
+      for (const id of followUpRef.current) clearTimeout(id);
+      followUpRef.current = [];
       timeoutRef.current = null;
       intervalRef.current = null;
     };
@@ -43,7 +57,11 @@ export function useAlignedPolling({
       const delay = msUntilNextUtcMinuteMarks(marks, settleMs);
       timeoutRef.current = setTimeout(() => {
         tick();
-        intervalRef.current = setInterval(tick, period);
+        scheduleFollowUps();
+        intervalRef.current = setInterval(() => {
+          tick();
+          scheduleFollowUps();
+        }, period);
       }, delay);
     };
 
@@ -64,5 +82,5 @@ export function useAlignedPolling({
       clear();
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [marks, settleMs, enabled, isBlocked]);
+  }, [marks, settleMs, followUpMs, enabled, isBlocked]);
 }

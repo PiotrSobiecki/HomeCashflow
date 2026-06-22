@@ -27,7 +27,7 @@ export default {
         console.error('[cron] timers failed', err)
       }
 
-      if (new Date(event.scheduledTime).getMinutes() % 15 === 0) {
+      if (new Date(event.scheduledTime).getUTCMinutes() % 15 === 0) {
         try {
           const res = await collectEnergySnapshots(sql, rawKey)
           await sql`DELETE FROM device_energy_snapshots WHERE recorded_at < NOW() - interval '400 days'`
@@ -38,7 +38,7 @@ export default {
       }
 
       // Termostat zewnętrzny klimy IR: sprawdzanie temperatury co 30 min (minuta % 30).
-      if (new Date(event.scheduledTime).getMinutes() % 30 === 0) {
+      if (new Date(event.scheduledTime).getUTCMinutes() % 30 === 0) {
         try {
           const res = await runAcThermostats(sql, rawKey, { readOutdoorTemp: getOutdoorTemp })
           if (res.checked || res.switched || res.failed) console.log('[cron] ac thermostats', res)
