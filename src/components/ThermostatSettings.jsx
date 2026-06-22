@@ -14,6 +14,7 @@ import {
   saveThermostat,
   fetchThermostatTemperature,
 } from "../lib/api";
+import { usePolling } from "../hooks/usePolling";
 
 const ERRORS = {
   geocode_no_result: "Nie znaleziono takiej miejscowości.",
@@ -43,8 +44,13 @@ const fmtTime = (iso) => {
   }
 };
 
+/** Ostatnia komenda wysłana przez cron (nie „teraz" — zmienia się tylko przy przełączeniu). */
 const lastActionLabel = (a) =>
-  a === "on" ? "włączyła klimę" : a === "off" ? "wyłączyła klimę" : null;
+  a === "on"
+    ? "ostatnio włączyła klimę"
+    : a === "off"
+      ? "ostatnio wyłączyła klimę"
+      : null;
 
 // Z etykiety „Wrocław, Dolnośląskie, Polska" robimy samą nazwę miasta.
 const cityName = (label) => (label ?? "").split(",")[0].trim();
@@ -126,6 +132,15 @@ export const ThermostatSettings = ({ deviceId, disabled, acMode }) => {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Cron zapisuje last_checked_at / last_outdoor_temp co 30 min — odświeżamy konfigurację
+  // w tle (jak status urządzeń), żeby stopka nie wisiała na starym czasie.
+  usePolling({
+    intervalMs: 30000,
+    enabled: !!deviceId,
+    onTick: load,
+    isBlocked: () => saving,
+  });
 
   const hasCoords = cfg?.lat != null && cfg?.lon != null;
 
@@ -493,7 +508,7 @@ export const ThermostatSettings = ({ deviceId, disabled, acMode }) => {
               {autoLabel && (
                 <>
                   <br />
-                  Automatyka {autoLabel}
+                  Automatyka {autoLabel}.
                 </>
               )}
             </p>
