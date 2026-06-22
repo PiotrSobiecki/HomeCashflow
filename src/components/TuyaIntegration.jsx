@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import {
-  Plug, Loader2, Check, X, Trash2, ChevronDown, ChevronRight, ExternalLink, Pencil,
+  Plug, Loader2, Check, X, Trash2, ChevronDown, ChevronRight, ExternalLink,
 } from 'lucide-react'
 import {
   fetchTuyaCredentials, saveTuyaCredentials, deleteTuyaCredentials, updateTuyaEnergyPrice,
@@ -31,9 +31,7 @@ export const TuyaIntegration = () => {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [showGuide, setShowGuide] = useState(false)
-  // Inline edycja samej ceny kWh (bez ruszania poświadczeń).
-  const [priceEditing, setPriceEditing] = useState(false)
-  const [priceDraft, setPriceDraft] = useState('')
+  // Zapis samej ceny kWh (w formularzu, bez ruszania poświadczeń).
   const [priceSaving, setPriceSaving] = useState(false)
   const [priceMsg, setPriceMsg] = useState('')
 
@@ -52,21 +50,11 @@ export const TuyaIntegration = () => {
 
   useEffect(() => { load() }, [])
 
-  // Synchronizuj pole ceny z aktualnym stanem (po wczytaniu / zapisie poświadczeń).
-  useEffect(() => {
-    setPriceDraft(status?.energyPricePln != null ? String(status.energyPricePln) : '')
-  }, [status?.energyPricePln])
-
   const setField = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
 
-  const cancelPrice = () => {
-    setPriceEditing(false)
-    setPriceMsg('')
-    setPriceDraft(status?.energyPricePln != null ? String(status.energyPricePln) : '')
-  }
-
+  // Zapis SAMej ceny (PATCH) — bez weryfikacji Client ID/Secret. Tylko gdy już połączono.
   const handleSavePrice = async () => {
-    const normalized = priceDraft.trim().replace(',', '.')
+    const normalized = form.energyPrice.trim().replace(',', '.')
     const energyPricePln = normalized === '' ? null : Number(normalized)
     if (energyPricePln !== null && (!Number.isFinite(energyPricePln) || energyPricePln < 0 || energyPricePln > 100)) {
       setPriceMsg('Cena musi być liczbą od 0 do 100 zł.')
@@ -77,7 +65,7 @@ export const TuyaIntegration = () => {
     try {
       const data = await updateTuyaEnergyPrice(energyPricePln)
       setStatus((s) => ({ ...s, energyPricePln: data.energyPricePln }))
-      setPriceEditing(false)
+      setPriceMsg('Zapisano ✓')
     } catch {
       setPriceMsg('Nie udało się zapisać ceny.')
     } finally {
@@ -175,42 +163,6 @@ export const TuyaIntegration = () => {
       {/* Status połączenia — po zminimalizowaniu tylko przyciski, szczegóły w „Zmień dane" */}
       {configured && !editing && (
         <div className="space-y-3">
-          {/* Cena kWh — kompaktowa edycja inline (✓/✗), bez wpisywania poświadczeń */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm text-slate-300 shrink-0">Cena za 1 kWh:</span>
-            {priceEditing ? (
-              <div className="flex items-center gap-1">
-                <input
-                  type="text" inputMode="decimal" value={priceDraft} autoFocus
-                  onChange={(e) => { setPriceDraft(e.target.value); setPriceMsg('') }}
-                  onKeyDown={(e) => { if (e.key === 'Enter') handleSavePrice(); if (e.key === 'Escape') cancelPrice() }}
-                  placeholder="np. 1.20"
-                  className="w-24 px-2 py-1 bg-slate-900/50 border border-slate-600 rounded-lg text-white text-sm placeholder-slate-500 focus:outline-none focus:border-indigo-500"
-                />
-                <span className="text-sm text-slate-400">zł</span>
-                <button onClick={handleSavePrice} disabled={priceSaving} className="p-1 text-emerald-400 hover:bg-emerald-500/20 rounded">
-                  {priceSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                </button>
-                <button onClick={cancelPrice} disabled={priceSaving} className="p-1 text-slate-400 hover:bg-slate-600 rounded">
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-1">
-                <span className="text-sm text-white font-medium">
-                  {status.energyPricePln != null ? `${status.energyPricePln} zł` : 'nie ustawiono'}
-                </span>
-                <button
-                  onClick={() => { setPriceDraft(status.energyPricePln != null ? String(status.energyPricePln) : ''); setPriceMsg(''); setPriceEditing(true) }}
-                  className="p-1 text-slate-400 hover:text-indigo-400 hover:bg-indigo-500/10 rounded"
-                  aria-label="Zmień cenę za kWh"
-                >
-                  <Pencil className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            )}
-            {priceMsg && <span className="text-xs text-rose-400">{priceMsg}</span>}
-          </div>
           <div className="flex gap-2">
             <button
               type="button"
@@ -256,15 +208,28 @@ export const TuyaIntegration = () => {
           >
             {DATACENTERS.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
           </select>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <label htmlFor="tuya-energy-price" className="text-sm text-slate-300 shrink-0">Cena za 1 kWh:</label>
             <input
               id="tuya-energy-price"
-              type="text" inputMode="decimal" value={form.energyPrice} onChange={setField('energyPrice')}
+              type="text" inputMode="decimal" value={form.energyPrice}
+              onChange={(e) => { setField('energyPrice')(e); setPriceMsg('') }}
               placeholder="np. 1.20"
               className="w-24 px-3 py-1.5 bg-slate-900/50 border border-slate-600 rounded-lg text-white text-sm placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
             />
-            <span className="text-sm text-slate-400">zł (do liczenia kosztów; opcjonalna)</span>
+            <span className="text-sm text-slate-400">zł</span>
+            {configured && (
+              <button
+                type="button" onClick={handleSavePrice} disabled={priceSaving}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-indigo-300 hover:text-white hover:bg-indigo-500/20 border border-indigo-500/40 rounded-lg transition-colors disabled:opacity-50"
+              >
+                {priceSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                Zapisz cenę
+              </button>
+            )}
+            {priceMsg && (
+              <span className={`text-xs ${priceMsg.includes('✓') ? 'text-emerald-400' : 'text-rose-400'}`}>{priceMsg}</span>
+            )}
           </div>
           <div className="flex gap-2">
             <button
