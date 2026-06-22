@@ -187,6 +187,70 @@ describe('GET /api/tuya/credentials', () => {
   })
 })
 
+describe('PATCH /api/tuya/credentials/price', () => {
+  function patchPrice(token, energyPricePln) {
+    return app.request('/api/tuya/credentials/price', {
+      method: 'PATCH',
+      headers: { cookie: `token=${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ energyPricePln }),
+    })
+  }
+
+  it('zapisuje samą cenę bez ponownej weryfikacji poświadczeń w Tuya', async () => {
+    const owner = await createUser(`g-tuya-${uniq()}`, `tuya-${uniq()}@test.com`, 'Owner')
+    vi.mocked(getTuyaToken).mockResolvedValue({ accessToken: 'tok', expireTime: 7200 })
+    await putCredentials(owner.token, VALID_BODY)
+    vi.mocked(getTuyaToken).mockClear()
+
+    const res = await patchPrice(owner.token, 1.23)
+
+    expect(res.status).toBe(200)
+    expect((await res.json()).energyPricePln).toBe(1.23)
+    // kluczowe: nie pukamy do Tuya przy samej zmianie ceny
+    expect(vi.mocked(getTuyaToken)).not.toHaveBeenCalled()
+
+    const householdId = await householdIdOf(owner.user.id)
+    const [row] = await sql`SELECT energy_price_pln FROM tuya_credentials WHERE household_id = ${householdId}`
+    expect(Number(row.energy_price_pln)).toBe(1.23)
+  })
+
+  it('akceptuje null (wyczyszczenie ceny)', async () => {
+    const owner = await createUser(`g-tuya-${uniq()}`, `tuya-${uniq()}@test.com`, 'Owner')
+    vi.mocked(getTuyaToken).mockResolvedValue({ accessToken: 'tok', expireTime: 7200 })
+    await putCredentials(owner.token, { ...VALID_BODY, energyPricePln: 2 })
+
+    const res = await patchPrice(owner.token, null)
+    expect(res.status).toBe(200)
+    expect((await res.json()).energyPricePln).toBe(null)
+  })
+
+  it('odrzuca cenę spoza zakresu 0–100', async () => {
+    const owner = await createUser(`g-tuya-${uniq()}`, `tuya-${uniq()}@test.com`, 'Owner')
+    vi.mocked(getTuyaToken).mockResolvedValue({ accessToken: 'tok', expireTime: 7200 })
+    await putCredentials(owner.token, VALID_BODY)
+
+    const res = await patchPrice(owner.token, 999)
+    expect(res.status).toBe(400)
+  })
+
+  it('zwraca 400 gdy integracja nie jest skonfigurowana', async () => {
+    const owner = await createUser(`g-tuya-${uniq()}`, `tuya-${uniq()}@test.com`, 'Owner')
+    const res = await patchPrice(owner.token, 1.1)
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe('not_configured')
+  })
+
+  it('zwraca 403 dla członka (tylko owner)', async () => {
+    const owner = await createUser(`g-tuya-${uniq()}`, `tuya-${uniq()}@test.com`, 'Owner')
+    vi.mocked(getTuyaToken).mockResolvedValue({ accessToken: 'tok', expireTime: 7200 })
+    await putCredentials(owner.token, VALID_BODY)
+    const member = await addMemberToHousehold(owner.token, `mem-${uniq()}@test.com`, `g-mem-${uniq()}`, 'Member')
+
+    const res = await patchPrice(member.token, 1.5)
+    expect(res.status).toBe(403)
+  })
+})
+
 describe('DELETE /api/tuya/credentials', () => {
   it('removes credentials so GET reports not configured', async () => {
     const owner = await createUser(`g-tuya-${uniq()}`, `tuya-${uniq()}@test.com`, 'Owner')
