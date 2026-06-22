@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
-  Thermometer, ChevronDown, ChevronRight, Loader2, Check, AlertTriangle, MapPin, RefreshCw,
+  Thermometer, ChevronDown, ChevronRight, Loader2, Check, AlertTriangle, RefreshCw,
 } from 'lucide-react'
 import { fetchThermostat, saveThermostat, fetchThermostatTemperature } from '../lib/api'
 
@@ -10,6 +10,17 @@ const ERRORS = {
   threshold_order: 'Próg włączenia musi być wyższy od wyłączenia (min. 1°C odstępu).',
   thresholds_required: 'Podaj oba progi temperatury.',
 }
+
+// Lista rozwijana miejscowości (większe miasta PL). Wybór trafia do geokodowania po stronie backendu.
+const CITIES = [
+  'Białystok', 'Bielsko-Biała', 'Bydgoszcz', 'Bytom', 'Chorzów', 'Częstochowa',
+  'Dąbrowa Górnicza', 'Elbląg', 'Gdańsk', 'Gdynia', 'Gliwice', 'Gorzów Wielkopolski',
+  'Grudziądz', 'Jaworzno', 'Jelenia Góra', 'Kalisz', 'Katowice', 'Kielce', 'Konin',
+  'Koszalin', 'Kraków', 'Legnica', 'Leszno', 'Lublin', 'Łódź', 'Olsztyn', 'Opole',
+  'Ostrów Wielkopolski', 'Płock', 'Poznań', 'Radom', 'Ruda Śląska', 'Rybnik', 'Rzeszów',
+  'Siedlce', 'Słupsk', 'Sosnowiec', 'Szczecin', 'Tarnów', 'Toruń', 'Tychy', 'Wałbrzych',
+  'Warszawa', 'Włocławek', 'Wrocław', 'Zabrze', 'Zamość', 'Zielona Góra',
+]
 
 const fmtTime = (iso) => {
   if (!iso) return null
@@ -22,12 +33,16 @@ const fmtTime = (iso) => {
 
 const lastActionLabel = (a) => (a === 'on' ? 'włączyła klimę' : a === 'off' ? 'wyłączyła klimę' : '—')
 
+// Z etykiety „Wrocław, Dolnośląskie, Polska" robimy samą nazwę miasta (wartość selecta).
+const cityName = (label) => (label ?? '').split(',')[0].trim()
+
 const fieldClass =
   'w-full px-2.5 py-1.5 bg-slate-900/60 border border-slate-600 rounded-lg text-white text-xs placeholder-slate-500 focus:outline-none focus:border-indigo-500 disabled:opacity-50'
 
 /**
  * Sekcja „Termostat zewnętrzny" dla klimy IR (ir_ac). Pozwala włączyć automatykę,
- * podać miejscowość i dwa progi histerezy; pokazuje ostatni odczyt i akcję automatyki.
+ * wybrać miejscowość i dwa progi histerezy; bieżąca temperatura na zewnątrz jest zawsze
+ * widoczna (nad zwijaniem), a pod zwijaniem reszta ustawień + ostatni odczyt/akcja.
  * @param {string} deviceId
  * @param {boolean} disabled
  */
@@ -40,7 +55,7 @@ export const ThermostatSettings = ({ deviceId, disabled }) => {
   const [tempOff, setTempOff] = useState('24')
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
-  // Bieżąca temperatura na zewnątrz (na żądanie, gdy sekcja rozwinięta).
+  // Bieżąca temperatura na zewnątrz.
   const [now, setNow] = useState(null)
   const [nowLoading, setNowLoading] = useState(false)
   const [nowError, setNowError] = useState(false)
@@ -51,7 +66,7 @@ export const ThermostatSettings = ({ deviceId, disabled }) => {
       if (thermostat) {
         setCfg(thermostat)
         setEnabled(thermostat.enabled)
-        setCity(thermostat.locationLabel ?? '')
+        setCity(cityName(thermostat.locationLabel))
         if (thermostat.tempOn != null) setTempOn(String(thermostat.tempOn))
         if (thermostat.tempOff != null) setTempOff(String(thermostat.tempOff))
       }
@@ -77,29 +92,29 @@ export const ThermostatSettings = ({ deviceId, disabled }) => {
     }
   }, [deviceId, cfg?.lat, cfg?.lon])
 
-  // Pobierz bieżącą temp po rozwinięciu sekcji oraz po zmianie lokalizacji (zapisie).
+  // Bieżąca temp pobierana gdy jest lokalizacja — niezależnie od zwinięcia (ma być zawsze widoczna).
   useEffect(() => {
-    if (open && hasCoords) loadNow()
-  }, [open, hasCoords, loadNow])
+    if (hasCoords) loadNow()
+  }, [hasCoords, loadNow])
 
   const save = async () => {
     const on = Number(String(tempOn).replace(',', '.'))
     const off = Number(String(tempOff).replace(',', '.'))
     if (!Number.isFinite(on) || !Number.isFinite(off)) { setMsg(ERRORS.thresholds_required); return }
-    const hasCoords = city.trim() || cfg?.lat != null
-    if (enabled && !hasCoords) { setMsg('Podaj miejscowość, żeby włączyć automatykę.'); return }
+    if (enabled && !city && cfg?.lat == null) { setMsg('Wybierz miejscowość, żeby włączyć automatykę.'); return }
 
     setSaving(true); setMsg('')
     try {
       const body = { enabled, tempOn: on, tempOff: off }
-      if (city.trim() && city.trim() !== (cfg?.locationLabel ?? '')) {
-        body.city = city.trim()
+      // Geokodujemy tylko gdy wybrano inne miasto niż zapisane (raz na zmianę).
+      if (city && city !== cityName(cfg?.locationLabel)) {
+        body.city = city
       } else if (cfg?.lat != null) {
         body.lat = cfg.lat; body.lon = cfg.lon; body.locationLabel = cfg.locationLabel
       }
       const { thermostat } = await saveThermostat(deviceId, body)
       setCfg(thermostat)
-      setCity(thermostat.locationLabel ?? '')
+      setCity(cityName(thermostat.locationLabel))
       setMsg('Zapisano ✓')
     } catch (err) {
       setMsg(ERRORS[err.code] || 'Nie udało się zapisać.')
@@ -111,7 +126,8 @@ export const ThermostatSettings = ({ deviceId, disabled }) => {
   const lastTemp = cfg?.lastOutdoorTemp
   const lastAt = fmtTime(cfg?.lastCheckedAt)
   const saved = msg.includes('✓')
-  const error = msg && !saved
+  // Miasto spoza listy (np. zapisane wcześniej) dokładamy jako opcję, żeby select je pokazał.
+  const cityOptions = city && !CITIES.includes(city) ? [city, ...CITIES] : CITIES
 
   return (
     <div className="pt-3 mt-1 border-t border-slate-700/40">
@@ -132,30 +148,32 @@ export const ThermostatSettings = ({ deviceId, disabled }) => {
         {open ? <ChevronDown className="w-4 h-4 shrink-0" /> : <ChevronRight className="w-4 h-4 shrink-0" />}
       </button>
 
+      {/* Bieżąca temperatura — ZAWSZE widoczna (nad zwijaniem), gdy ustawiona jest lokalizacja. */}
+      {hasCoords && (
+        <div className="mt-2 flex items-center justify-between rounded-lg bg-sky-500/10 border border-sky-500/25 px-2.5 py-2">
+          <span className="flex items-center gap-1.5 text-[11px] text-sky-300/90">
+            <Thermometer className="w-3.5 h-3.5" /> Teraz na zewnątrz
+            {cfg?.locationLabel && <span className="text-slate-500">· {cityName(cfg.locationLabel)}</span>}
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="text-sm font-semibold text-white tabular-nums">
+              {nowLoading ? '…' : nowError ? '—' : now != null ? `${now}°C` : '—'}
+            </span>
+            <button
+              type="button"
+              onClick={loadNow}
+              disabled={disabled || nowLoading}
+              className="p-1 text-slate-400 hover:text-sky-300 hover:bg-sky-500/10 rounded disabled:opacity-50"
+              aria-label="Odśwież temperaturę"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${nowLoading ? 'animate-spin' : ''}`} />
+            </button>
+          </span>
+        </div>
+      )}
+
       {open && (
         <div className="mt-2.5 rounded-xl border border-slate-700/50 bg-slate-900/40 p-3 space-y-3">
-          {hasCoords && (
-            <div className="flex items-center justify-between rounded-lg bg-sky-500/10 border border-sky-500/25 px-2.5 py-2">
-              <span className="flex items-center gap-1.5 text-[11px] text-sky-300/90">
-                <Thermometer className="w-3.5 h-3.5" /> Teraz na zewnątrz
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="text-sm font-semibold text-white tabular-nums">
-                  {nowLoading ? '…' : nowError ? '—' : now != null ? `${now}°C` : '—'}
-                </span>
-                <button
-                  type="button"
-                  onClick={loadNow}
-                  disabled={disabled || nowLoading}
-                  className="p-1 text-slate-400 hover:text-sky-300 hover:bg-sky-500/10 rounded disabled:opacity-50"
-                  aria-label="Odśwież temperaturę"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${nowLoading ? 'animate-spin' : ''}`} />
-                </button>
-              </span>
-            </div>
-          )}
-
           <label className="flex items-start gap-2.5 text-xs text-slate-300 cursor-pointer">
             <input
               type="checkbox"
@@ -164,27 +182,25 @@ export const ThermostatSettings = ({ deviceId, disabled }) => {
               onChange={(e) => { setEnabled(e.target.checked); setMsg('') }}
               className="accent-indigo-500 mt-0.5 shrink-0"
             />
-            <span className="leading-snug">
-              Automatyka wł./wył. wg temperatury na zewnątrz
-            </span>
+            <span className="leading-snug">Automatyka wł./wył. wg temperatury na zewnątrz</span>
           </label>
 
           <div className="space-y-1">
             <label htmlFor={`thermo-city-${deviceId}`} className="text-[11px] text-slate-400">
               Miejscowość
             </label>
-            <div className="relative">
-              <MapPin className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500 pointer-events-none" />
-              <input
-                id={`thermo-city-${deviceId}`}
-                type="text"
-                value={city}
-                disabled={disabled}
-                onChange={(e) => { setCity(e.target.value); setMsg('') }}
-                placeholder="np. Wrocław"
-                className={`${fieldClass} pl-8`}
-              />
-            </div>
+            <select
+              id={`thermo-city-${deviceId}`}
+              value={city}
+              disabled={disabled}
+              onChange={(e) => { setCity(e.target.value); setMsg('') }}
+              className={fieldClass}
+            >
+              <option value="">— wybierz miejscowość —</option>
+              {cityOptions.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
           </div>
 
           <div className="grid grid-cols-2 gap-2">
@@ -242,9 +258,7 @@ export const ThermostatSettings = ({ deviceId, disabled }) => {
               Zapisz ustawienia
             </button>
             {msg && (
-              <p className={`text-center text-[11px] ${saved ? 'text-emerald-400' : 'text-rose-400'}`}>
-                {msg}
-              </p>
+              <p className={`text-center text-[11px] ${saved ? 'text-emerald-400' : 'text-rose-400'}`}>{msg}</p>
             )}
           </div>
 
