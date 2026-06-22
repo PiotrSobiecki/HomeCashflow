@@ -1,35 +1,53 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback } from "react";
 import {
-  Thermometer, ChevronDown, ChevronRight, Loader2, Check, AlertTriangle, MapPin, RefreshCw,
-} from 'lucide-react'
-import { fetchThermostat, saveThermostat, fetchThermostatTemperature } from '../lib/api'
+  Thermometer,
+  ChevronDown,
+  ChevronRight,
+  Loader2,
+  Check,
+  AlertTriangle,
+  MapPin,
+  RefreshCw,
+} from "lucide-react";
+import {
+  fetchThermostat,
+  saveThermostat,
+  fetchThermostatTemperature,
+} from "../lib/api";
 
 const ERRORS = {
-  geocode_no_result: 'Nie znaleziono takiej miejscowości.',
-  geocode_failed: 'Nie udało się pobrać lokalizacji. Spróbuj ponownie.',
-  threshold_order: 'Próg włączenia musi być wyższy od wyłączenia (min. 1°C odstępu).',
-  thresholds_required: 'Podaj oba progi temperatury.',
-}
+  geocode_no_result: "Nie znaleziono takiej miejscowości.",
+  geocode_failed: "Nie udało się pobrać lokalizacji. Spróbuj ponownie.",
+  threshold_order:
+    "Próg włączenia musi być wyższy od wyłączenia (min. 1°C odstępu).",
+  thresholds_required: "Podaj oba progi temperatury.",
+};
 
 // Podpowiedzi miejscowości pojawiają się po wpisaniu tylu liter.
-const MIN_QUERY = 3
+const MIN_QUERY = 3;
 
 const fmtTime = (iso) => {
-  if (!iso) return null
+  if (!iso) return null;
   try {
-    return new Date(iso).toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+    return new Date(iso).toLocaleString("pl-PL", {
+      day: "2-digit",
+      month: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
   } catch {
-    return null
+    return null;
   }
-}
+};
 
-const lastActionLabel = (a) => (a === 'on' ? 'włączyła klimę' : a === 'off' ? 'wyłączyła klimę' : '—')
+const lastActionLabel = (a) =>
+  a === "on" ? "włączyła klimę" : a === "off" ? "wyłączyła klimę" : "—";
 
 // Z etykiety „Wrocław, Dolnośląskie, Polska" robimy samą nazwę miasta.
-const cityName = (label) => (label ?? '').split(',')[0].trim()
+const cityName = (label) => (label ?? "").split(",")[0].trim();
 
 const fieldClass =
-  'w-full px-2.5 py-1.5 bg-slate-900/60 border border-slate-600 rounded-lg text-white text-xs placeholder-slate-500 focus:outline-none focus:border-indigo-500 disabled:opacity-50'
+  "w-full px-2.5 py-1.5 bg-slate-900/60 border border-slate-600 rounded-lg text-white text-xs placeholder-slate-500 focus:outline-none focus:border-indigo-500 disabled:opacity-50";
 
 /**
  * Sekcja „Termostat zewnętrzny" dla klimy IR (ir_ac). Pozwala włączyć automatykę,
@@ -39,134 +57,148 @@ const fieldClass =
  * @param {boolean} disabled
  */
 export const ThermostatSettings = ({ deviceId, disabled }) => {
-  const [open, setOpen] = useState(false)
-  const [cfg, setCfg] = useState(null)
-  const [enabled, setEnabled] = useState(false)
-  const [city, setCity] = useState('')
-  const [tempOn, setTempOn] = useState('26')
-  const [tempOff, setTempOff] = useState('24')
-  const [saving, setSaving] = useState(false)
-  const [msg, setMsg] = useState('')
+  const [open, setOpen] = useState(false);
+  const [cfg, setCfg] = useState(null);
+  const [enabled, setEnabled] = useState(false);
+  const [city, setCity] = useState("");
+  const [tempOn, setTempOn] = useState("26");
+  const [tempOff, setTempOff] = useState("24");
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState("");
   // Podpowiedzi miejscowości + wybrana (precyzyjne lat/lon, bez ponownego geokodowania).
-  const [suggestions, setSuggestions] = useState([])
-  const [picked, setPicked] = useState(null)
+  const [suggestions, setSuggestions] = useState([]);
+  const [picked, setPicked] = useState(null);
   // Bieżąca temperatura na zewnątrz.
-  const [now, setNow] = useState(null)
-  const [nowLoading, setNowLoading] = useState(false)
-  const [nowError, setNowError] = useState(false)
+  const [now, setNow] = useState(null);
+  const [nowLoading, setNowLoading] = useState(false);
+  const [nowError, setNowError] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const { thermostat } = await fetchThermostat(deviceId)
+      const { thermostat } = await fetchThermostat(deviceId);
       if (thermostat) {
-        setCfg(thermostat)
-        setEnabled(thermostat.enabled)
-        setCity(cityName(thermostat.locationLabel))
-        if (thermostat.tempOn != null) setTempOn(String(thermostat.tempOn))
-        if (thermostat.tempOff != null) setTempOff(String(thermostat.tempOff))
+        setCfg(thermostat);
+        setEnabled(thermostat.enabled);
+        setCity(cityName(thermostat.locationLabel));
+        if (thermostat.tempOn != null) setTempOn(String(thermostat.tempOn));
+        if (thermostat.tempOff != null) setTempOff(String(thermostat.tempOff));
       }
     } catch {
       // cicho — automatyka to nie krytyczna ścieżka
     }
-  }, [deviceId])
+  }, [deviceId]);
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    load();
+  }, [load]);
 
-  const hasCoords = cfg?.lat != null && cfg?.lon != null
+  const hasCoords = cfg?.lat != null && cfg?.lon != null;
 
   const loadNow = useCallback(async () => {
-    if (cfg?.lat == null || cfg?.lon == null) return
-    setNowLoading(true); setNowError(false)
+    if (cfg?.lat == null || cfg?.lon == null) return;
+    setNowLoading(true);
+    setNowError(false);
     try {
-      const { temp } = await fetchThermostatTemperature(deviceId)
-      setNow(typeof temp === 'number' ? temp : null)
+      const { temp } = await fetchThermostatTemperature(deviceId);
+      setNow(typeof temp === "number" ? temp : null);
     } catch {
-      setNowError(true)
+      setNowError(true);
     } finally {
-      setNowLoading(false)
+      setNowLoading(false);
     }
-  }, [deviceId, cfg?.lat, cfg?.lon])
+  }, [deviceId, cfg?.lat, cfg?.lon]);
 
   // Bieżąca temp pobierana gdy jest lokalizacja — niezależnie od zwinięcia (ma być zawsze widoczna).
   useEffect(() => {
-    if (hasCoords) loadNow()
-  }, [hasCoords, loadNow])
+    if (hasCoords) loadNow();
+  }, [hasCoords, loadNow]);
 
   // Podpowiedzi miejscowości z Open-Meteo (debounce). Nie szukamy zapisanej już nazwy ani po wyborze.
   useEffect(() => {
-    const q = city.trim()
+    const q = city.trim();
     if (q.length < MIN_QUERY || picked || q === cityName(cfg?.locationLabel)) {
-      setSuggestions([])
-      return
+      setSuggestions([]);
+      return;
     }
     const t = setTimeout(async () => {
       try {
         const res = await fetch(
           `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=5&language=pl&format=json`,
-        )
-        const data = await res.json()
+        );
+        const data = await res.json();
         setSuggestions(
           (data?.results ?? []).map((r) => ({
             id: r.id ?? `${r.latitude}-${r.longitude}`,
             name: r.name,
             lat: r.latitude,
             lon: r.longitude,
-            label: [r.name, r.admin1, r.country].filter(Boolean).join(', '),
+            label: [r.name, r.admin1, r.country].filter(Boolean).join(", "),
           })),
-        )
+        );
       } catch {
-        setSuggestions([])
+        setSuggestions([]);
       }
-    }, 300)
-    return () => clearTimeout(t)
-  }, [city, picked, cfg?.locationLabel])
+    }, 300);
+    return () => clearTimeout(t);
+  }, [city, picked, cfg?.locationLabel]);
 
   const onCityChange = (e) => {
-    setCity(e.target.value)
-    setPicked(null)
-    setMsg('')
-  }
+    setCity(e.target.value);
+    setPicked(null);
+    setMsg("");
+  };
 
   const pickCity = (s) => {
-    setCity(s.name)
-    setPicked({ lat: s.lat, lon: s.lon, label: s.label })
-    setSuggestions([])
-    setMsg('')
-  }
+    setCity(s.name);
+    setPicked({ lat: s.lat, lon: s.lon, label: s.label });
+    setSuggestions([]);
+    setMsg("");
+  };
 
   const save = async () => {
-    const on = Number(String(tempOn).replace(',', '.'))
-    const off = Number(String(tempOff).replace(',', '.'))
-    if (!Number.isFinite(on) || !Number.isFinite(off)) { setMsg(ERRORS.thresholds_required); return }
-    if (enabled && !city.trim() && cfg?.lat == null) { setMsg('Podaj miejscowość, żeby włączyć automatykę.'); return }
+    const on = Number(String(tempOn).replace(",", "."));
+    const off = Number(String(tempOff).replace(",", "."));
+    if (!Number.isFinite(on) || !Number.isFinite(off)) {
+      setMsg(ERRORS.thresholds_required);
+      return;
+    }
+    if (enabled && !city.trim() && cfg?.lat == null) {
+      setMsg("Podaj miejscowość, żeby włączyć automatykę.");
+      return;
+    }
 
-    setSaving(true); setMsg('')
+    setSaving(true);
+    setMsg("");
     try {
-      const body = { enabled, tempOn: on, tempOff: off }
+      const body = { enabled, tempOn: on, tempOff: off };
       if (picked) {
         // Wybrano z podpowiedzi — mamy dokładne współrzędne, bez ponownego geokodowania.
-        body.lat = picked.lat; body.lon = picked.lon; body.locationLabel = picked.label
+        body.lat = picked.lat;
+        body.lon = picked.lon;
+        body.locationLabel = picked.label;
       } else if (city.trim() && city.trim() !== cityName(cfg?.locationLabel)) {
         // Wpisano ręcznie i nie wybrano — backend zgeokoduje nazwę.
-        body.city = city.trim()
+        body.city = city.trim();
       } else if (cfg?.lat != null) {
-        body.lat = cfg.lat; body.lon = cfg.lon; body.locationLabel = cfg.locationLabel
+        body.lat = cfg.lat;
+        body.lon = cfg.lon;
+        body.locationLabel = cfg.locationLabel;
       }
-      const { thermostat } = await saveThermostat(deviceId, body)
-      setCfg(thermostat)
-      setCity(cityName(thermostat.locationLabel))
-      setPicked(null)
-      setMsg('Zapisano ✓')
+      const { thermostat } = await saveThermostat(deviceId, body);
+      setCfg(thermostat);
+      setCity(cityName(thermostat.locationLabel));
+      setPicked(null);
+      setMsg("Zapisano ✓");
     } catch (err) {
-      setMsg(ERRORS[err.code] || 'Nie udało się zapisać.')
+      setMsg(ERRORS[err.code] || "Nie udało się zapisać.");
     } finally {
-      setSaving(false)
+      setSaving(false);
     }
-  }
+  };
 
-  const lastTemp = cfg?.lastOutdoorTemp
-  const lastAt = fmtTime(cfg?.lastCheckedAt)
-  const saved = msg.includes('✓')
+  const lastTemp = cfg?.lastOutdoorTemp;
+  const lastAt = fmtTime(cfg?.lastCheckedAt);
+  const saved = msg.includes("✓");
 
   return (
     <div className="pt-3 mt-1 border-t border-slate-700/40">
@@ -184,7 +216,11 @@ export const ThermostatSettings = ({ deviceId, disabled }) => {
             </span>
           )}
         </span>
-        {open ? <ChevronDown className="w-4 h-4 shrink-0" /> : <ChevronRight className="w-4 h-4 shrink-0" />}
+        {open ? (
+          <ChevronDown className="w-4 h-4 shrink-0" />
+        ) : (
+          <ChevronRight className="w-4 h-4 shrink-0" />
+        )}
       </button>
 
       {/* Bieżąca temperatura — ZAWSZE widoczna (nad zwijaniem), gdy ustawiona jest lokalizacja. */}
@@ -192,11 +228,21 @@ export const ThermostatSettings = ({ deviceId, disabled }) => {
         <div className="mt-2 flex items-center justify-between rounded-lg bg-sky-500/10 border border-sky-500/25 px-2.5 py-2">
           <span className="flex items-center gap-1.5 text-[11px] text-sky-300/90">
             <Thermometer className="w-3.5 h-3.5" /> Teraz na zewnątrz
-            {cfg?.locationLabel && <span className="text-slate-500">· {cityName(cfg.locationLabel)}</span>}
+            {cfg?.locationLabel && (
+              <span className="text-slate-500">
+                · {cityName(cfg.locationLabel)}
+              </span>
+            )}
           </span>
           <span className="flex items-center gap-1.5">
             <span className="text-sm font-semibold text-white tabular-nums">
-              {nowLoading ? '…' : nowError ? '—' : now != null ? `${now}°C` : '—'}
+              {nowLoading
+                ? "…"
+                : nowError
+                  ? "—"
+                  : now != null
+                    ? `${now}°C`
+                    : "—"}
             </span>
             <button
               type="button"
@@ -205,7 +251,9 @@ export const ThermostatSettings = ({ deviceId, disabled }) => {
               className="p-1 text-slate-400 hover:text-sky-300 hover:bg-sky-500/10 rounded disabled:opacity-50"
               aria-label="Odśwież temperaturę"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${nowLoading ? 'animate-spin' : ''}`} />
+              <RefreshCw
+                className={`w-3.5 h-3.5 ${nowLoading ? "animate-spin" : ""}`}
+              />
             </button>
           </span>
         </div>
@@ -218,14 +266,20 @@ export const ThermostatSettings = ({ deviceId, disabled }) => {
               type="checkbox"
               checked={enabled}
               disabled={disabled}
-              onChange={(e) => { setEnabled(e.target.checked); setMsg('') }}
+              onChange={(e) => {
+                setEnabled(e.target.checked);
+                setMsg("");
+              }}
               className="accent-indigo-500 mt-0.5 shrink-0"
             />
-            <span className="leading-snug">Automatyka wł./wył. wg temperatury na zewnątrz</span>
+            <span className="leading-snug">Automatyka wł./wył.</span>
           </label>
 
           <div className="space-y-1">
-            <label htmlFor={`thermo-city-${deviceId}`} className="text-[11px] text-slate-400">
+            <label
+              htmlFor={`thermo-city-${deviceId}`}
+              className="text-[11px] text-slate-400"
+            >
               Miejscowość
             </label>
             <div className="relative">
@@ -261,7 +315,10 @@ export const ThermostatSettings = ({ deviceId, disabled }) => {
 
           <div className="grid grid-cols-2 gap-2">
             <div className="space-y-1">
-              <label htmlFor={`thermo-on-${deviceId}`} className="text-[11px] text-slate-400">
+              <label
+                htmlFor={`thermo-on-${deviceId}`}
+                className="text-[11px] text-slate-400"
+              >
                 Włącz powyżej
               </label>
               <div className="flex items-center gap-1.5">
@@ -271,14 +328,20 @@ export const ThermostatSettings = ({ deviceId, disabled }) => {
                   inputMode="decimal"
                   value={tempOn}
                   disabled={disabled}
-                  onChange={(e) => { setTempOn(e.target.value); setMsg('') }}
+                  onChange={(e) => {
+                    setTempOn(e.target.value);
+                    setMsg("");
+                  }}
                   className={`${fieldClass} text-center tabular-nums`}
                 />
                 <span className="text-xs text-slate-500 shrink-0">°C</span>
               </div>
             </div>
             <div className="space-y-1">
-              <label htmlFor={`thermo-off-${deviceId}`} className="text-[11px] text-slate-400">
+              <label
+                htmlFor={`thermo-off-${deviceId}`}
+                className="text-[11px] text-slate-400"
+              >
                 Wyłącz poniżej
               </label>
               <div className="flex items-center gap-1.5">
@@ -288,7 +351,10 @@ export const ThermostatSettings = ({ deviceId, disabled }) => {
                   inputMode="decimal"
                   value={tempOff}
                   disabled={disabled}
-                  onChange={(e) => { setTempOff(e.target.value); setMsg('') }}
+                  onChange={(e) => {
+                    setTempOff(e.target.value);
+                    setMsg("");
+                  }}
                   className={`${fieldClass} text-center tabular-nums`}
                 />
                 <span className="text-xs text-slate-500 shrink-0">°C</span>
@@ -299,7 +365,8 @@ export const ThermostatSettings = ({ deviceId, disabled }) => {
           {enabled && (
             <p className="flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-2.5 py-2 text-[11px] leading-snug text-amber-200/90">
               <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-              Włączenie używa ostatniego trybu z pilota — ustaw klimę na chłodzenie, zanim zostawisz automatykę.
+              Włączenie używa ostatniego trybu z pilota — ustaw klimę na
+              chłodzenie, zanim zostawisz automatykę.
             </p>
           )}
 
@@ -310,25 +377,38 @@ export const ThermostatSettings = ({ deviceId, disabled }) => {
               disabled={disabled || saving}
               className="w-full flex items-center justify-center gap-1.5 px-3 py-2 bg-indigo-500 hover:bg-indigo-600 text-white text-xs font-medium rounded-lg transition-colors disabled:opacity-50"
             >
-              {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+              {saving ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Check className="w-3.5 h-3.5" />
+              )}
               Zapisz ustawienia
             </button>
             {msg && (
-              <p className={`text-center text-[11px] ${saved ? 'text-emerald-400' : 'text-rose-400'}`}>{msg}</p>
+              <p
+                className={`text-center text-[11px] ${saved ? "text-emerald-400" : "text-rose-400"}`}
+              >
+                {msg}
+              </p>
             )}
           </div>
 
           {cfg?.lastCheckedAt && (
             <p className="pt-2 border-t border-slate-700/40 text-[11px] text-slate-500 leading-relaxed">
-              Ostatni odczyt:{' '}
-              <span className="text-slate-400">{lastTemp != null ? `${lastTemp}°C` : '—'}</span>
+              Ostatni odczyt:{" "}
+              <span className="text-slate-400">
+                {lastTemp != null ? `${lastTemp}°C` : "—"}
+              </span>
               {lastAt && <span className="text-slate-600"> · {lastAt}</span>}
               <br />
-              Automatyka: <span className="text-slate-400">{lastActionLabel(cfg.lastAction)}</span>
+              Automatyka:{" "}
+              <span className="text-slate-400">
+                {lastActionLabel(cfg.lastAction)}
+              </span>
             </p>
           )}
         </div>
       )}
     </div>
-  )
-}
+  );
+};
