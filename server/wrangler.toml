@@ -22,3 +22,5 @@ SMARTTHINGS_REDIRECT_URI = "https://api.homecashflow.org/api/smartthings/callbac
 # - RESEND_API_KEY
 # - SMARTTHINGS_CLIENT_ID      (z `smartthings apps:create` — jeden na całą apkę, NIE per user)
 # - SMARTTHINGS_CLIENT_SECRET  (j.w. — tokeny per user idą do tabeli smartthings_credentials, nie tu)
+# - WEATHER_GOOGLE_API_KEY      (Google Weather API — główne źródło pogody; brak/błąd → fallback Open-Meteo.
+#                               Klucz MUSI mieć Application restrictions = None, bo Worker woła server-side bez referrera)

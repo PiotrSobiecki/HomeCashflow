@@ -47,7 +47,7 @@ import {
   writeFinanceToRelational,
 } from "./finance-relational.js";
 import { logAction } from "./action-log.js";
-import { geocodeCity, getOutdoorTemp } from "./weather.js";
+import { geocodeCity, getOutdoorWeather } from "./weather.js";
 import { thermostatThresholdGap } from "./ac-thermostat.js";
 import {
   IR_PLUG_STANDBY_W,
@@ -2957,8 +2957,11 @@ app.get("/api/smart-devices/:id/thermostat/temperature", authMiddleware, async (
     return c.json({ error: "no_location" }, 400);
 
   try {
-    const temp = await getOutdoorTemp({ lat: Number(t.lat), lon: Number(t.lon) });
-    return c.json({ temp });
+    const w = await getOutdoorWeather(
+      { lat: Number(t.lat), lon: Number(t.lon) },
+      { apiKey: c.env.WEATHER_GOOGLE_API_KEY },
+    );
+    return c.json({ temp: w?.temp ?? null, condition: w?.condition ?? null });
   } catch (err) {
     console.error("[thermostat] temperature fetch failed", err);
     return c.json({ error: "weather_failed" }, 502);

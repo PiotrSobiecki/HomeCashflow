@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { getOutdoorTemp, geocodeCity } from './weather.js'
+import { getOutdoorTemp, getOutdoorWeather, geocodeCity } from './weather.js'
 
-// Granica: Open-Meteo (zewnętrzne API). Mockujemy global fetch — ten test nie dotyka DB,
+// Granica: zewnętrzne API pogodowe. Mockujemy global fetch — ten test nie dotyka DB,
 // więc podmiana fetch nie koliduje z Neon.
 afterEach(() => { vi.unstubAllGlobals() })
 
@@ -9,17 +9,74 @@ function stubFetch(impl) {
   vi.stubGlobal('fetch', vi.fn(impl))
 }
 
-describe('getOutdoorTemp — odczyt temperatury z Open-Meteo', () => {
-  it('zwraca bieżącą temperaturę 2 m dla podanych współrzędnych', async () => {
+describe('getOutdoorWeather — Google jako główne źródło', () => {
+  it('odpytuje Google gdy podano apiKey i zwraca temperaturę + warunek', async () => {
     stubFetch(async (url) => {
-      expect(String(url)).toContain('latitude=51.1')
-      expect(String(url)).toContain('longitude=17.03')
-      expect(String(url)).toContain('temperature_2m')
-      return { ok: true, json: async () => ({ current: { temperature_2m: 23.7 } }) }
+      expect(String(url)).toContain('weather.googleapis.com')
+      expect(String(url)).toContain('key=secret-key')
+      expect(String(url)).toContain('location.latitude=51.1')
+      expect(String(url)).toContain('location.longitude=17.03')
+      return {
+        ok: true,
+        json: async () => ({
+          temperature: { degrees: 23.7, unit: 'CELSIUS' },
+          isDaytime: true,
+          weatherCondition: { type: 'PARTLY_CLOUDY' },
+        }),
+      }
     })
 
-    const temp = await getOutdoorTemp({ lat: 51.1, lon: 17.03 })
-    expect(temp).toBe(23.7)
+    const w = await getOutdoorWeather({ lat: 51.1, lon: 17.03 }, { apiKey: 'secret-key' })
+    expect(w.temp).toBe(23.7)
+    expect(w.condition).toMatchObject({ code: 'partly-cloudy', isDay: true })
+  })
+
+  it('mapuje typ Google na śnieg i wariant nocny', async () => {
+    stubFetch(async () => ({
+      ok: true,
+      json: async () => ({
+        temperature: { degrees: -2 },
+        isDaytime: false,
+        weatherCondition: { type: 'HEAVY_SNOW' },
+      }),
+    }))
+    const w = await getOutdoorWeather({ lat: 51, lon: 17 }, { apiKey: 'k' })
+    expect(w.condition).toMatchObject({ code: 'snow', isDay: false })
+  })
+
+  it('spada na Open-Meteo gdy Google zwróci błąd HTTP (np. 403 referrer)', async () => {
+    let calls = 0
+    stubFetch(async (url) => {
+      calls++
+      if (String(url).includes('googleapis.com')) {
+        return { ok: false, status: 403, json: async () => ({}) }
+      }
+      expect(String(url)).toContain('open-meteo.com')
+      expect(String(url)).toContain('weather_code')
+      return { ok: true, json: async () => ({ current: { temperature_2m: 19.4, weather_code: 61, is_day: 1 } }) }
+    })
+
+    const w = await getOutdoorWeather({ lat: 51, lon: 17 }, { apiKey: 'k' })
+    expect(calls).toBe(2)
+    expect(w.temp).toBe(19.4)
+    expect(w.condition).toMatchObject({ code: 'rain' })
+  })
+
+  it('bez apiKey idzie prosto do Open-Meteo', async () => {
+    stubFetch(async (url) => {
+      expect(String(url)).toContain('open-meteo.com')
+      return { ok: true, json: async () => ({ current: { temperature_2m: 12, weather_code: 0, is_day: 1 } }) }
+    })
+    const w = await getOutdoorWeather({ lat: 51, lon: 17 })
+    expect(w.temp).toBe(12)
+    expect(w.condition).toMatchObject({ code: 'clear' })
+  })
+})
+
+describe('getOutdoorTemp — cienka nakładka zwracająca samą temperaturę', () => {
+  it('zwraca liczbę dla runnera termostatu (Open-Meteo)', async () => {
+    stubFetch(async () => ({ ok: true, json: async () => ({ current: { temperature_2m: 23.7, weather_code: 1 } }) }))
+    expect(await getOutdoorTemp({ lat: 51.1, lon: 17.03 })).toBe(23.7)
   })
 
   it('rzuca błędem przy odpowiedzi HTTP != 2xx (runner pominie wpis)', async () => {

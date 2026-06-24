@@ -40,7 +40,9 @@ export default {
       // Termostat zewnętrzny klimy IR: sprawdzanie temperatury co 30 min (minuta % 30).
       if (new Date(event.scheduledTime).getUTCMinutes() % 30 === 0) {
         try {
-          const res = await runAcThermostats(sql, rawKey, { readOutdoorTemp: getOutdoorTemp })
+          const res = await runAcThermostats(sql, rawKey, {
+            readOutdoorTemp: (coords) => getOutdoorTemp(coords, { apiKey: env.WEATHER_GOOGLE_API_KEY }),
+          })
           if (res.checked || res.switched || res.failed) console.log('[cron] ac thermostats', res)
         } catch (err) {
           console.error('[cron] ac thermostats failed', err)

@@ -8,6 +8,16 @@ import {
   AlertTriangle,
   MapPin,
   RefreshCw,
+  Sun,
+  Moon,
+  CloudSun,
+  CloudMoon,
+  Cloud,
+  CloudFog,
+  CloudDrizzle,
+  CloudRain,
+  CloudSnow,
+  CloudLightning,
 } from "lucide-react";
 import {
   fetchThermostat,
@@ -26,6 +36,32 @@ const ERRORS = {
   threshold_gap: "Min. 1°C odstępu między progami.",
   thresholds_required: "Podaj oba progi temperatury.",
 };
+
+// Kod warunku z backendu (weather.js) → ikona lucide + kolor. Dla bezchmurnego/częściowego
+// nieba osobny wariant dzienny/nocny (isDay).
+const WEATHER_ICONS = {
+  clear: { day: Sun, night: Moon, color: "text-amber-300" },
+  "partly-cloudy": { day: CloudSun, night: CloudMoon, color: "text-sky-300" },
+  cloudy: { day: Cloud, color: "text-slate-300" },
+  fog: { day: CloudFog, color: "text-slate-400" },
+  drizzle: { day: CloudDrizzle, color: "text-sky-300" },
+  rain: { day: CloudRain, color: "text-sky-400" },
+  sleet: { day: CloudSnow, color: "text-sky-200" },
+  snow: { day: CloudSnow, color: "text-sky-100" },
+  thunder: { day: CloudLightning, color: "text-amber-400" },
+};
+
+function WeatherIcon({ condition, className = "w-4 h-4" }) {
+  const def = WEATHER_ICONS[condition?.code];
+  if (!def) return null;
+  const Icon = condition.isDay === false && def.night ? def.night : def.day;
+  return (
+    <Icon
+      className={`${className} ${def.color}`}
+      aria-label={condition.label}
+    />
+  );
+}
 
 // Podpowiedzi miejscowości pojawiają się po wpisaniu tylu liter.
 const MIN_QUERY = 3;
@@ -121,6 +157,7 @@ export const ThermostatSettings = ({
   const [picked, setPicked] = useState(null);
   // Bieżąca temperatura na zewnątrz.
   const [now, setNow] = useState(null);
+  const [nowCondition, setNowCondition] = useState(null);
   const [nowLoading, setNowLoading] = useState(false);
   const [nowError, setNowError] = useState(false);
   const cfgReady = useRef(false);
@@ -175,8 +212,9 @@ export const ThermostatSettings = ({
     setNowLoading(true);
     setNowError(false);
     try {
-      const { temp } = await fetchThermostatTemperature(deviceId);
+      const { temp, condition } = await fetchThermostatTemperature(deviceId);
       setNow(typeof temp === "number" ? temp : null);
+      setNowCondition(condition ?? null);
     } catch {
       setNowError(true);
     } finally {
@@ -376,6 +414,9 @@ export const ThermostatSettings = ({
             )}
           </span>
           <span className="flex items-center gap-1.5">
+            {!nowLoading && !nowError && now != null && nowCondition && (
+              <WeatherIcon condition={nowCondition} className="w-4 h-4 shrink-0" />
+            )}
             <span className="text-sm font-semibold text-white tabular-nums">
               {nowLoading
                 ? "…"
