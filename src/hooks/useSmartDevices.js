@@ -88,6 +88,12 @@ export function useSmartDevices() {
     refreshStatus()
   }, [refreshStatus])
 
+  const saveNotifySettings = useCallback(async (id, patch) => {
+    const updated = await patchSmartDevice(id, patch)
+    setDevices((prev) => prev.map((d) => (d.id === id ? updated : d)))
+    return updated
+  }, [])
+
   // Powiązanie urządzenia IR z gniazdkiem (plugId=null rozłącza). Po zmianie odśwież status.
   const linkPlug = useCallback(async (id, plugId) => {
     const updated = await patchSmartDevice(id, { linkedPlugId: plugId })
@@ -138,5 +144,5 @@ export function useSmartDevices() {
     setTimeout(refreshStatus, 1500)
   }, [refreshStatus])
 
-  return { devices, statusById, loading, error, reload, refreshStatus, add, addSt, rename, setActive, linkPlug, saveCycleLabels, remove, sendCommand, sendSt, sendStSetting: sendStSettingCmd }
+  return { devices, statusById, loading, error, reload, refreshStatus, add, addSt, rename, setActive, linkPlug, saveCycleLabels, saveNotifySettings, remove, sendCommand, sendSt, sendStSetting: sendStSettingCmd }
 }

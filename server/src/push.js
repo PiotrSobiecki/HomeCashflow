@@ -21,6 +21,32 @@ export function formatAcPowerPushMessage({ action, deviceName, outdoorTemp, sour
   return { title, body }
 }
 
+/** Tekst powiadomienia o zakończeniu cyklu AGD. */
+export function formatCycleCompletePushMessage({ deviceName, deviceType }) {
+  const typeLabel =
+    deviceType === 'dryer' ? 'Suszarka'
+      : deviceType === 'dishwasher' ? 'Zmywarka'
+        : 'Pralka'
+  const title = `${typeLabel} — cykl zakończony`
+  const device = deviceName?.trim() || typeLabel
+  const body = `${device} zakończyła pracę.`
+  return { title, body }
+}
+
+/** Tekst powiadomienia o progu mocy gniazdka (powyżej / poniżej). */
+export function formatPlugPowerPushMessage({ deviceName, powerW, thresholdW, direction = 'above' }) {
+  const above = direction !== 'below'
+  const title = above ? 'Gniazdko — wysoki pobór mocy' : 'Gniazdko — niski pobór mocy'
+  const device = deviceName?.trim() || 'Gniazdko'
+  const w = Number(powerW)
+  const t = Number(thresholdW)
+  const powerPart = Number.isFinite(w) ? `${Math.round(w)} W` : '—'
+  const thresholdPart = Number.isFinite(t) ? `${Math.round(t)} W` : '—'
+  const cmp = above ? '>' : '<'
+  const body = `${device}: ${powerPart} (${cmp} ${thresholdPart})`
+  return { title, body }
+}
+
 function parsePrivateJwk(raw) {
   if (!raw?.trim()) return null
   try {
@@ -124,6 +150,65 @@ export async function notifyHouseholdAcPower(sql, env, payload) {
   })
   if (result.sent === 0 && !result.skipped) {
     console.warn('[push] ac-power: nothing delivered', { householdId, action, ...result })
+  }
+  return result
+}
+
+/**
+ * @param {import('@neondatabase/serverless').NeonQueryFunction} sql
+ * @param {{ VAPID_PUBLIC_KEY?: string, VAPID_PRIVATE_JWK?: string, PUSH_ADMIN_CONTACT?: string }} env
+ * @param {{ householdId: string, deviceName?: string, deviceType?: string }} payload
+ */
+export async function notifyHouseholdCycleComplete(sql, env, payload) {
+  if (!pushConfigured(env)) return { sent: 0, skipped: true, reason: 'not_configured' }
+
+  const { householdId, deviceName, deviceType } = payload
+  const rows = await sql`
+    SELECT ps.id, ps.endpoint, ps.p256dh, ps.auth
+    FROM push_subscriptions ps
+    JOIN household_members hm ON hm.user_id = ps.user_id
+    WHERE hm.household_id = ${householdId}
+      AND ps.washer_cycle_notify = true
+  `
+  const { title, body } = formatCycleCompletePushMessage({ deviceName, deviceType })
+  const result = await sendPushToSubscriptions(sql, env, rows, {
+    title,
+    body,
+    url: '/?view=urzadzenia',
+    tag: 'washer-cycle',
+  })
+  if (result.sent === 0 && !result.skipped) {
+    console.warn('[push] cycle-complete: nothing delivered', { householdId, ...result })
+  }
+  return result
+}
+
+/**
+ * @param {import('@neondatabase/serverless').NeonQueryFunction} sql
+ * @param {{ VAPID_PUBLIC_KEY?: string, VAPID_PRIVATE_JWK?: string, PUSH_ADMIN_CONTACT?: string }} env
+ * @param {{ householdId: string, deviceName?: string, powerW: number, thresholdW: number, direction?: 'above'|'below' }} payload
+ */
+export async function notifyHouseholdPlugPower(sql, env, payload) {
+  if (!pushConfigured(env)) return { sent: 0, skipped: true, reason: 'not_configured' }
+
+  const { householdId, deviceName, powerW, thresholdW, direction = 'above' } = payload
+  const rows = await sql`
+    SELECT ps.id, ps.endpoint, ps.p256dh, ps.auth
+    FROM push_subscriptions ps
+    JOIN household_members hm ON hm.user_id = ps.user_id
+    WHERE hm.household_id = ${householdId}
+      AND ps.plug_power_notify = true
+  `
+  const { title, body } = formatPlugPowerPushMessage({ deviceName, powerW, thresholdW, direction })
+  const tag = direction === 'below' ? 'plug-power-below' : 'plug-power-above'
+  const result = await sendPushToSubscriptions(sql, env, rows, {
+    title,
+    body,
+    url: '/?view=urzadzenia',
+    tag,
+  })
+  if (result.sent === 0 && !result.skipped) {
+    console.warn('[push] plug-power: nothing delivered', { householdId, ...result })
   }
   return result
 }

@@ -9,7 +9,8 @@ import { decodeFinanceDataKey } from './finance-crypto.js'
 import { refreshExpiringTokens } from './smartthings/credentials.js'
 import { runAcThermostats } from './ac-thermostat.js'
 import { getOutdoorTemp } from './weather.js'
-import { notifyHouseholdAcPower } from './push.js'
+import { notifyHouseholdAcPower, notifyHouseholdCycleComplete, notifyHouseholdPlugPower } from './push.js'
+import { pollCycleDevices } from './device-notifications.js'
 
 export default {
   fetch: app.fetch,
@@ -21,6 +22,8 @@ export default {
       const sql = neon(env.DATABASE_URL)
       const rawKey = decodeFinanceDataKey(env.FINANCE_DATA_KEY)
       const notifyAcPower = (payload) => notifyHouseholdAcPower(sql, env, payload)
+      const notifyCycleComplete = (payload) => notifyHouseholdCycleComplete(sql, env, payload)
+      const notifyPlugPower = (payload) => notifyHouseholdPlugPower(sql, env, payload)
 
       try {
         const t = await fireDueTimers(sql, rawKey, { notifyAcPower })
@@ -29,9 +32,20 @@ export default {
         console.error('[cron] timers failed', err)
       }
 
+      try {
+        const c = await pollCycleDevices(sql, rawKey, {
+          clientId: env.SMARTTHINGS_CLIENT_ID,
+          clientSecret: env.SMARTTHINGS_CLIENT_SECRET,
+          notifyCycleComplete,
+        })
+        if (c.checked || c.notified || c.failed) console.log('[cron] cycle devices', c)
+      } catch (err) {
+        console.error('[cron] cycle devices failed', err)
+      }
+
       if (new Date(event.scheduledTime).getUTCMinutes() % 15 === 0) {
         try {
-          const res = await collectEnergySnapshots(sql, rawKey)
+          const res = await collectEnergySnapshots(sql, rawKey, { notifyPlugPower })
           await sql`DELETE FROM device_energy_snapshots WHERE recorded_at < NOW() - interval '400 days'`
           console.log('[cron] energy snapshots', res)
         } catch (err) {

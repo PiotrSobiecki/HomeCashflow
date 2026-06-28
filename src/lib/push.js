@@ -166,7 +166,11 @@ async function getBrowserSubscription(reg) {
  * Włącza powiadomienia: permission → SW → subscribe → backend.
  * @returns {Promise<'granted'|'denied'|'unsupported'|'not_configured'|'error'>}
  */
-export async function subscribeAcPowerPush({ acPowerNotify = true } = {}) {
+export async function subscribeDevicePush({
+  acPowerNotify,
+  washerCycleNotify,
+  plugPowerNotify,
+} = {}) {
   if (!pushSupported()) return 'unsupported'
 
   let publicKey
@@ -182,7 +186,6 @@ export async function subscribeAcPowerPush({ acPowerNotify = true } = {}) {
 
   const reg = await ensureServiceWorker()
   let sub = await getBrowserSubscription(reg)
-  // Stara subskrypcja (inny klucz VAPID) blokuje nową — usuwamy i tworzymy od nowa.
   if (sub) {
     try {
       await sub.unsubscribe()
@@ -198,12 +201,20 @@ export async function subscribeAcPowerPush({ acPowerNotify = true } = {}) {
     })
   }
 
+  const current = await loadPushStatus().catch(() => ({}))
   const payload = await subscriptionToPayload(sub)
   await savePushSubscribe({
     ...payload,
-    acPowerNotify,
+    acPowerNotify: acPowerNotify ?? current.acPowerNotify ?? true,
+    washerCycleNotify: washerCycleNotify ?? current.washerCycleNotify ?? true,
+    plugPowerNotify: plugPowerNotify ?? current.plugPowerNotify ?? true,
   })
   return 'granted'
+}
+
+/** @deprecated użyj subscribeDevicePush */
+export async function subscribeAcPowerPush({ acPowerNotify = true } = {}) {
+  return subscribeDevicePush({ acPowerNotify })
 }
 
 export async function unsubscribeAcPowerPush() {
@@ -219,17 +230,31 @@ export async function unsubscribeAcPowerPush() {
   }
 }
 
-export async function setAcPowerPushPreference(enabled) {
+export async function setPushPreference(key, enabled) {
+  const body = {}
+  if (key === 'acPowerNotify') body.acPowerNotify = enabled
+  if (key === 'washerCycleNotify') body.washerCycleNotify = enabled
+  if (key === 'plugPowerNotify') body.plugPowerNotify = enabled
   if (!enabled) {
     try {
       const reg = await navigator.serviceWorker.getRegistration(SW_URL)
       const sub = reg ? await reg.pushManager.getSubscription() : null
-      if (sub) await sub.unsubscribe()
+      const status = await loadPushStatus().catch(() => ({}))
+      const anyOther =
+        (key !== 'acPowerNotify' && status.acPowerNotify) ||
+        (key !== 'washerCycleNotify' && status.washerCycleNotify) ||
+        (key !== 'plugPowerNotify' && status.plugPowerNotify)
+      if (!anyOther && sub) await sub.unsubscribe()
     } catch {
       /* ignore */
     }
   }
-  await savePushPreferences({ acPowerNotify: enabled })
+  await savePushPreferences(body)
+}
+
+/** @deprecated użyj setPushPreference('acPowerNotify', enabled) */
+export async function setAcPowerPushPreference(enabled) {
+  return setPushPreference('acPowerNotify', enabled)
 }
 
 export async function loadPushStatus() {
@@ -239,6 +264,8 @@ export async function loadPushStatus() {
       configured: false,
       subscribed: false,
       acPowerNotify: false,
+      washerCycleNotify: false,
+      plugPowerNotify: false,
       supported: false,
       reason: info.reason,
       hint: info.hint,
@@ -251,7 +278,7 @@ export async function loadPushStatus() {
         ...status,
         supported: true,
         reason: 'ok',
-        hint: 'Błąd bazy push — uruchom migrację 0023 na serwerze.',
+        hint: 'Błąd bazy push — uruchom migrację 0024 na serwerze.',
       }
     }
     return { ...status, supported: true, reason: 'ok', hint: '', permission: Notification.permission }
@@ -260,6 +287,8 @@ export async function loadPushStatus() {
       configured: false,
       subscribed: false,
       acPowerNotify: false,
+      washerCycleNotify: false,
+      plugPowerNotify: false,
       supported: true,
       reason: 'ok',
       hint: '',

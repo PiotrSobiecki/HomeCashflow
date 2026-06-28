@@ -117,13 +117,14 @@ import { WasherSettings } from './WasherSettings'
 import { DeviceTimer } from './DeviceTimer'
 import { PlugLinkPicker } from './PlugLinkPicker'
 import { DeviceEnergyChart } from './DeviceEnergyChart'
+import { DeviceNotifySettings } from './DeviceNotifySettings'
 
 /**
  * Karta pojedynczego urządzenia: status na żywo + sterowanie (Slice 3).
  */
 export const SmartDeviceCard = ({
   device, status, isOwner, plugs = [], linkedRemotes = [],
-  onRefresh, onRename, onToggleActive, onLinkPlug, onSaveCycleLabels, onRemove, onSend, onSendSt, onSendStSetting,
+  onRefresh, onRename, onToggleActive, onLinkPlug, onSaveCycleLabels, onSaveNotify, onRemove, onSend, onSendSt, onSendStSetting,
 }) => {
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(device.displayName)
@@ -244,6 +245,7 @@ export const SmartDeviceCard = ({
           {/* Powiązanie z gniazdkiem Tuya = koszt z gniazdka; bez powiązania pobór czytany
               natywnie z SmartThings (jeśli urządzenie go wystawia). */}
           {isOwner && <PlugLinkPicker device={device} plugs={plugs} onLinkPlug={onLinkPlug} />}
+          <DeviceNotifySettings device={device} disabled={!online} isOwner={isOwner} onSave={onSaveNotify} />
         </>
       ) : (<>
       {/* Pomiary (gniazdka — urządzenia IR to piloty, bez pomiaru energii) */}
@@ -311,6 +313,10 @@ export const SmartDeviceCard = ({
           {showChart && <DeviceEnergyChart deviceId={device.id} refreshKey={refreshKey} />}
         </>
       )}
+
+      {device.deviceType === 'plug' && (
+        <DeviceNotifySettings device={device} disabled={!online} isOwner={isOwner} onSave={onSaveNotify} />
+      )}
       </>)}
         </div>
 
@@ -361,6 +367,7 @@ export const SmartDeviceCard = ({
                         onSaveLabels={isOwner ? (labels) => onSaveCycleLabels(rd.id, labels) : null}
                       />
                     )}
+                    <DeviceNotifySettings device={rd} disabled={!rdOnline} isOwner={isOwner} onSave={onSaveNotify} />
                   </>
                 ) : rd.deviceType === 'ir_ac' ? (
                   <AcControls ac={rs?.ac} onSend={sendRd} disabled={!online}>

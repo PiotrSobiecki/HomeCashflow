@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { formatAcPowerPushMessage } from './push.js'
+import { formatAcPowerPushMessage, formatCycleCompletePushMessage, formatPlugPowerPushMessage } from './push.js'
 
 describe('formatAcPowerPushMessage', () => {
   it('formatuje włączenie z termostatu i temperaturą', () => {
@@ -33,5 +33,27 @@ describe('formatAcPowerPushMessage', () => {
     })
     expect(m.body).toContain('Klima')
     expect(m.body).toContain('wyłącznik czasowy')
+  })
+})
+
+describe('formatCycleCompletePushMessage', () => {
+  it('formatuje pralkę', () => {
+    const m = formatCycleCompletePushMessage({ deviceName: 'Pralka łazienka', deviceType: 'washer' })
+    expect(m.title).toContain('Pralka')
+    expect(m.body).toContain('Pralka łazienka')
+  })
+})
+
+describe('formatPlugPowerPushMessage', () => {
+  it('formatuje przekroczenie progu w górę', () => {
+    const m = formatPlugPowerPushMessage({ deviceName: 'Tv szafka', powerW: 650, thresholdW: 500, direction: 'above' })
+    expect(m.title).toContain('wysoki')
+    expect(m.body).toContain('> 500 W')
+  })
+
+  it('formatuje spadek poniżej progu', () => {
+    const m = formatPlugPowerPushMessage({ deviceName: 'Tv szafka', powerW: 5, thresholdW: 20, direction: 'below' })
+    expect(m.title).toContain('niski')
+    expect(m.body).toContain('< 20 W')
   })
 })

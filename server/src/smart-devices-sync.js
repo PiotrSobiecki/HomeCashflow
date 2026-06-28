@@ -8,6 +8,7 @@
  */
 import { decryptField } from './finance-crypto.js'
 import { getTuyaToken, getDeviceProperties, formatProperties, getAddEleEvents } from './tuya/client.js'
+import { shouldNotifyPowerAbove, shouldNotifyPowerBelow } from './device-notifications.js'
 
 // Gdy urządzenie nie ma jeszcze żadnej zapisanej paczki — ile wstecz spróbować
 // dociągnąć z logów (retencja Tuya i tak jest krótka, ~doba).
@@ -16,20 +17,24 @@ const BACKFILL_WINDOW_MS = 24 * 60 * 60 * 1000
 /**
  * @param {import('@neondatabase/serverless').NeonQueryFunction} sql
  * @param {Uint8Array} rawKey — FINANCE_DATA_KEY do deszyfracji poświadczeń
- * @param {{ householdId?: string }} [opts] — opcjonalny scope do jednego gospodarstwa (cron: brak = wszystkie)
- * @returns {Promise<{ inserted: number, events: number, skipped: number }>}
+ * @param {{ householdId?: string, notifyPlugPower?: (payload: object) => Promise<object> }} [opts]
+ * @returns {Promise<{ inserted: number, events: number, skipped: number, powerAlerts: number }>}
  */
-export async function collectEnergySnapshots(sql, rawKey, { householdId } = {}) {
+export async function collectEnergySnapshots(sql, rawKey, { householdId, notifyPlugPower } = {}) {
   const devices = householdId
     ? await sql`
-        SELECT sd.id, sd.tuya_device_id, sd.household_id,
+        SELECT sd.id, sd.tuya_device_id, sd.household_id, sd.display_name,
+               sd.plug_notify_enabled, sd.power_threshold_w, sd.power_threshold_min_w,
+               sd.last_power_above, sd.last_power_below,
                tc.client_id_enc, tc.client_secret_enc, tc.datacenter
         FROM smart_devices sd
         JOIN tuya_credentials tc ON tc.household_id = sd.household_id
         WHERE sd.is_active = true AND COALESCE(sd.device_type, '') NOT LIKE 'ir_%' AND sd.household_id = ${householdId}
       `
     : await sql`
-        SELECT sd.id, sd.tuya_device_id, sd.household_id,
+        SELECT sd.id, sd.tuya_device_id, sd.household_id, sd.display_name,
+               sd.plug_notify_enabled, sd.power_threshold_w, sd.power_threshold_min_w,
+               sd.last_power_above, sd.last_power_below,
                tc.client_id_enc, tc.client_secret_enc, tc.datacenter
         FROM smart_devices sd
         JOIN tuya_credentials tc ON tc.household_id = sd.household_id
@@ -41,6 +46,7 @@ export async function collectEnergySnapshots(sql, rawKey, { householdId } = {}) 
   let inserted = 0
   let events = 0
   let skipped = 0
+  let powerAlerts = 0
 
   for (const d of devices) {
     try {
@@ -61,6 +67,61 @@ export async function collectEnergySnapshots(sql, rawKey, { householdId } = {}) 
         VALUES (${d.id}, ${f.powerW ?? null}, ${f.switchOn ?? null}, true)
       `
       inserted++
+
+      const thresholdMax = Number(d.power_threshold_w)
+      const thresholdMin = Number(d.power_threshold_min_w)
+      const powerW = f.powerW != null ? Number(f.powerW) : null
+      if (d.plug_notify_enabled && powerW != null && Number.isFinite(powerW)) {
+        let nextAbove = d.last_power_above
+        let nextBelow = d.last_power_below
+        let stateChanged = false
+
+        if (Number.isFinite(thresholdMax) && thresholdMax > 0) {
+          const nowAbove = powerW >= thresholdMax
+          const prevAbove = d.last_power_above === true
+          if (shouldNotifyPowerAbove(prevAbove, nowAbove) && notifyPlugPower) {
+            await notifyPlugPower({
+              householdId: d.household_id,
+              deviceName: d.display_name,
+              powerW,
+              thresholdW: thresholdMax,
+              direction: 'above',
+            })
+            powerAlerts++
+          }
+          if (nowAbove !== prevAbove) {
+            nextAbove = nowAbove
+            stateChanged = true
+          }
+        }
+
+        if (Number.isFinite(thresholdMin) && thresholdMin > 0) {
+          const nowBelow = powerW <= thresholdMin
+          const prevBelow = d.last_power_below === true
+          if (shouldNotifyPowerBelow(prevBelow, nowBelow) && notifyPlugPower) {
+            await notifyPlugPower({
+              householdId: d.household_id,
+              deviceName: d.display_name,
+              powerW,
+              thresholdW: thresholdMin,
+              direction: 'below',
+            })
+            powerAlerts++
+          }
+          if (nowBelow !== prevBelow) {
+            nextBelow = nowBelow
+            stateChanged = true
+          }
+        }
+
+        if (stateChanged) {
+          await sql`
+            UPDATE smart_devices
+            SET last_power_above = ${nextAbove}, last_power_below = ${nextBelow}, updated_at = NOW()
+            WHERE id = ${d.id}
+          `
+        }
+      }
 
       // 2) Paczki add_ele z logów od ostatniej zapisanej (event_time). Dedup po
       //    (device_id, energy_reported_at) — idempotentne między rundami.
@@ -85,5 +146,5 @@ export async function collectEnergySnapshots(sql, rawKey, { householdId } = {}) 
     }
   }
 
-  return { inserted, events, skipped }
+  return { inserted, events, skipped, powerAlerts }
 }

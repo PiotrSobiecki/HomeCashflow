@@ -254,6 +254,15 @@ export const smartDevices = pgTable('smart_devices', {
   // Własne nazwy programów pralki (SmartThings nie wystawia nazw kursów — tylko kody jak
   // "1C"). Mapa { kodKursu: nazwaPL } nadpisuje draft z washer.js. NULL = same defaulty.
   cycleLabels: jsonb('cycle_labels'),
+  // Powiadomienia push: pralka/zmywarka (ST) — włączone per urządzenie; cron edge-trigger.
+  cycleNotifyEnabled: boolean('cycle_notify_enabled').notNull().default(false),
+  lastCycleState: text('last_cycle_state'),
+  // Powiadomienia push: gniazdko — próg mocy (W) + edge-trigger co 15 min.
+  plugNotifyEnabled: boolean('plug_notify_enabled').notNull().default(false),
+  powerThresholdW: numeric('power_threshold_w', { precision: 10, scale: 2 }),
+  powerThresholdMinW: numeric('power_threshold_min_w', { precision: 10, scale: 2 }),
+  lastPowerAbove: boolean('last_power_above'),
+  lastPowerBelow: boolean('last_power_below'),
   functionsJson: jsonb('functions_json'),
   isActive: boolean('is_active').notNull().default(true),
   createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
@@ -262,6 +271,10 @@ export const smartDevices = pgTable('smart_devices', {
 }, (t) => ({
   byHousehold: index('idx_smart_devices_household').on(t.householdId),
   providerCheck: check('smart_devices_provider_check', sql`${t.provider} IN ('tuya', 'smartthings')`),
+  lastCycleStateCheck: check(
+    'smart_devices_last_cycle_state_check',
+    sql`${t.lastCycleState} IS NULL OR ${t.lastCycleState} IN ('running', 'paused', 'finished', 'idle', 'unknown')`,
+  ),
   uniqProviderExternal: uniqueIndex('uniq_smart_devices_provider_external').on(t.provider, t.externalDeviceId),
 }))
 
@@ -342,9 +355,9 @@ export const acThermostats = pgTable('ac_thermostats', {
   lastCheckActionCheck: check('ac_thermostats_last_check_action_check', sql`${t.lastCheckAction} IS NULL OR ${t.lastCheckAction} IN ('on', 'off')`),
 }))
 
-// ====== Web Push (powiadomienia o klimie IR) ======
+// ====== Web Push (powiadomienia urządzeń) ======
 //
-// Subskrypcja przeglądarki per użytkownik. ac_power_notify = włączone alerty ON/OFF klimy.
+// Subskrypcja przeglądarki per użytkownik. Flagi per typ alertu.
 export const pushSubscriptions = pgTable('push_subscriptions', {
   id: uuid('id').defaultRandom().primaryKey(),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
@@ -352,6 +365,8 @@ export const pushSubscriptions = pgTable('push_subscriptions', {
   p256dh: text('p256dh').notNull(),
   auth: text('auth').notNull(),
   acPowerNotify: boolean('ac_power_notify').notNull().default(true),
+  washerCycleNotify: boolean('washer_cycle_notify').notNull().default(true),
+  plugPowerNotify: boolean('plug_power_notify').notNull().default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 }, (t) => ({

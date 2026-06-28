@@ -150,6 +150,15 @@ function getEnv(c, key) {
   return undefined;
 }
 
+/** Env Web Push — lokalnie z process.env, na Workers z c.env. */
+function pushEnv(c) {
+  return {
+    VAPID_PUBLIC_KEY: getEnv(c, "VAPID_PUBLIC_KEY"),
+    VAPID_PRIVATE_JWK: getEnv(c, "VAPID_PRIVATE_JWK"),
+    PUSH_ADMIN_CONTACT: getEnv(c, "PUSH_ADMIN_CONTACT"),
+  };
+}
+
 /** Krótki kod do ?auth_err= na froncie (bez pełnej treści błędu w URL). */
 function authFailureCode(message) {
   const m = String(message || "");
@@ -1621,6 +1630,10 @@ function mapDevice(row) {
     irParentId: row.ir_parent_id ?? null,
     linkedPlugId: row.linked_plug_id ?? null,
     cycleLabels: row.cycle_labels ?? null,
+    cycleNotifyEnabled: row.cycle_notify_enabled === true,
+    plugNotifyEnabled: row.plug_notify_enabled === true,
+    powerThresholdW: row.power_threshold_w != null ? Number(row.power_threshold_w) : null,
+    powerThresholdMinW: row.power_threshold_min_w != null ? Number(row.power_threshold_min_w) : null,
     functionsJson: row.functions_json ?? null,
     isActive: row.is_active,
     createdBy: row.created_by ?? null,
@@ -2663,11 +2676,56 @@ app.patch("/api/smart-devices/:id", authMiddleware, async (c) => {
     nextCycleLabels = Object.keys(clean).length ? clean : null;
   }
 
+  const CYCLE_TYPES = new Set(["washer", "dryer", "dishwasher"]);
+  let nextCycleNotify = result.row.cycle_notify_enabled;
+  if ("cycleNotifyEnabled" in body) {
+    if (!CYCLE_TYPES.has(result.row.device_type))
+      return c.json({ error: "cycle_notify_not_supported" }, 400);
+    if (typeof body.cycleNotifyEnabled !== "boolean")
+      return c.json({ error: "invalid_cycle_notify" }, 400);
+    nextCycleNotify = body.cycleNotifyEnabled;
+  }
+
+  let nextPlugNotify = result.row.plug_notify_enabled;
+  let nextThreshold = result.row.power_threshold_w;
+  let nextThresholdMin = result.row.power_threshold_min_w;
+  if ("plugNotifyEnabled" in body) {
+    if (result.row.device_type !== "plug")
+      return c.json({ error: "plug_notify_not_supported" }, 400);
+    if (typeof body.plugNotifyEnabled !== "boolean")
+      return c.json({ error: "invalid_plug_notify" }, 400);
+    nextPlugNotify = body.plugNotifyEnabled;
+  }
+  const parseThreshold = (val) => {
+    if (val == null || val === "") return null;
+    const t = Number(val);
+    if (!Number.isFinite(t) || t <= 0 || t > 100_000) return NaN;
+    return t;
+  };
+  if ("powerThresholdW" in body) {
+    if (result.row.device_type !== "plug")
+      return c.json({ error: "plug_notify_not_supported" }, 400);
+    const t = parseThreshold(body.powerThresholdW);
+    if (Number.isNaN(t)) return c.json({ error: "invalid_power_threshold" }, 400);
+    nextThreshold = t;
+  }
+  if ("powerThresholdMinW" in body) {
+    if (result.row.device_type !== "plug")
+      return c.json({ error: "plug_notify_not_supported" }, 400);
+    const t = parseThreshold(body.powerThresholdMinW);
+    if (Number.isNaN(t)) return c.json({ error: "invalid_power_threshold" }, 400);
+    nextThresholdMin = t;
+  }
+
   const [row] = await sql`
     UPDATE smart_devices
     SET display_name = ${nextName}, is_active = ${nextActive},
         linked_plug_id = ${nextPlug},
         cycle_labels = ${nextCycleLabels == null ? null : JSON.stringify(nextCycleLabels)},
+        cycle_notify_enabled = ${nextCycleNotify},
+        plug_notify_enabled = ${nextPlugNotify},
+        power_threshold_w = ${nextThreshold},
+        power_threshold_min_w = ${nextThresholdMin},
         updated_at = NOW()
     WHERE id = ${id}
     RETURNING *
@@ -2769,7 +2827,7 @@ app.post("/api/smart-devices/:id/commands", authMiddleware, async (c) => {
             ? "off"
             : null;
       if (action) {
-        const pushResult = await notifyHouseholdAcPower(sql, c.env, {
+        const pushResult = await notifyHouseholdAcPower(sql, pushEnv(c), {
           householdId: result.row.household_id,
           action,
           deviceName: result.row.display_name,
@@ -3068,7 +3126,7 @@ app.put("/api/smart-devices/:id/thermostat", authMiddleware, async (c) => {
 // ====== Web Push (powiadomienia o klimie) ======
 
 app.get("/api/push/vapid-public-key", async (c) => {
-  const publicKey = c.env.VAPID_PUBLIC_KEY?.trim();
+  const publicKey = pushEnv(c).VAPID_PUBLIC_KEY;
   if (!publicKey) return c.json({ error: "push_not_configured" }, 503);
   return c.json({ publicKey });
 });
@@ -3079,22 +3137,28 @@ app.get("/api/push/status", authMiddleware, async (c) => {
   try {
     const [row] = await sql`
       SELECT COUNT(*)::int AS count,
-             COALESCE(BOOL_OR(ac_power_notify), false) AS ac_power_notify
+             COALESCE(BOOL_OR(ac_power_notify), false) AS ac_power_notify,
+             COALESCE(BOOL_OR(washer_cycle_notify), false) AS washer_cycle_notify,
+             COALESCE(BOOL_OR(plug_power_notify), false) AS plug_power_notify
       FROM push_subscriptions
       WHERE user_id = ${user.id}
     `;
     const count = row?.count ?? 0;
     return c.json({
-      configured: pushConfigured(c.env),
+      configured: pushConfigured(pushEnv(c)),
       subscribed: count > 0,
       acPowerNotify: count > 0 ? row.ac_power_notify === true : false,
+      washerCycleNotify: count > 0 ? row.washer_cycle_notify === true : false,
+      plugPowerNotify: count > 0 ? row.plug_power_notify === true : false,
     });
   } catch (err) {
     console.error("[push] status db failed", err);
     return c.json({
-      configured: pushConfigured(c.env),
+      configured: pushConfigured(pushEnv(c)),
       subscribed: false,
       acPowerNotify: false,
+      washerCycleNotify: false,
+      plugPowerNotify: false,
       dbError: true,
     });
   }
@@ -3103,7 +3167,7 @@ app.get("/api/push/status", authMiddleware, async (c) => {
 app.post("/api/push/subscribe", authMiddleware, async (c) => {
   const user = c.get("user");
   const sql = getDb(c);
-  if (!pushConfigured(c.env)) return c.json({ error: "push_not_configured" }, 503);
+  if (!pushConfigured(pushEnv(c))) return c.json({ error: "push_not_configured" }, 503);
 
   let body;
   try {
@@ -3119,16 +3183,20 @@ app.post("/api/push/subscribe", authMiddleware, async (c) => {
     return c.json({ error: "invalid_subscription" }, 400);
 
   const acPowerNotify = body?.acPowerNotify !== false;
+  const washerCycleNotify = body?.washerCycleNotify !== false;
+  const plugPowerNotify = body?.plugPowerNotify !== false;
 
   try {
     await sql`
-      INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, ac_power_notify)
-      VALUES (${user.id}, ${endpoint}, ${p256dh}, ${auth}, ${acPowerNotify})
+      INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, ac_power_notify, washer_cycle_notify, plug_power_notify)
+      VALUES (${user.id}, ${endpoint}, ${p256dh}, ${auth}, ${acPowerNotify}, ${washerCycleNotify}, ${plugPowerNotify})
       ON CONFLICT (endpoint) DO UPDATE SET
         user_id = EXCLUDED.user_id,
         p256dh = EXCLUDED.p256dh,
         auth = EXCLUDED.auth,
         ac_power_notify = EXCLUDED.ac_power_notify,
+        washer_cycle_notify = EXCLUDED.washer_cycle_notify,
+        plug_power_notify = EXCLUDED.plug_power_notify,
         updated_at = NOW()
     `;
   } catch (err) {
@@ -3136,15 +3204,15 @@ app.post("/api/push/subscribe", authMiddleware, async (c) => {
     return c.json({ error: "push_db_error", message: String(err.message || err) }, 500);
   }
 
-  return c.json({ ok: true, acPowerNotify });
+  return c.json({ ok: true, acPowerNotify, washerCycleNotify, plugPowerNotify });
 });
 
 app.post("/api/push/test", authMiddleware, async (c) => {
   const user = c.get("user");
   const sql = getDb(c);
-  if (!pushConfigured(c.env)) return c.json({ error: "push_not_configured" }, 503);
+  if (!pushConfigured(pushEnv(c))) return c.json({ error: "push_not_configured" }, 503);
 
-  const result = await notifyUserPush(sql, c.env, user.id, {
+  const result = await notifyUserPush(sql, pushEnv(c), user.id, {
     title: "HomeCashflow — test",
     body: "Powiadomienia push działają poprawnie.",
     url: "/?view=urzadzenia",
@@ -3207,16 +3275,42 @@ app.put("/api/push/preferences", authMiddleware, async (c) => {
     return c.json({ error: "Invalid JSON body" }, 400);
   }
 
-  if (typeof body?.acPowerNotify !== "boolean")
-    return c.json({ error: "ac_power_notify_required" }, 400);
+  if (
+    typeof body?.acPowerNotify !== "boolean" &&
+    typeof body?.washerCycleNotify !== "boolean" &&
+    typeof body?.plugPowerNotify !== "boolean"
+  ) {
+    return c.json({ error: "push_preference_required" }, 400);
+  }
 
-  await sql`
-    UPDATE push_subscriptions
-    SET ac_power_notify = ${body.acPowerNotify}, updated_at = NOW()
-    WHERE user_id = ${user.id}
+  const updates = [];
+  if (typeof body.acPowerNotify === "boolean") updates.push(["ac_power_notify", body.acPowerNotify]);
+  if (typeof body.washerCycleNotify === "boolean") updates.push(["washer_cycle_notify", body.washerCycleNotify]);
+  if (typeof body.plugPowerNotify === "boolean") updates.push(["plug_power_notify", body.plugPowerNotify]);
+
+  for (const [col, val] of updates) {
+    if (col === "ac_power_notify") {
+      await sql`UPDATE push_subscriptions SET ac_power_notify = ${val}, updated_at = NOW() WHERE user_id = ${user.id}`;
+    } else if (col === "washer_cycle_notify") {
+      await sql`UPDATE push_subscriptions SET washer_cycle_notify = ${val}, updated_at = NOW() WHERE user_id = ${user.id}`;
+    } else if (col === "plug_power_notify") {
+      await sql`UPDATE push_subscriptions SET plug_power_notify = ${val}, updated_at = NOW() WHERE user_id = ${user.id}`;
+    }
+  }
+
+  const [row] = await sql`
+    SELECT COALESCE(BOOL_OR(ac_power_notify), false) AS ac_power_notify,
+           COALESCE(BOOL_OR(washer_cycle_notify), false) AS washer_cycle_notify,
+           COALESCE(BOOL_OR(plug_power_notify), false) AS plug_power_notify
+    FROM push_subscriptions WHERE user_id = ${user.id}
   `;
 
-  return c.json({ ok: true, acPowerNotify: body.acPowerNotify });
+  return c.json({
+    ok: true,
+    acPowerNotify: row?.ac_power_notify === true,
+    washerCycleNotify: row?.washer_cycle_notify === true,
+    plugPowerNotify: row?.plug_power_notify === true,
+  });
 });
 
 // ============ ACTION LOG (undo Phase 4) ============
