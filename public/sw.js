@@ -11,8 +11,8 @@ self.addEventListener('push', (event) => {
   event.waitUntil(
     self.registration.showNotification(data.title || 'HomeCashflow', {
       body: data.body || '',
-      icon: '/vite.svg',
-      badge: '/vite.svg',
+      icon: '/icons/icon-192.png',
+      badge: '/icons/icon-192.png',
       tag: data.tag || 'ac-power',
       renotify: true,
       data: { url: data.url || '/?view=urzadzenia' },

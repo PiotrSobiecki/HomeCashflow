@@ -538,6 +538,22 @@ export const savePushPreferences = async (body) => {
   return jsonOrThrow(res, 'PUT /api/push/preferences');
 };
 
+export const sendPushTest = async () => {
+  const res = await fetch(`${API_URL}/api/push/test`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { Accept: 'application/json' },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(data.message || data.error || `POST /api/push/test: ${res.status}`);
+    err.code = data.error;
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+};
+
 export const fetchDeviceHistory = async (id, range) => {
   const res = await fetch(`${API_URL}/api/smart-devices/${id}/history?range=${range}`, {
     credentials: 'include',

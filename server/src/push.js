@@ -34,30 +34,11 @@ function pushConfigured(env) {
   return Boolean(env?.VAPID_PUBLIC_KEY?.trim() && parsePrivateJwk(env?.VAPID_PRIVATE_JWK))
 }
 
-/**
- * @param {import('@neondatabase/serverless').NeonQueryFunction} sql
- * @param {{ VAPID_PUBLIC_KEY?: string, VAPID_PRIVATE_JWK?: string, PUSH_ADMIN_CONTACT?: string }} env
- * @param {{ householdId: string, action: 'on'|'off', deviceName?: string, outdoorTemp?: number|null, source?: string }} payload
- */
-export async function notifyHouseholdAcPower(sql, env, payload) {
-  if (!pushConfigured(env)) return { sent: 0, skipped: true }
-
-  const { householdId, action, deviceName, outdoorTemp, source } = payload
-  if (action !== 'on' && action !== 'off') return { sent: 0, skipped: true }
-
-  const rows = await sql`
-    SELECT ps.id, ps.endpoint, ps.p256dh, ps.auth
-    FROM push_subscriptions ps
-    JOIN household_members hm ON hm.user_id = ps.user_id
-    WHERE hm.household_id = ${householdId}
-      AND ps.ac_power_notify = true
-  `
-  if (!rows.length) return { sent: 0, failed: 0 }
+async function sendPushToSubscriptions(sql, env, rows, { title, body, url, tag = 'ac-power' }) {
+  if (!rows.length) return { sent: 0, failed: 0, removed: 0, reason: 'no_subscriptions' }
 
   const privateJWK = parsePrivateJwk(env.VAPID_PRIVATE_JWK)
-  const { title, body } = formatAcPowerPushMessage({ action, deviceName, outdoorTemp, source })
   const adminContact = env.PUSH_ADMIN_CONTACT?.trim() || 'mailto:support@homecashflow.org'
-  const url = '/?view=urzadzenia'
 
   let sent = 0
   let failed = 0
@@ -73,9 +54,9 @@ export async function notifyHouseholdAcPower(sql, env, payload) {
         privateJWK,
         subscription,
         message: {
-          payload: { title, body, url, tag: 'ac-power', action },
+          payload: { title, body, url, tag },
           adminContact,
-          options: { urgency: 'normal', ttl: 86400, topic: 'ac-power' },
+          options: { urgency: 'normal', ttl: 86400, topic: tag },
         },
       })
       const res = await fetch(endpoint, { method: 'POST', headers, body: reqBody })
@@ -100,6 +81,51 @@ export async function notifyHouseholdAcPower(sql, env, payload) {
   }
 
   return { sent, failed, removed: staleIds.length }
+}
+
+/**
+ * Powiadomienie testowe / pojedynczego użytkownika.
+ */
+export async function notifyUserPush(sql, env, userId, { title, body, url = '/?view=urzadzenia' }) {
+  if (!pushConfigured(env)) return { sent: 0, skipped: true, reason: 'not_configured' }
+
+  const rows = await sql`
+    SELECT id, endpoint, p256dh, auth
+    FROM push_subscriptions
+    WHERE user_id = ${userId} AND ac_power_notify = true
+  `
+  return sendPushToSubscriptions(sql, env, rows, { title, body, url, tag: 'push-test' })
+}
+
+/**
+ * @param {import('@neondatabase/serverless').NeonQueryFunction} sql
+ * @param {{ VAPID_PUBLIC_KEY?: string, VAPID_PRIVATE_JWK?: string, PUSH_ADMIN_CONTACT?: string }} env
+ * @param {{ householdId: string, action: 'on'|'off', deviceName?: string, outdoorTemp?: number|null, source?: string }} payload
+ */
+export async function notifyHouseholdAcPower(sql, env, payload) {
+  if (!pushConfigured(env)) return { sent: 0, skipped: true, reason: 'not_configured' }
+
+  const { householdId, action, deviceName, outdoorTemp, source } = payload
+  if (action !== 'on' && action !== 'off') return { sent: 0, skipped: true, reason: 'invalid_action' }
+
+  const rows = await sql`
+    SELECT ps.id, ps.endpoint, ps.p256dh, ps.auth
+    FROM push_subscriptions ps
+    JOIN household_members hm ON hm.user_id = ps.user_id
+    WHERE hm.household_id = ${householdId}
+      AND ps.ac_power_notify = true
+  `
+  const { title, body } = formatAcPowerPushMessage({ action, deviceName, outdoorTemp, source })
+  const result = await sendPushToSubscriptions(sql, env, rows, {
+    title,
+    body,
+    url: '/?view=urzadzenia',
+    tag: 'ac-power',
+  })
+  if (result.sent === 0 && !result.skipped) {
+    console.warn('[push] ac-power: nothing delivered', { householdId, action, ...result })
+  }
+  return result
 }
 
 export { pushConfigured }

@@ -33,6 +33,7 @@ import {
   setAcPowerPushPreference,
   subscribeAcPowerPush,
 } from "../lib/push";
+import { sendPushTest } from "../lib/api";
 
 const ERRORS = {
   geocode_no_result: "Nie znaleziono takiej miejscowości.",
@@ -182,6 +183,7 @@ export const ThermostatSettings = ({
     };
   });
   const [pushMsg, setPushMsg] = useState("");
+  const [pushTesting, setPushTesting] = useState(false);
 
   const load = useCallback(async (syncForm = false) => {
     try {
@@ -436,6 +438,19 @@ export const ThermostatSettings = ({
     }
   };
 
+  const testPush = async () => {
+    setPushTesting(true);
+    setPushMsg("");
+    try {
+      await sendPushTest();
+      setPushMsg("Wysłano test — sprawdź powiadomienia systemowe.");
+    } catch (err) {
+      setPushMsg(describePushClientError(err));
+    } finally {
+      setPushTesting(false);
+    }
+  };
+
   const lastTemp = cfg?.lastOutdoorTemp;
   const lastAt = fmtTime(cfg?.lastCheckedAt);
   const saved = msg.includes("✓");
@@ -687,6 +702,16 @@ export const ThermostatSettings = ({
                 </label>
                 {pushMsg && (
                   <p className="text-[11px] text-slate-400 leading-snug">{pushMsg}</p>
+                )}
+                {pushState.subscribed && pushState.acPowerNotify && (
+                  <button
+                    type="button"
+                    onClick={testPush}
+                    disabled={disabled || pushTesting}
+                    className="text-[11px] text-indigo-400 hover:text-indigo-300 disabled:opacity-50"
+                  >
+                    {pushTesting ? "Wysyłanie testu…" : "Wyślij powiadomienie testowe"}
+                  </button>
                 )}
               </>
             )}

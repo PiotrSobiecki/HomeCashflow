@@ -49,7 +49,7 @@ import {
 import { logAction } from "./action-log.js";
 import { geocodeCity, getOutdoorWeather } from "./weather.js";
 import { thermostatThresholdGap } from "./ac-thermostat.js";
-import { notifyHouseholdAcPower, pushConfigured } from "./push.js";
+import { notifyHouseholdAcPower, notifyUserPush, pushConfigured } from "./push.js";
 import {
   IR_PLUG_STANDBY_W,
   acPowerOnFromPlugW,
@@ -2769,12 +2769,16 @@ app.post("/api/smart-devices/:id/commands", authMiddleware, async (c) => {
             ? "off"
             : null;
       if (action) {
-        notifyHouseholdAcPower(sql, c.env, {
+        const pushResult = await notifyHouseholdAcPower(sql, c.env, {
           householdId: result.row.household_id,
           action,
           deviceName: result.row.display_name,
           source: "manual",
-        }).catch((err) => console.warn("[push] manual AC notify failed", err));
+        }).catch((err) => {
+          console.warn("[push] manual AC notify failed", err);
+          return { sent: 0, failed: 1, error: String(err.message || err) };
+        });
+        return c.json({ ok: true, push: pushResult });
       }
     }
   }
@@ -3133,6 +3137,39 @@ app.post("/api/push/subscribe", authMiddleware, async (c) => {
   }
 
   return c.json({ ok: true, acPowerNotify });
+});
+
+app.post("/api/push/test", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+  if (!pushConfigured(c.env)) return c.json({ error: "push_not_configured" }, 503);
+
+  const result = await notifyUserPush(sql, c.env, user.id, {
+    title: "HomeCashflow — test",
+    body: "Powiadomienia push działają poprawnie.",
+    url: "/?view=urzadzenia",
+  });
+
+  if (result.reason === "no_subscriptions") {
+    return c.json(
+      {
+        error: "no_subscription",
+        message: "Brak aktywnej subskrypcji push — włącz powiadomienia checkboxem.",
+      },
+      400,
+    );
+  }
+  if (result.sent === 0) {
+    return c.json(
+      {
+        error: "push_delivery_failed",
+        message: "Nie udało się dostarczyć powiadomienia.",
+        detail: result,
+      },
+      502,
+    );
+  }
+  return c.json({ ok: true, ...result });
 });
 
 app.delete("/api/push/subscribe", authMiddleware, async (c) => {
