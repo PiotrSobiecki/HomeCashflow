@@ -9,6 +9,7 @@ import { decodeFinanceDataKey } from './finance-crypto.js'
 import { refreshExpiringTokens } from './smartthings/credentials.js'
 import { runAcThermostats } from './ac-thermostat.js'
 import { getOutdoorTemp } from './weather.js'
+import { notifyHouseholdAcPower } from './push.js'
 
 export default {
   fetch: app.fetch,
@@ -19,9 +20,10 @@ export default {
     ctx.waitUntil((async () => {
       const sql = neon(env.DATABASE_URL)
       const rawKey = decodeFinanceDataKey(env.FINANCE_DATA_KEY)
+      const notifyAcPower = (payload) => notifyHouseholdAcPower(sql, env, payload)
 
       try {
-        const t = await fireDueTimers(sql, rawKey)
+        const t = await fireDueTimers(sql, rawKey, { notifyAcPower })
         if (t.fired || t.failed) console.log('[cron] timers', t)
       } catch (err) {
         console.error('[cron] timers failed', err)
@@ -42,6 +44,7 @@ export default {
         try {
           const res = await runAcThermostats(sql, rawKey, {
             readOutdoorTemp: (coords) => getOutdoorTemp(coords, { apiKey: env.WEATHER_GOOGLE_API_KEY }),
+            notifyAcPower,
           })
           if (res.checked || res.switched || res.failed) console.log('[cron] ac thermostats', res)
         } catch (err) {

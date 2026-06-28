@@ -53,14 +53,14 @@ export function decide({ temp, tempOn, tempOff, lastAction, acPowerOn = null, mo
  *
  * @param {import('@neondatabase/serverless').NeonQueryFunction} sql
  * @param {Uint8Array} rawKey — FINANCE_DATA_KEY do deszyfracji poświadczeń Tuya
- * @param {{ readOutdoorTemp: (coords:{lat:number,lon:number}) => Promise<number|null> }} deps
+ * @param {{ readOutdoorTemp: (coords:{lat:number,lon:number}) => Promise<number|null>, notifyAcPower?: (payload:object) => Promise<void> }} deps
  * @returns {Promise<{ checked:number, switched:number, failed:number }>}
  */
-export async function runAcThermostats(sql, rawKey, { readOutdoorTemp }) {
+export async function runAcThermostats(sql, rawKey, { readOutdoorTemp, notifyAcPower }) {
   const rows = await sql`
     SELECT th.id, th.household_id, th.device_id, th.lat, th.lon,
            th.climate_mode, th.temp_on, th.temp_off, th.last_action,
-           sd.tuya_device_id, sd.ir_parent_id, sd.linked_plug_id,
+           sd.tuya_device_id, sd.ir_parent_id, sd.linked_plug_id, sd.display_name,
            plug.tuya_device_id AS plug_tuya_id,
            tc.client_id_enc, tc.client_secret_enc, tc.datacenter
     FROM ac_thermostats th
@@ -136,6 +136,19 @@ export async function runAcThermostats(sql, rawKey, { readOutdoorTemp }) {
           WHERE id = ${r.id}
         `
         switched++
+        if (notifyAcPower) {
+          try {
+            await notifyAcPower({
+              householdId: r.household_id,
+              action,
+              deviceName: r.display_name,
+              outdoorTemp: temp,
+              source: 'thermostat',
+            })
+          } catch (err) {
+            console.warn('[ac-thermostat] push notify failed', err)
+          }
+        }
       } else {
         // Strefa martwa / stan już osiągnięty: zapisujemy odczyt, bez opisu akcji w UI.
         await sql`

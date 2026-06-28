@@ -12,6 +12,8 @@ import {
   getDeviceStatus, formatStatuses,
 } from './tuya/client.js'
 
+/** @typedef {(payload: { householdId: string, action: 'on'|'off', deviceName?: string, source?: string }) => Promise<void>} NotifyAcPowerFn */
+
 // Próg standby — pilot powiązany z gniazdkiem nie wyśle „off", gdy pobór poniżej (zestaw już zgaszony).
 const IR_PLUG_STANDBY_W = 20
 
@@ -24,12 +26,14 @@ function findPowerKey(keyList) {
  * Wykonuje należne timery (fire_at <= now). Token Tuya cache'owany per gospodarstwo.
  * @param {import('@neondatabase/serverless').NeonQueryFunction} sql
  * @param {Uint8Array} rawKey — FINANCE_DATA_KEY do deszyfracji poświadczeń
+ * @param {{ notifyAcPower?: NotifyAcPowerFn }} [opts]
  * @returns {Promise<{ fired: number, failed: number }>}
  */
-export async function fireDueTimers(sql, rawKey) {
+export async function fireDueTimers(sql, rawKey, { notifyAcPower } = {}) {
   const due = await sql`
     SELECT t.id, t.device_id, t.household_id,
            sd.tuya_device_id, sd.device_type, sd.ir_parent_id, sd.linked_plug_id,
+           sd.display_name,
            plug.tuya_device_id AS plug_tuya_id,
            tc.client_id_enc, tc.client_secret_enc, tc.datacenter
     FROM device_timers t
@@ -57,6 +61,18 @@ export async function fireDueTimers(sql, rawKey) {
 
       if (d.device_type === 'ir_ac') {
         await sendAcCommand(ctx, d.ir_parent_id, d.tuya_device_id, 'power', 0)
+        if (notifyAcPower) {
+          try {
+            await notifyAcPower({
+              householdId: d.household_id,
+              action: 'off',
+              deviceName: d.display_name,
+              source: 'timer',
+            })
+          } catch (err) {
+            console.warn('[timers] push notify failed', err)
+          }
+        }
       } else if (d.device_type === 'ir_remote') {
         // Bezpieczny toggle: jeśli pilot powiązany z gniazdkiem i pobór ≤ standby,
         // zestaw jest już zgaszony — nie wysyłamy „power" (toggle by go WŁĄCZYŁ).

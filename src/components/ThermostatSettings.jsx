@@ -18,6 +18,7 @@ import {
   CloudRain,
   CloudSnow,
   CloudLightning,
+  Bell,
 } from "lucide-react";
 import {
   fetchThermostat,
@@ -25,6 +26,12 @@ import {
   fetchThermostatTemperature,
 } from "../lib/api";
 import { useAlignedPolling } from "../hooks/useAlignedPolling";
+import {
+  loadPushStatus,
+  pushSupported,
+  setAcPowerPushPreference,
+  subscribeAcPowerPush,
+} from "../lib/push";
 
 const ERRORS = {
   geocode_no_result: "Nie znaleziono takiej miejscowości.",
@@ -161,6 +168,15 @@ export const ThermostatSettings = ({
   const [nowLoading, setNowLoading] = useState(false);
   const [nowError, setNowError] = useState(false);
   const cfgReady = useRef(false);
+  const [pushLoading, setPushLoading] = useState(false);
+  const [pushState, setPushState] = useState({
+    supported: pushSupported(),
+    configured: false,
+    subscribed: false,
+    acPowerNotify: false,
+    permission: typeof Notification !== "undefined" ? Notification.permission : "default",
+  });
+  const [pushMsg, setPushMsg] = useState("");
 
   const load = useCallback(async (syncForm = false) => {
     try {
@@ -183,6 +199,11 @@ export const ThermostatSettings = ({
   useEffect(() => {
     load(true);
   }, [load]);
+
+  useEffect(() => {
+    if (!pushSupported()) return;
+    loadPushStatus().then(setPushState).catch(() => {});
+  }, []);
 
   // Po ręcznym „Odśwież" na karcie — dograj stopkę z bazy (bez nadpisywania formularza).
   useEffect(() => {
@@ -370,6 +391,43 @@ export const ThermostatSettings = ({
       );
     } finally {
       setSaving(false);
+    }
+  };
+
+  const togglePush = async (next) => {
+    setPushLoading(true);
+    setPushMsg("");
+    try {
+      if (next) {
+        const result = await subscribeAcPowerPush({ acPowerNotify: true });
+        if (result === "denied") {
+          setPushMsg("Przeglądarka zablokowała powiadomienia. Włącz je w ustawieniach strony.");
+          return;
+        }
+        if (result === "not_configured") {
+          setPushMsg("Serwer nie ma skonfigurowanych kluczy push.");
+          return;
+        }
+        if (result === "unsupported") {
+          setPushMsg("Ta przeglądarka nie obsługuje powiadomień push.");
+          return;
+        }
+        setPushState((s) => ({
+          ...s,
+          subscribed: true,
+          acPowerNotify: true,
+          permission: "granted",
+        }));
+        setPushMsg("Powiadomienia włączone.");
+      } else {
+        await setAcPowerPushPreference(false);
+        setPushState((s) => ({ ...s, acPowerNotify: false }));
+        setPushMsg("Powiadomienia wyłączone.");
+      }
+    } catch {
+      setPushMsg("Nie udało się zmienić powiadomień.");
+    } finally {
+      setPushLoading(false);
     }
   };
 
@@ -585,6 +643,43 @@ export const ThermostatSettings = ({
               >
                 {msg}
               </p>
+            )}
+          </div>
+
+          <div className="rounded-lg border border-slate-700/50 bg-slate-900/30 p-2.5 space-y-1.5">
+            <p className="flex items-center gap-1.5 text-[11px] font-medium text-slate-300">
+              <Bell className="w-3.5 h-3.5 text-indigo-400" />
+              Powiadomienia na telefonie
+            </p>
+            {!pushState.supported ? (
+              <p className="text-[11px] text-slate-500 leading-snug">
+                Twoja przeglądarka nie obsługuje powiadomień push.
+              </p>
+            ) : !pushState.configured ? (
+              <p className="text-[11px] text-slate-500 leading-snug">
+                Powiadomienia push nie są jeszcze skonfigurowane na serwerze.
+              </p>
+            ) : (
+              <>
+                <label className="flex items-start gap-2.5 text-xs text-slate-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={pushState.subscribed && pushState.acPowerNotify}
+                    disabled={disabled || pushLoading}
+                    onChange={(e) => togglePush(e.target.checked)}
+                    className="accent-indigo-500 mt-0.5 shrink-0"
+                  />
+                  <span className="leading-snug">
+                    Powiadom, gdy klimatyzacja się włączy lub wyłączy
+                    <span className="block text-[10px] text-slate-500 mt-0.5">
+                      Automatyka, ręczne sterowanie i wyłącznik czasowy. Na iPhone: Dodaj do ekranu początkowego.
+                    </span>
+                  </span>
+                </label>
+                {pushMsg && (
+                  <p className="text-[11px] text-slate-400 leading-snug">{pushMsg}</p>
+                )}
+              </>
             )}
           </div>
 

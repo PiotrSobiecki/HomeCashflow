@@ -342,6 +342,22 @@ export const acThermostats = pgTable('ac_thermostats', {
   lastCheckActionCheck: check('ac_thermostats_last_check_action_check', sql`${t.lastCheckAction} IS NULL OR ${t.lastCheckAction} IN ('on', 'off')`),
 }))
 
+// ====== Web Push (powiadomienia o klimie IR) ======
+//
+// Subskrypcja przeglądarki per użytkownik. ac_power_notify = włączone alerty ON/OFF klimy.
+export const pushSubscriptions = pgTable('push_subscriptions', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  endpoint: text('endpoint').notNull().unique(),
+  p256dh: text('p256dh').notNull(),
+  auth: text('auth').notNull(),
+  acPowerNotify: boolean('ac_power_notify').notNull().default(true),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  byUser: index('idx_push_subscriptions_user').on(t.userId),
+}))
+
 // ====== Pomiary zużycia w czasie (Slice 4 — wykresy) ======
 //
 // Dwa rodzaje wierszy w jednej tabeli:

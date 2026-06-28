@@ -487,6 +487,57 @@ export const saveThermostat = async (id, body) => {
   return data;
 };
 
+export const fetchPushVapidPublicKey = async () => {
+  const res = await fetch(`${API_URL}/api/push/vapid-public-key`, {
+    headers: { Accept: 'application/json' },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(data.error || `GET /api/push/vapid-public-key: ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+};
+
+export const fetchPushStatus = async () => {
+  const res = await fetch(`${API_URL}/api/push/status`, {
+    credentials: 'include',
+    headers: { Accept: 'application/json' },
+  });
+  return jsonOrThrow(res, 'GET /api/push/status');
+};
+
+export const savePushSubscribe = async (body) => {
+  const res = await fetch(`${API_URL}/api/push/subscribe`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return jsonOrThrow(res, 'POST /api/push/subscribe');
+};
+
+export const savePushUnsubscribe = async (body = {}) => {
+  const res = await fetch(`${API_URL}/api/push/subscribe`, {
+    method: 'DELETE',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return jsonOrThrow(res, 'DELETE /api/push/subscribe');
+};
+
+export const savePushPreferences = async (body) => {
+  const res = await fetch(`${API_URL}/api/push/preferences`, {
+    method: 'PUT',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return jsonOrThrow(res, 'PUT /api/push/preferences');
+};
+
 export const fetchDeviceHistory = async (id, range) => {
   const res = await fetch(`${API_URL}/api/smart-devices/${id}/history?range=${range}`, {
     credentials: 'include',

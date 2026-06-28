@@ -49,6 +49,7 @@ import {
 import { logAction } from "./action-log.js";
 import { geocodeCity, getOutdoorWeather } from "./weather.js";
 import { thermostatThresholdGap } from "./ac-thermostat.js";
+import { notifyHouseholdAcPower, pushConfigured } from "./push.js";
 import {
   IR_PLUG_STANDBY_W,
   acPowerOnFromPlugW,
@@ -2757,6 +2758,27 @@ app.post("/api/smart-devices/:id/commands", authMiddleware, async (c) => {
     }
   }
 
+  if (isIrAc) {
+    const powerCmd = commands.find((cmd) => cmd.code === "power");
+    if (powerCmd != null) {
+      const v = powerCmd.value;
+      const action =
+        v === 1 || v === true || v === "1"
+          ? "on"
+          : v === 0 || v === false || v === "0"
+            ? "off"
+            : null;
+      if (action) {
+        notifyHouseholdAcPower(sql, c.env, {
+          householdId: result.row.household_id,
+          action,
+          deviceName: result.row.display_name,
+          source: "manual",
+        }).catch((err) => console.warn("[push] manual AC notify failed", err));
+      }
+    }
+  }
+
   return c.json({ ok: true });
 });
 
@@ -3037,6 +3059,112 @@ app.put("/api/smart-devices/:id/thermostat", authMiddleware, async (c) => {
               last_action, last_check_action, last_outdoor_temp, last_checked_at
   `;
   return c.json({ thermostat: serializeThermostat(t) });
+});
+
+// ====== Web Push (powiadomienia o klimie) ======
+
+app.get("/api/push/vapid-public-key", async (c) => {
+  const publicKey = c.env.VAPID_PUBLIC_KEY?.trim();
+  if (!publicKey) return c.json({ error: "push_not_configured" }, 503);
+  return c.json({ publicKey });
+});
+
+app.get("/api/push/status", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+  const [row] = await sql`
+    SELECT COUNT(*)::int AS count,
+           COALESCE(BOOL_OR(ac_power_notify), false) AS ac_power_notify
+    FROM push_subscriptions
+    WHERE user_id = ${user.id}
+  `;
+  const count = row?.count ?? 0;
+  return c.json({
+    configured: pushConfigured(c.env),
+    subscribed: count > 0,
+    acPowerNotify: count > 0 ? row.ac_power_notify === true : false,
+  });
+});
+
+app.post("/api/push/subscribe", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+  if (!pushConfigured(c.env)) return c.json({ error: "push_not_configured" }, 503);
+
+  let body;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+
+  const endpoint = typeof body?.endpoint === "string" ? body.endpoint.trim() : "";
+  const p256dh = typeof body?.keys?.p256dh === "string" ? body.keys.p256dh.trim() : "";
+  const auth = typeof body?.keys?.auth === "string" ? body.keys.auth.trim() : "";
+  if (!endpoint || !p256dh || !auth)
+    return c.json({ error: "invalid_subscription" }, 400);
+
+  const acPowerNotify = body?.acPowerNotify !== false;
+
+  await sql`
+    INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, ac_power_notify)
+    VALUES (${user.id}, ${endpoint}, ${p256dh}, ${auth}, ${acPowerNotify})
+    ON CONFLICT (endpoint) DO UPDATE SET
+      user_id = EXCLUDED.user_id,
+      p256dh = EXCLUDED.p256dh,
+      auth = EXCLUDED.auth,
+      ac_power_notify = EXCLUDED.ac_power_notify,
+      updated_at = NOW()
+  `;
+
+  return c.json({ ok: true, acPowerNotify });
+});
+
+app.delete("/api/push/subscribe", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+
+  let endpoint = null;
+  try {
+    const body = await c.req.json();
+    endpoint = typeof body?.endpoint === "string" ? body.endpoint.trim() : null;
+  } catch {
+    /* brak body — usuń wszystkie subskrypcje usera */
+  }
+
+  if (endpoint) {
+    await sql`
+      DELETE FROM push_subscriptions
+      WHERE user_id = ${user.id} AND endpoint = ${endpoint}
+    `;
+  } else {
+    await sql`DELETE FROM push_subscriptions WHERE user_id = ${user.id}`;
+  }
+
+  return c.json({ ok: true });
+});
+
+app.put("/api/push/preferences", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+
+  let body;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+
+  if (typeof body?.acPowerNotify !== "boolean")
+    return c.json({ error: "ac_power_notify_required" }, 400);
+
+  await sql`
+    UPDATE push_subscriptions
+    SET ac_power_notify = ${body.acPowerNotify}, updated_at = NOW()
+    WHERE user_id = ${user.id}
+  `;
+
+  return c.json({ ok: true, acPowerNotify: body.acPowerNotify });
 });
 
 // ============ ACTION LOG (undo Phase 4) ============
