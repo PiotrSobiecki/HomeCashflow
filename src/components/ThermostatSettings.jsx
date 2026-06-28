@@ -5,7 +5,6 @@ import {
   ChevronRight,
   Loader2,
   Check,
-  AlertTriangle,
   MapPin,
   RefreshCw,
   Sun,
@@ -118,11 +117,6 @@ const thresholdLabels = (mode) =>
     ? { on: "Włącz poniżej", off: "Wyłącz powyżej" }
     : { on: "Włącz powyżej", off: "Wyłącz poniżej" };
 
-const modeWarning = (mode) =>
-  mode === "heat"
-    ? "Włączenie używa ostatniego trybu z pilota — u góry wybierz Grzanie, zanim zostawisz automatykę."
-    : "Włączenie używa ostatniego trybu z pilota — u góry wybierz Chłodzenie, zanim zostawisz automatykę.";
-
 /** 0 = chłodzenie, 1 = grzanie (jak dropdown Tryb w AcControls). */
 const climateModeFromAc = (acMode, fallback = "cool") => {
   if (acMode === 1) return "heat";
@@ -168,6 +162,11 @@ export const ThermostatSettings = ({
   const [nowError, setNowError] = useState(false);
   const cfgReady = useRef(false);
   const [pushLoading, setPushLoading] = useState(false);
+  const [pushOpen, setPushOpen] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      window.matchMedia("(min-width: 640px)").matches,
+  );
   const [pushState, setPushState] = useState(() => {
     const info = getPushSupportInfo();
     return {
@@ -484,12 +483,21 @@ export const ThermostatSettings = ({
 
       {/* Bieżąca temperatura — ZAWSZE widoczna (nad zwijaniem), gdy ustawiona jest lokalizacja. */}
       {hasCoords && (
-        <div className="mt-2 flex items-center justify-between rounded-lg bg-sky-500/10 border border-sky-500/25 px-2.5 py-2">
-          <span className="flex items-center gap-1.5 text-[11px] text-sky-300/90">
-            <Thermometer className="w-3.5 h-3.5" /> Teraz na zewnątrz
+        <div
+          className="mt-2 flex items-center justify-between rounded-lg bg-sky-500/10 border border-sky-500/25 px-2.5 py-2"
+          aria-label={
+            cfg?.locationLabel
+              ? `Teraz na zewnątrz, ${cityName(cfg.locationLabel)}`
+              : "Teraz na zewnątrz"
+          }
+        >
+          <span className="flex items-center gap-1.5 text-[11px] text-sky-300/90 min-w-0">
+            <Thermometer className="w-3.5 h-3.5 shrink-0" aria-hidden />
+            <span className="hidden sm:inline">Teraz na zewnątrz</span>
             {cfg?.locationLabel && (
-              <span className="text-slate-500">
-                · {cityName(cfg.locationLabel)}
+              <span className="text-slate-500 truncate">
+                <span className="hidden sm:inline"> · </span>
+                {cityName(cfg.locationLabel)}
               </span>
             )}
           </span>
@@ -643,13 +651,6 @@ export const ThermostatSettings = ({
             </p>
           )}
 
-          {enabled && (
-            <p className="flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-2.5 py-2 text-[11px] leading-snug text-amber-200/90">
-              <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-              {modeWarning(climateMode)}
-            </p>
-          )}
-
           <div className="space-y-1.5">
             <button
               type="button"
@@ -673,11 +674,30 @@ export const ThermostatSettings = ({
             )}
           </div>
 
-          <div className="rounded-lg border border-slate-700/50 bg-slate-900/30 p-2.5 space-y-1.5">
-            <p className="flex items-center gap-1.5 text-[11px] font-medium text-slate-300">
-              <Bell className="w-3.5 h-3.5 text-indigo-400" />
-              Powiadomienia na telefonie
-            </p>
+          <div className="rounded-lg border border-slate-700/50 bg-slate-900/30 p-2.5">
+            <button
+              type="button"
+              onClick={() => setPushOpen((v) => !v)}
+              aria-expanded={pushOpen}
+              className="w-full flex items-center justify-between gap-2 text-left"
+            >
+              <span className="flex items-center gap-1.5 text-[11px] font-medium text-slate-300 min-w-0">
+                <Bell className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                <span className="truncate">Powiadomienia na telefonie</span>
+                {pushState.subscribed && pushState.acPowerNotify && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 shrink-0">
+                    wł.
+                  </span>
+                )}
+              </span>
+              {pushOpen ? (
+                <ChevronDown className="w-4 h-4 shrink-0 text-slate-400" />
+              ) : (
+                <ChevronRight className="w-4 h-4 shrink-0 text-slate-400" />
+              )}
+            </button>
+            {pushOpen && (
+              <div className="mt-2 space-y-1.5">
             {!pushState.supported ? (
               <p className="text-[11px] text-slate-500 leading-snug">
                 {pushState.hint ||
@@ -712,6 +732,8 @@ export const ThermostatSettings = ({
                   </p>
                 )}
               </>
+            )}
+              </div>
             )}
           </div>
 
