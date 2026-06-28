@@ -28,7 +28,8 @@ import {
 import { useAlignedPolling } from "../hooks/useAlignedPolling";
 import {
   loadPushStatus,
-  pushSupported,
+  getPushSupportInfo,
+  describePushClientError,
   setAcPowerPushPreference,
   subscribeAcPowerPush,
 } from "../lib/push";
@@ -169,12 +170,16 @@ export const ThermostatSettings = ({
   const [nowError, setNowError] = useState(false);
   const cfgReady = useRef(false);
   const [pushLoading, setPushLoading] = useState(false);
-  const [pushState, setPushState] = useState({
-    supported: pushSupported(),
-    configured: false,
-    subscribed: false,
-    acPowerNotify: false,
-    permission: typeof Notification !== "undefined" ? Notification.permission : "default",
+  const [pushState, setPushState] = useState(() => {
+    const info = getPushSupportInfo();
+    return {
+      supported: info.supported,
+      configured: false,
+      subscribed: false,
+      acPowerNotify: false,
+      hint: info.hint,
+      permission: typeof Notification !== "undefined" ? Notification.permission : "default",
+    };
   });
   const [pushMsg, setPushMsg] = useState("");
 
@@ -201,7 +206,6 @@ export const ThermostatSettings = ({
   }, [load]);
 
   useEffect(() => {
-    if (!pushSupported()) return;
     loadPushStatus().then(setPushState).catch(() => {});
   }, []);
 
@@ -421,11 +425,12 @@ export const ThermostatSettings = ({
         setPushMsg("Powiadomienia włączone.");
       } else {
         await setAcPowerPushPreference(false);
-        setPushState((s) => ({ ...s, acPowerNotify: false }));
+        setPushState((s) => ({ ...s, subscribed: false, acPowerNotify: false }));
         setPushMsg("Powiadomienia wyłączone.");
       }
-    } catch {
-      setPushMsg("Nie udało się zmienić powiadomień.");
+    } catch (err) {
+      console.error("[push] toggle failed", err);
+      setPushMsg(describePushClientError(err));
     } finally {
       setPushLoading(false);
     }
@@ -653,12 +658,16 @@ export const ThermostatSettings = ({
             </p>
             {!pushState.supported ? (
               <p className="text-[11px] text-slate-500 leading-snug">
-                Twoja przeglądarka nie obsługuje powiadomień push.
+                {pushState.hint ||
+                  "Twoja przeglądarka nie obsługuje powiadomień push."}
               </p>
             ) : !pushState.configured ? (
               <p className="text-[11px] text-slate-500 leading-snug">
-                Powiadomienia push nie są jeszcze skonfigurowane na serwerze.
+                {pushState.hint ||
+                  "Powiadomienia push nie są jeszcze skonfigurowane na serwerze (brak kluczy VAPID)."}
               </p>
+            ) : pushState.hint ? (
+              <p className="text-[11px] text-amber-400/90 leading-snug">{pushState.hint}</p>
             ) : (
               <>
                 <label className="flex items-start gap-2.5 text-xs text-slate-300 cursor-pointer">
@@ -672,7 +681,7 @@ export const ThermostatSettings = ({
                   <span className="leading-snug">
                     Powiadom, gdy klimatyzacja się włączy lub wyłączy
                     <span className="block text-[10px] text-slate-500 mt-0.5">
-                      Automatyka, ręczne sterowanie i wyłącznik czasowy. Na iPhone: Dodaj do ekranu początkowego.
+                      Automatyka, ręczne sterowanie i wyłącznik czasowy.
                     </span>
                   </span>
                 </label>

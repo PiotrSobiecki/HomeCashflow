@@ -3072,18 +3072,28 @@ app.get("/api/push/vapid-public-key", async (c) => {
 app.get("/api/push/status", authMiddleware, async (c) => {
   const user = c.get("user");
   const sql = getDb(c);
-  const [row] = await sql`
-    SELECT COUNT(*)::int AS count,
-           COALESCE(BOOL_OR(ac_power_notify), false) AS ac_power_notify
-    FROM push_subscriptions
-    WHERE user_id = ${user.id}
-  `;
-  const count = row?.count ?? 0;
-  return c.json({
-    configured: pushConfigured(c.env),
-    subscribed: count > 0,
-    acPowerNotify: count > 0 ? row.ac_power_notify === true : false,
-  });
+  try {
+    const [row] = await sql`
+      SELECT COUNT(*)::int AS count,
+             COALESCE(BOOL_OR(ac_power_notify), false) AS ac_power_notify
+      FROM push_subscriptions
+      WHERE user_id = ${user.id}
+    `;
+    const count = row?.count ?? 0;
+    return c.json({
+      configured: pushConfigured(c.env),
+      subscribed: count > 0,
+      acPowerNotify: count > 0 ? row.ac_power_notify === true : false,
+    });
+  } catch (err) {
+    console.error("[push] status db failed", err);
+    return c.json({
+      configured: pushConfigured(c.env),
+      subscribed: false,
+      acPowerNotify: false,
+      dbError: true,
+    });
+  }
 });
 
 app.post("/api/push/subscribe", authMiddleware, async (c) => {
@@ -3106,16 +3116,21 @@ app.post("/api/push/subscribe", authMiddleware, async (c) => {
 
   const acPowerNotify = body?.acPowerNotify !== false;
 
-  await sql`
-    INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, ac_power_notify)
-    VALUES (${user.id}, ${endpoint}, ${p256dh}, ${auth}, ${acPowerNotify})
-    ON CONFLICT (endpoint) DO UPDATE SET
-      user_id = EXCLUDED.user_id,
-      p256dh = EXCLUDED.p256dh,
-      auth = EXCLUDED.auth,
-      ac_power_notify = EXCLUDED.ac_power_notify,
-      updated_at = NOW()
-  `;
+  try {
+    await sql`
+      INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, ac_power_notify)
+      VALUES (${user.id}, ${endpoint}, ${p256dh}, ${auth}, ${acPowerNotify})
+      ON CONFLICT (endpoint) DO UPDATE SET
+        user_id = EXCLUDED.user_id,
+        p256dh = EXCLUDED.p256dh,
+        auth = EXCLUDED.auth,
+        ac_power_notify = EXCLUDED.ac_power_notify,
+        updated_at = NOW()
+    `;
+  } catch (err) {
+    console.error("[push] subscribe db failed", err);
+    return c.json({ error: "push_db_error", message: String(err.message || err) }, 500);
+  }
 
   return c.json({ ok: true, acPowerNotify });
 });
