@@ -25,9 +25,12 @@ const parseThresholdInput = (raw) => {
   return n
 }
 
-const ThresholdInput = ({ prefix, value, onChange, onSave, disabled, saving, ariaLabel }) => (
+const ThresholdInput = ({ symbol, value, onChange, onSave, disabled, saving, ariaLabel }) => (
   <>
-    <span className="shrink-0 text-[11px]">{prefix}</span>
+    <span className="shrink-0 text-[11px]">
+      <span className="hidden sm:inline">Powiadom </span>
+      {symbol}
+    </span>
     <input
       type="text"
       inputMode="decimal"
@@ -238,7 +241,7 @@ export const DeviceNotifySettings = ({ device, disabled, isOwner, onSave }) => {
                 aria-label="Włącz powiadomienia push dla gniazdka"
               />
               <ThresholdInput
-                prefix="Powiadom >"
+                symbol=">"
                 value={thresholdMax}
                 onChange={(e) => { setThresholdMax(e.target.value); setMsg('') }}
                 onSave={savePlug}
@@ -248,7 +251,7 @@ export const DeviceNotifySettings = ({ device, disabled, isOwner, onSave }) => {
               />
               <span className="text-slate-600 shrink-0 px-0.5" aria-hidden>·</span>
               <ThresholdInput
-                prefix="Powiadom <"
+                symbol="<"
                 value={thresholdMin}
                 onChange={(e) => { setThresholdMin(e.target.value); setMsg('') }}
                 onSave={savePlug}
