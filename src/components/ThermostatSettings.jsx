@@ -33,13 +33,11 @@ import {
   setAcPowerPushPreference,
   subscribeAcPowerPush,
 } from "../lib/push";
-import { sendPushTest } from "../lib/api";
 
 const ERRORS = {
   geocode_no_result: "Nie znaleziono takiej miejscowości.",
   geocode_failed: "Nie udało się pobrać lokalizacji. Spróbuj ponownie.",
-  threshold_order_cool:
-    "„Włącz powyżej” musi być większe od „Wyłącz poniżej”.",
+  threshold_order_cool: "„Włącz powyżej” musi być większe od „Wyłącz poniżej”.",
   threshold_order_heat:
     "„Włącz poniżej” musi być mniejsze od „Wyłącz powyżej”.",
   threshold_gap: "Min. 1°C odstępu między progami.",
@@ -102,8 +100,7 @@ const lastCheckActionLabel = (a) =>
 // Z etykiety „Wrocław, Dolnośląskie, Polska" robimy samą nazwę miasta.
 const cityName = (label) => (label ?? "").split(",")[0].trim();
 
-const thresholdGap = (mode, on, off) =>
-  mode === "heat" ? off - on : on - off;
+const thresholdGap = (mode, on, off) => (mode === "heat" ? off - on : on - off);
 
 const thresholdError = (mode, on, off) => {
   if (!Number.isFinite(on) || !Number.isFinite(off))
@@ -179,36 +176,44 @@ export const ThermostatSettings = ({
       subscribed: false,
       acPowerNotify: false,
       hint: info.hint,
-      permission: typeof Notification !== "undefined" ? Notification.permission : "default",
+      permission:
+        typeof Notification !== "undefined"
+          ? Notification.permission
+          : "default",
     };
   });
   const [pushMsg, setPushMsg] = useState("");
-  const [pushTesting, setPushTesting] = useState(false);
 
-  const load = useCallback(async (syncForm = false) => {
-    try {
-      const { thermostat } = await fetchThermostat(deviceId);
-      if (thermostat) {
-        setCfg(thermostat);
-        cfgReady.current = true;
-        if (syncForm) {
-          setEnabled(thermostat.enabled);
-          setCity(cityName(thermostat.locationLabel));
-          if (thermostat.tempOn != null) setTempOn(String(thermostat.tempOn));
-          if (thermostat.tempOff != null) setTempOff(String(thermostat.tempOff));
+  const load = useCallback(
+    async (syncForm = false) => {
+      try {
+        const { thermostat } = await fetchThermostat(deviceId);
+        if (thermostat) {
+          setCfg(thermostat);
+          cfgReady.current = true;
+          if (syncForm) {
+            setEnabled(thermostat.enabled);
+            setCity(cityName(thermostat.locationLabel));
+            if (thermostat.tempOn != null) setTempOn(String(thermostat.tempOn));
+            if (thermostat.tempOff != null)
+              setTempOff(String(thermostat.tempOff));
+          }
         }
+      } catch {
+        // cicho — automatyka to nie krytyczna ścieżka
       }
-    } catch {
-      // cicho — automatyka to nie krytyczna ścieżka
-    }
-  }, [deviceId]);
+    },
+    [deviceId],
+  );
 
   useEffect(() => {
     load(true);
   }, [load]);
 
   useEffect(() => {
-    loadPushStatus().then(setPushState).catch(() => {});
+    loadPushStatus()
+      .then(setPushState)
+      .catch(() => {});
   }, []);
 
   // Po ręcznym „Odśwież" na karcie — dograj stopkę z bazy (bez nadpisywania formularza).
@@ -312,7 +317,11 @@ export const ThermostatSettings = ({
     if (prevClimateMode.current === climateMode) return;
     const on = parseTemp(tempOn);
     const off = parseTemp(tempOff);
-    if (Number.isFinite(on) && Number.isFinite(off) && thresholdGap(climateMode, on, off) < 1) {
+    if (
+      Number.isFinite(on) &&
+      Number.isFinite(off) &&
+      thresholdGap(climateMode, on, off) < 1
+    ) {
       setTempOn(String(off));
       setTempOff(String(on));
       setMsg("");
@@ -326,7 +335,8 @@ export const ThermostatSettings = ({
     tempOn.trim() && tempOff.trim()
       ? thresholdError(climateMode, parsedOn, parsedOff)
       : null;
-  const invalidThresholds = thresholdErr != null && thresholdErr !== ERRORS.thresholds_required;
+  const invalidThresholds =
+    thresholdErr != null && thresholdErr !== ERRORS.thresholds_required;
   const onOrderInvalid =
     invalidThresholds &&
     Number.isFinite(parsedOn) &&
@@ -338,19 +348,18 @@ export const ThermostatSettings = ({
         : false);
 
   const savedMode = cfg?.mode === "heat" ? "heat" : "cool";
-  const hasChanges =
-    !cfg
-      ? enabled ||
-        picked != null ||
-        city.trim() !== "" ||
-        tempOn !== "26" ||
-        tempOff !== "24"
-      : enabled !== !!cfg.enabled ||
-        climateMode !== savedMode ||
-        picked != null ||
-        city.trim() !== cityName(cfg.locationLabel) ||
-        parsedOn !== Number(cfg.tempOn) ||
-        parsedOff !== Number(cfg.tempOff);
+  const hasChanges = !cfg
+    ? enabled ||
+      picked != null ||
+      city.trim() !== "" ||
+      tempOn !== "26" ||
+      tempOff !== "24"
+    : enabled !== !!cfg.enabled ||
+      climateMode !== savedMode ||
+      picked != null ||
+      city.trim() !== cityName(cfg.locationLabel) ||
+      parsedOn !== Number(cfg.tempOn) ||
+      parsedOff !== Number(cfg.tempOff);
 
   const save = async () => {
     const on = parsedOn;
@@ -407,7 +416,9 @@ export const ThermostatSettings = ({
       if (next) {
         const result = await subscribeAcPowerPush({ acPowerNotify: true });
         if (result === "denied") {
-          setPushMsg("Przeglądarka zablokowała powiadomienia. Włącz je w ustawieniach strony.");
+          setPushMsg(
+            "Przeglądarka zablokowała powiadomienia. Włącz je w ustawieniach strony.",
+          );
           return;
         }
         if (result === "not_configured") {
@@ -427,7 +438,11 @@ export const ThermostatSettings = ({
         setPushMsg("Powiadomienia włączone.");
       } else {
         await setAcPowerPushPreference(false);
-        setPushState((s) => ({ ...s, subscribed: false, acPowerNotify: false }));
+        setPushState((s) => ({
+          ...s,
+          subscribed: false,
+          acPowerNotify: false,
+        }));
         setPushMsg("Powiadomienia wyłączone.");
       }
     } catch (err) {
@@ -435,19 +450,6 @@ export const ThermostatSettings = ({
       setPushMsg(describePushClientError(err));
     } finally {
       setPushLoading(false);
-    }
-  };
-
-  const testPush = async () => {
-    setPushTesting(true);
-    setPushMsg("");
-    try {
-      await sendPushTest();
-      setPushMsg("Wysłano test — sprawdź powiadomienia systemowe.");
-    } catch (err) {
-      setPushMsg(describePushClientError(err));
-    } finally {
-      setPushTesting(false);
     }
   };
 
@@ -493,7 +495,10 @@ export const ThermostatSettings = ({
           </span>
           <span className="flex items-center gap-1.5">
             {!nowLoading && !nowError && now != null && nowCondition && (
-              <WeatherIcon condition={nowCondition} className="w-4 h-4 shrink-0" />
+              <WeatherIcon
+                condition={nowCondition}
+                className="w-4 h-4 shrink-0"
+              />
             )}
             <span className="text-sm font-semibold text-white tabular-nums">
               {nowLoading
@@ -633,7 +638,9 @@ export const ThermostatSettings = ({
           </div>
 
           {invalidThresholds && thresholdErr === ERRORS.threshold_gap && (
-            <p className="text-[11px] text-rose-400 leading-snug">{thresholdErr}</p>
+            <p className="text-[11px] text-rose-400 leading-snug">
+              {thresholdErr}
+            </p>
           )}
 
           {enabled && (
@@ -682,7 +689,9 @@ export const ThermostatSettings = ({
                   "Powiadomienia push nie są jeszcze skonfigurowane na serwerze (brak kluczy VAPID)."}
               </p>
             ) : pushState.hint ? (
-              <p className="text-[11px] text-amber-400/90 leading-snug">{pushState.hint}</p>
+              <p className="text-[11px] text-amber-400/90 leading-snug">
+                {pushState.hint}
+              </p>
             ) : (
               <>
                 <label className="flex items-start gap-2.5 text-xs text-slate-300 cursor-pointer">
@@ -694,24 +703,13 @@ export const ThermostatSettings = ({
                     className="accent-indigo-500 mt-0.5 shrink-0"
                   />
                   <span className="leading-snug">
-                    Powiadom, gdy klimatyzacja się włączy lub wyłączy
-                    <span className="block text-[10px] text-slate-500 mt-0.5">
-                      Automatyka, ręczne sterowanie i wyłącznik czasowy.
-                    </span>
+                    Powiadom, gdy klimatyzacja się włączy lub wyłączy.
                   </span>
                 </label>
                 {pushMsg && (
-                  <p className="text-[11px] text-slate-400 leading-snug">{pushMsg}</p>
-                )}
-                {pushState.subscribed && pushState.acPowerNotify && (
-                  <button
-                    type="button"
-                    onClick={testPush}
-                    disabled={disabled || pushTesting}
-                    className="text-[11px] text-indigo-400 hover:text-indigo-300 disabled:opacity-50"
-                  >
-                    {pushTesting ? "Wysyłanie testu…" : "Wyślij powiadomienie testowe"}
-                  </button>
+                  <p className="text-[11px] text-slate-400 leading-snug">
+                    {pushMsg}
+                  </p>
                 )}
               </>
             )}
