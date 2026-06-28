@@ -257,6 +257,7 @@ export const smartDevices = pgTable('smart_devices', {
   // Powiadomienia push: pralka/zmywarka (ST) — włączone per urządzenie; cron edge-trigger.
   cycleNotifyEnabled: boolean('cycle_notify_enabled').notNull().default(false),
   lastCycleState: text('last_cycle_state'),
+  lastCycleSnapshot: jsonb('last_cycle_snapshot'),
   // Powiadomienia push: gniazdko — próg mocy (W) + edge-trigger co 15 min.
   plugNotifyEnabled: boolean('plug_notify_enabled').notNull().default(false),
   powerThresholdW: numeric('power_threshold_w', { precision: 10, scale: 2 }),

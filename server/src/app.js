@@ -1811,21 +1811,19 @@ async function loadStContext(c, sql, householdId) {
   return { accessToken };
 }
 
-/** Po odczycie ST: śledź stan cyklu (push przy końcu prania, także między cronami co 5 min). */
-async function trackStCycleState(c, sql, row, mappedStatus) {
+/** Po odczycie ST: śledź surowe sygnały cyklu (Samsung finish/none, run→stop). */
+async function trackStCycleState(c, sql, row, rawStStatus) {
   await applyCycleStateUpdate(
     sql,
     row,
-    mappedStatus.state || "unknown",
+    rawStStatus,
     row.cycle_notify_enabled
       ? (payload) => notifyHouseholdCycleComplete(sql, pushEnv(c), payload)
       : null,
   );
 }
 
-/** Status jednego urządzenia ST przez mapper (czytelny UI-model, nie surowy JSON). */
-async function readStStatus(stCtx, row) {
-  const status = await getStDeviceStatus(stCtx, row.external_device_id);
+function buildStStatusPayload(status, row) {
   return {
     id: row.id,
     provider: "smartthings",
@@ -1833,7 +1831,6 @@ async function readStStatus(stCtx, row) {
     ok: true,
     online: true,
     ...mapStStatus(status, row.device_type, row.cycle_labels),
-    // Dozwolone akcje sterowania (Faza 4) — UI rysuje tylko wspierane przyciski.
     controls: allowedStActions(row.device_type, status),
     updatedAt: new Date().toISOString(),
   };
@@ -2123,7 +2120,8 @@ app.get("/api/smart-devices/status", authMiddleware, async (c) => {
 
   const rows = await sql`
     SELECT id, household_id, display_name, provider, external_device_id, tuya_device_id, device_type,
-           ir_parent_id, linked_plug_id, cycle_labels, cycle_notify_enabled, last_cycle_state
+           ir_parent_id, linked_plug_id, cycle_labels, cycle_notify_enabled,
+           last_cycle_state, last_cycle_snapshot
     FROM smart_devices
     WHERE household_id = ${membership.household_id} AND is_active = true
     ORDER BY created_at ASC
@@ -2177,8 +2175,9 @@ app.get("/api/smart-devices/status", authMiddleware, async (c) => {
       stRows.map(async (r) => {
         if (!stCtx) return stOfflinePayload(r);
         try {
-          const base = await readStStatus(stCtx, r);
-          await trackStCycleState(c, sql, r, base);
+          const raw = await getStDeviceStatus(stCtx, r.external_device_id);
+          await trackStCycleState(c, sql, r, raw);
+          const base = buildStStatusPayload(raw, r);
           return await enrichStWithPlug(base, r, tuyaCtx, sql);
         } catch (err) {
           console.error(
@@ -2210,8 +2209,9 @@ app.get("/api/smart-devices/:id/status", authMiddleware, async (c) => {
       const tuyaCtx = result.row.linked_plug_id
         ? await loadTuyaContext(c, sql, result.row.household_id)
         : null;
-      const base = await readStStatus(stCtx, result.row);
-      await trackStCycleState(c, sql, result.row, base);
+      const raw = await getStDeviceStatus(stCtx, result.row.external_device_id);
+      await trackStCycleState(c, sql, result.row, raw);
+      const base = buildStStatusPayload(raw, result.row);
       return c.json(
         await enrichStWithPlug(base, result.row, tuyaCtx, sql),
       );

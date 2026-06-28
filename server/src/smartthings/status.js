@@ -20,11 +20,47 @@ const CYCLE_CAPABILITY = {
   dishwasher: 'dishwasherOperatingState',
 }
 
+/** Samsung CE: jobState to fazy (`wash`, `finish`, `none`); standard ST używa `finished`. */
+export function isCycleJobComplete(jobState, operatingState) {
+  if (jobState === 'finished' || jobState === 'finish') return true
+  if (operatingState === 'finished') return true
+  return false
+}
+
+const ACTIVE_JOB_PHASES = new Set([
+  'wash', 'washing', 'rinse', 'rinsing', 'spin', 'dry', 'drying', 'prewash', 'cooling', 'airwash',
+])
+
+/** Czy cykl AGD jest aktywnie w trakcie (Samsung + standard ST). */
+export function isCycleActivelyRunning(signals) {
+  if (!signals) return false
+  const { machineState, jobState, operatingState } = signals
+  if (machineState === 'run' || machineState === 'pause') return true
+  if (operatingState === 'running' || operatingState === 'paused') return true
+  if (jobState && ACTIVE_JOB_PHASES.has(jobState)) return true
+  return false
+}
+
+/** Surowe sygnały cyklu AGD z odpowiedzi GET /devices/{id}/status (do edge-trigger push). */
+export function extractCycleSignals(status, type) {
+  const cap = CYCLE_CAPABILITY[type]
+  if (!cap) return null
+  const samsungCap = `samsungce.${cap}`
+  return {
+    machineState: attr(status, cap, 'machineState'),
+    jobState: attr(status, samsungCap, `${type}JobState`) ?? attr(status, cap, `${type}JobState`),
+    operatingState: attr(status, samsungCap, 'operatingState'),
+  }
+}
+
 /** Mapowanie maszyny stanu AGD na UI-model (run/pause/stop). */
 function mapCycleDevice(status, type, cycleLabels) {
   const cap = CYCLE_CAPABILITY[type]
   const samsungCap = `samsungce.${cap}`
-  const machineState = attr(status, cap, 'machineState')
+  const signals = extractCycleSignals(status, type)
+  const machineState = signals?.machineState
+  const jobState = signals?.jobState
+  const operatingState = signals?.operatingState
   const remainingMin = attr(status, samsungCap, 'remainingTime')
   const completionTime = attr(status, cap, 'completionTime')
   // Ustawienia cyklu (temperatura/wirowanie/płukanie/namaczanie/program) — tylko pralka.
@@ -36,9 +72,8 @@ function mapCycleDevice(status, type, cycleLabels) {
   if (machineState === 'pause') {
     return { type, state: 'paused', label: 'Pauza', remainingMin, completionTime, settings }
   }
-  // stop: świeżo zakończony cykl (jobState = finished) → „Gotowe"; inaczej bezczynna.
-  const jobState = attr(status, cap, `${type}JobState`) ?? attr(status, samsungCap, `${type}JobState`)
-  if (jobState === 'finished') {
+  // stop: świeżo zakończony cykl (jobState finish/finished lub operatingState finished) → „Gotowe".
+  if (isCycleJobComplete(jobState, operatingState)) {
     return { type, state: 'finished', label: 'Gotowe', remainingMin: null, completionTime: null, settings }
   }
   return { type, state: 'idle', label: 'Bezczynna', remainingMin: null, completionTime: null, settings }

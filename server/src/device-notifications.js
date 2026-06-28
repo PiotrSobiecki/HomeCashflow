@@ -4,7 +4,12 @@
  */
 import { getFreshAccessToken } from './smartthings/credentials.js'
 import { getStDeviceStatus } from './smartthings/client.js'
-import { mapStStatus } from './smartthings/status.js'
+import {
+  extractCycleSignals,
+  isCycleActivelyRunning,
+  isCycleJobComplete,
+  mapStStatus,
+} from './smartthings/status.js'
 
 const CYCLE_TYPES = new Set(['washer', 'dryer', 'dishwasher'])
 
@@ -14,37 +19,95 @@ const CYCLE_TYPE_LABEL = {
   dishwasher: 'Zmywarka',
 }
 
-/** Edge-trigger: wejście w „gotowe" po pracy/pauzie/bezczynności (nie powtarzaj). */
-export function shouldNotifyCycleComplete(prevState, newState) {
-  if (newState !== 'finished') return false
-  if (prevState === 'finished' || prevState == null) return false
-  return prevState === 'running' || prevState === 'paused' || prevState === 'idle'
+/** @param {object|null|undefined} raw jsonb z last_cycle_snapshot */
+export function parseCycleSnapshot(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  return {
+    machineState: raw.machineState ?? null,
+    jobState: raw.jobState ?? null,
+    operatingState: raw.operatingState ?? null,
+  }
+}
+
+function snapshotsEqual(a, b) {
+  if (!a && !b) return true
+  if (!a || !b) return false
+  return a.machineState === b.machineState
+    && a.jobState === b.jobState
+    && a.operatingState === b.operatingState
 }
 
 /**
- * Aktualizuje last_cycle_state i ewentualnie wysyła push o końcu cyklu.
+ * Edge-trigger na surowych sygnałach ST (Samsung: `finish` → `none` w sekundach).
+ * Łapie też run→stop gdy faza job zdąży wrócić do `none` przed kolejnym pollem.
+ */
+export function shouldNotifyCycleComplete(prev, curr) {
+  if (!curr || !prev) return false
+
+  const prevActive = isCycleActivelyRunning(prev)
+  const currComplete = isCycleJobComplete(curr.jobState, curr.operatingState)
+  const prevComplete = isCycleJobComplete(prev.jobState, prev.operatingState)
+
+  if (currComplete && !prevComplete && prevActive) return true
+  if (curr.operatingState === 'finished' && prev.operatingState !== 'finished' && prevActive) return true
+
+  if (
+    prevActive &&
+    !isCycleActivelyRunning(curr) &&
+    (prev.machineState === 'run' || prev.machineState === 'pause') &&
+    curr.machineState === 'stop'
+  ) {
+    return true
+  }
+
+  return false
+}
+
+/** UI-state do last_cycle_state (CHECK constraint w DB). */
+export function cycleUiStateFromSignals(signals) {
+  if (!signals) return 'unknown'
+  if (signals.machineState === 'run') return 'running'
+  if (signals.machineState === 'pause') return 'paused'
+  if (isCycleJobComplete(signals.jobState, signals.operatingState)) return 'finished'
+  return 'idle'
+}
+
+/**
+ * Aktualizuje snapshot cyklu i ewentualnie wysyła push o końcu prania.
  * @returns {Promise<{ notified: boolean }>}
  */
-export async function applyCycleStateUpdate(sql, device, newState, notifyCycleComplete) {
-  const prevState = device.last_cycle_state ?? null
+export async function applyCycleStateUpdate(sql, device, rawStStatus, notifyCycleComplete) {
+  const type = device.device_type
+  if (!CYCLE_TYPES.has(type)) return { notified: false }
+
+  const curr = extractCycleSignals(rawStStatus, type)
+  if (!curr) return { notified: false }
+
+  const prev = parseCycleSnapshot(device.last_cycle_snapshot)
   let notified = false
 
   if (
     device.cycle_notify_enabled &&
-    shouldNotifyCycleComplete(prevState, newState) &&
+    shouldNotifyCycleComplete(prev, curr) &&
     notifyCycleComplete
   ) {
     await notifyCycleComplete({
       householdId: device.household_id,
       deviceName: device.display_name,
-      deviceType: device.device_type,
+      deviceType: type,
     })
     notified = true
   }
 
-  if (newState !== prevState) {
+  const uiState = cycleUiStateFromSignals(curr)
+  const snapshotJson = JSON.stringify(curr)
+
+  if (!snapshotsEqual(prev, curr) || device.last_cycle_state !== uiState) {
     await sql`
-      UPDATE smart_devices SET last_cycle_state = ${newState}, updated_at = NOW()
+      UPDATE smart_devices
+      SET last_cycle_snapshot = ${snapshotJson}::jsonb,
+          last_cycle_state = ${uiState},
+          updated_at = NOW()
       WHERE id = ${device.id}
     `
   }
@@ -71,7 +134,7 @@ export function shouldNotifyPowerBelow(prevBelow, nowBelow) {
 export async function pollCycleDevices(sql, rawKey, { clientId, clientSecret, notifyCycleComplete }) {
   const devices = await sql`
     SELECT sd.id, sd.household_id, sd.external_device_id, sd.display_name, sd.device_type,
-           sd.last_cycle_state, sd.cycle_notify_enabled, sd.cycle_labels
+           sd.last_cycle_state, sd.last_cycle_snapshot, sd.cycle_notify_enabled, sd.cycle_labels
     FROM smart_devices sd
     WHERE sd.is_active = true
       AND sd.provider = 'smartthings'
@@ -102,15 +165,7 @@ export async function pollCycleDevices(sql, rawKey, { clientId, clientSecret, no
       }
 
       const status = await getStDeviceStatus({ accessToken }, d.external_device_id)
-      const labels = d.cycle_labels && typeof d.cycle_labels === 'object'
-        ? d.cycle_labels
-        : d.cycle_labels
-          ? JSON.parse(d.cycle_labels)
-          : null
-      const mapped = mapStStatus(status, d.device_type, labels)
-      const newState = mapped.state || 'unknown'
-
-      const { notified: n } = await applyCycleStateUpdate(sql, d, newState, notifyCycleComplete)
+      const { notified: n } = await applyCycleStateUpdate(sql, d, status, notifyCycleComplete)
       if (n) notified++
 
       checked++

@@ -46,6 +46,25 @@ describe('mapStStatus — washer', () => {
     expect(mapStStatus(s, 'washer')).toMatchObject({ state: 'finished', label: 'Gotowe' })
   })
 
+  it('maps Samsung finish jobState to "Gotowe"', () => {
+    const s = status({
+      washerOperatingState: { machineState: { value: 'stop' }, washerJobState: { value: 'none' } },
+      'samsungce.washerOperatingState': {
+        washerJobState: { value: 'finish' },
+        operatingState: { value: 'ready' },
+      },
+    })
+    expect(mapStStatus(s, 'washer')).toMatchObject({ state: 'finished', label: 'Gotowe' })
+  })
+
+  it('maps samsungce operatingState finished to "Gotowe"', () => {
+    const s = status({
+      washerOperatingState: { machineState: { value: 'stop' }, washerJobState: { value: 'none' } },
+      'samsungce.washerOperatingState': { operatingState: { value: 'finished' } },
+    })
+    expect(mapStStatus(s, 'washer')).toMatchObject({ state: 'finished', label: 'Gotowe' })
+  })
+
   it('maps the real washer fixture (stopped, idle job) to "Bezczynna"', () => {
     const ui = mapStStatus(fixture('washer-status.json'), 'washer')
     expect(ui).toMatchObject({ type: 'washer', state: 'idle', label: 'Bezczynna' })
