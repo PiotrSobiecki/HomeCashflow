@@ -10,8 +10,12 @@ describe('shouldNotifyCycleComplete', () => {
     expect(shouldNotifyCycleComplete('paused', 'finished')).toBe(true)
   })
 
-  it('nie powiadamia przy idle → finished', () => {
-    expect(shouldNotifyCycleComplete('idle', 'finished')).toBe(false)
+  it('powiadamia przy idle → finished (cron mógł pominąć running)', () => {
+    expect(shouldNotifyCycleComplete('idle', 'finished')).toBe(true)
+  })
+
+  it('nie powiadamia przy null → finished (pierwszy odczyt)', () => {
+    expect(shouldNotifyCycleComplete(null, 'finished')).toBe(false)
   })
 
   it('nie powiadamia ponownie gdy już finished', () => {

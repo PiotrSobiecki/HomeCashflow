@@ -14,9 +14,42 @@ const CYCLE_TYPE_LABEL = {
   dishwasher: 'Zmywarka',
 }
 
-/** Edge-trigger: powiadom tylko przy przejściu z pracy/pauzy na „gotowe". */
+/** Edge-trigger: wejście w „gotowe" po pracy/pauzie/bezczynności (nie powtarzaj). */
 export function shouldNotifyCycleComplete(prevState, newState) {
-  return newState === 'finished' && (prevState === 'running' || prevState === 'paused')
+  if (newState !== 'finished') return false
+  if (prevState === 'finished' || prevState == null) return false
+  return prevState === 'running' || prevState === 'paused' || prevState === 'idle'
+}
+
+/**
+ * Aktualizuje last_cycle_state i ewentualnie wysyła push o końcu cyklu.
+ * @returns {Promise<{ notified: boolean }>}
+ */
+export async function applyCycleStateUpdate(sql, device, newState, notifyCycleComplete) {
+  const prevState = device.last_cycle_state ?? null
+  let notified = false
+
+  if (
+    device.cycle_notify_enabled &&
+    shouldNotifyCycleComplete(prevState, newState) &&
+    notifyCycleComplete
+  ) {
+    await notifyCycleComplete({
+      householdId: device.household_id,
+      deviceName: device.display_name,
+      deviceType: device.device_type,
+    })
+    notified = true
+  }
+
+  if (newState !== prevState) {
+    await sql`
+      UPDATE smart_devices SET last_cycle_state = ${newState}, updated_at = NOW()
+      WHERE id = ${device.id}
+    `
+  }
+
+  return { notified }
 }
 
 /** Edge-trigger: powiadom gdy moc przekroczyła próg (poprzednio była poniżej). */
@@ -38,7 +71,7 @@ export function shouldNotifyPowerBelow(prevBelow, nowBelow) {
 export async function pollCycleDevices(sql, rawKey, { clientId, clientSecret, notifyCycleComplete }) {
   const devices = await sql`
     SELECT sd.id, sd.household_id, sd.external_device_id, sd.display_name, sd.device_type,
-           sd.last_cycle_state, sd.cycle_labels
+           sd.last_cycle_state, sd.cycle_notify_enabled, sd.cycle_labels
     FROM smart_devices sd
     WHERE sd.is_active = true
       AND sd.provider = 'smartthings'
@@ -76,23 +109,10 @@ export async function pollCycleDevices(sql, rawKey, { clientId, clientSecret, no
           : null
       const mapped = mapStStatus(status, d.device_type, labels)
       const newState = mapped.state || 'unknown'
-      const prevState = d.last_cycle_state
 
-      if (shouldNotifyCycleComplete(prevState, newState) && notifyCycleComplete) {
-        await notifyCycleComplete({
-          householdId: d.household_id,
-          deviceName: d.display_name,
-          deviceType: d.device_type,
-        })
-        notified++
-      }
+      const { notified: n } = await applyCycleStateUpdate(sql, d, newState, notifyCycleComplete)
+      if (n) notified++
 
-      if (newState !== prevState) {
-        await sql`
-          UPDATE smart_devices SET last_cycle_state = ${newState}, updated_at = NOW()
-          WHERE id = ${d.id}
-        `
-      }
       checked++
     } catch (err) {
       console.warn('[cycle-notify] device skipped', d.external_device_id, err)
