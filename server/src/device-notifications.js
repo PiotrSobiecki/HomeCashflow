@@ -1,6 +1,6 @@
 /**
  * Powiadomienia push: koniec cyklu AGD (SmartThings) + próg mocy gniazdka (Tuya).
- * Cron woła pollCycleDevices co 5 min; progi mocy sprawdzane w collectEnergySnapshots co 15 min.
+ * Cron woła pollCycleDevices i collectEnergySnapshots co 15 min.
  */
 import { getFreshAccessToken } from './smartthings/credentials.js'
 import { getStDeviceStatus } from './smartthings/client.js'

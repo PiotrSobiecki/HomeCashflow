@@ -15,8 +15,8 @@ import { pollCycleDevices } from './device-notifications.js'
 export default {
   fetch: app.fetch,
 
-  // Cron co 5 min: wyłączniki czasowe IR (±5 min — krok suwaka to i tak 30 min).
-  // Snapshot zużycia + retencja tylko co 15 min (minuta % 15 == 0).
+  // Cron co 15 min: timery IR, poll cyklu AGD, snapshoty energii.
+  // Termostat klimy co 30 min; tokeny ST ~co 12h.
   async scheduled(event, env, ctx) {
     ctx.waitUntil((async () => {
       const sql = neon(env.DATABASE_URL)
@@ -24,6 +24,7 @@ export default {
       const notifyAcPower = (payload) => notifyHouseholdAcPower(sql, env, payload)
       const notifyCycleComplete = (payload) => notifyHouseholdCycleComplete(sql, env, payload)
       const notifyPlugPower = (payload) => notifyHouseholdPlugPower(sql, env, payload)
+      const minute = new Date(event.scheduledTime).getUTCMinutes()
 
       try {
         const t = await fireDueTimers(sql, rawKey, { notifyAcPower })
@@ -43,18 +44,17 @@ export default {
         console.error('[cron] cycle devices failed', err)
       }
 
-      if (new Date(event.scheduledTime).getUTCMinutes() % 15 === 0) {
-        try {
-          const res = await collectEnergySnapshots(sql, rawKey, { notifyPlugPower })
-          await sql`DELETE FROM device_energy_snapshots WHERE recorded_at < NOW() - interval '400 days'`
-          console.log('[cron] energy snapshots', res)
-        } catch (err) {
-          console.error('[cron] energy snapshots failed', err)
-        }
+      // Snapshoty energii + retencja — przy cronie */15 lecą na każdym ticku.
+      try {
+        const res = await collectEnergySnapshots(sql, rawKey, { notifyPlugPower })
+        await sql`DELETE FROM device_energy_snapshots WHERE recorded_at < NOW() - interval '400 days'`
+        console.log('[cron] energy snapshots', res)
+      } catch (err) {
+        console.error('[cron] energy snapshots failed', err)
       }
 
-      // Termostat zewnętrzny klimy IR: sprawdzanie temperatury co 30 min (minuta % 30).
-      if (new Date(event.scheduledTime).getUTCMinutes() % 30 === 0) {
+      // Termostat zewnętrzny klimy IR: co 30 min (:00 i :30).
+      if (minute % 30 === 0) {
         try {
           const res = await runAcThermostats(sql, rawKey, {
             readOutdoorTemp: (coords) => getOutdoorTemp(coords, { apiKey: env.WEATHER_GOOGLE_API_KEY }),
@@ -66,9 +66,9 @@ export default {
         }
       }
 
-      // SmartThings: odświeżanie tokenów ~co 12h (cron leci co 5 min).
+      // SmartThings: odświeżanie tokenów ~co 12h (tick o :00).
       const st = new Date(event.scheduledTime)
-      if (st.getHours() % 12 === 0 && st.getMinutes() < 5) {
+      if (st.getHours() % 12 === 0 && st.getMinutes() === 0) {
         try {
           const res = await refreshExpiringTokens(sql, {
             clientId: env.SMARTTHINGS_CLIENT_ID,
