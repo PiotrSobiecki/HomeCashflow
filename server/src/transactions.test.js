@@ -126,6 +126,68 @@ describe('PATCH /api/transactions/:id', () => {
     expect(body.updatedAt).not.toBe(created.updatedAt)
   })
 
+  it('updates category of an existing expense', async () => {
+    const { token } = await setupUserWithHousehold()
+    const created = await createTransaction(token) // category: 'Żywność'
+
+    await new Promise(r => setTimeout(r, 50))
+
+    const res = await app.request(`/api/transactions/${created.id}`, {
+      method: 'PATCH',
+      headers: {
+        cookie: `token=${token}`,
+        'Content-Type': 'application/json',
+        'If-Match': created.updatedAt,
+      },
+      body: JSON.stringify({ name: 'Lunch', amount: 42.5, isFixed: false, category: 'Transport' }),
+    })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.category).toBe('Transport')
+    expect(body.isFixed).toBe(false)
+  })
+
+  it('clears category when expense becomes fixed', async () => {
+    const { token } = await setupUserWithHousehold()
+    const created = await createTransaction(token)
+
+    await new Promise(r => setTimeout(r, 50))
+
+    const res = await app.request(`/api/transactions/${created.id}`, {
+      method: 'PATCH',
+      headers: {
+        cookie: `token=${token}`,
+        'Content-Type': 'application/json',
+        'If-Match': created.updatedAt,
+      },
+      body: JSON.stringify({ isFixed: true, category: null }),
+    })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.isFixed).toBe(true)
+    expect(body.category).toBeNull()
+  })
+
+  it('keeps category unchanged when PATCH body omits it', async () => {
+    const { token } = await setupUserWithHousehold()
+    const created = await createTransaction(token)
+
+    await new Promise(r => setTimeout(r, 50))
+
+    const res = await app.request(`/api/transactions/${created.id}`, {
+      method: 'PATCH',
+      headers: {
+        cookie: `token=${token}`,
+        'Content-Type': 'application/json',
+        'If-Match': created.updatedAt,
+      },
+      body: JSON.stringify({ name: 'Dinner' }),
+    })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.category).toBe('Żywność')
+  })
+
   it('returns 400 when If-Match header is missing', async () => {
     const { token } = await setupUserWithHousehold()
     const created = await createTransaction(token)

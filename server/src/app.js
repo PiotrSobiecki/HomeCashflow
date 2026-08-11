@@ -709,17 +709,38 @@ app.patch("/api/transactions/:id", authMiddleware, async (c) => {
   ) {
     return c.json({ error: "txnDate must be YYYY-MM-DD" }, 400);
   }
+  if (body.isFixed !== undefined && typeof body.isFixed !== "boolean") {
+    return c.json({ error: "isFixed must be a boolean" }, 400);
+  }
+  const hasCategory = Object.prototype.hasOwnProperty.call(body, "category");
+  if (
+    hasCategory &&
+    body.category !== null &&
+    (typeof body.category !== "string" || !body.category.trim())
+  ) {
+    return c.json({ error: "category must be a non-empty string or null" }, 400);
+  }
   const nameEnc =
     nextName !== null ? await encryptField(nextName, rawKey) : row.name;
   const amountEnc =
     nextAmount !== null ? await encryptField(nextAmount, rawKey) : row.amount;
   const txnDateVal = nextTxnDate !== null ? nextTxnDate : row.txn_date;
+  const isFixedVal = body.isFixed !== undefined ? body.isFixed : row.is_fixed;
+  // Kategoria dotyczy tylko wydatków; wydatek stały nie ma kategorii
+  const categoryVal =
+    row.kind === "expense" && hasCategory
+      ? isFixedVal
+        ? null
+        : body.category
+      : row.category;
 
   const [updated] = await sql`
     UPDATE transactions
     SET name = ${nameEnc},
         amount = ${amountEnc},
         txn_date = ${txnDateVal},
+        is_fixed = ${isFixedVal},
+        category = ${categoryVal},
         updated_at = NOW()
     WHERE id = ${id}
     RETURNING id, kind, txn_date, year, month, is_fixed, category, updated_at
@@ -737,6 +758,8 @@ app.patch("/api/transactions/:id", authMiddleware, async (c) => {
       name: nameEnc,
       amount: amountEnc,
       txn_date: txnDateVal,
+      is_fixed: isFixedVal,
+      category: categoryVal,
     }),
   });
 

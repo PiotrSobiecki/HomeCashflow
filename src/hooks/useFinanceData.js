@@ -433,7 +433,13 @@ export const useFinanceData = () => {
     }
     setSaving(true);
     const txnDate = buildTxnDate(fields.date, monthIdx);
-    const changes = { name: fields.name, amount: fields.amount, txnDate };
+    const changes = {
+      name: fields.name,
+      amount: fields.amount,
+      txnDate,
+      isFixed: !!fields.isFixed,
+      ...(kind === 'expense' ? { category: fields.isFixed ? null : (fields.category ?? null) } : {}),
+    };
     try {
       const saved = await patchTransaction(id, prevItem.updatedAt, changes);
       upsertTxnLocal(kind, monthIdx, it => it.id === id, {
