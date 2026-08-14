@@ -145,6 +145,9 @@ function getEnv(c, key) {
   let v = c?.env?.[key];
   if (typeof v === "string") v = v.trim();
   if (v !== undefined && v !== null && v !== "") return v;
+  // Na Workers `process` w ogóle nie istnieje bez nodejs_compat — bez tego strażnika
+  // brak bindingu wychodził jako ReferenceError "process is not defined" zamiast czytelnego błędu.
+  if (typeof process === "undefined") return undefined;
   let p = process.env[key];
   if (typeof p === "string") p = p.trim();
   if (p !== undefined && p !== null && p !== "") return p;
