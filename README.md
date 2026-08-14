@@ -210,10 +210,16 @@ npx wrangler deploy
 
 Sekrety wypychaj skryptem, jednym żądaniem — nie po jednym `secret put`:
 
-```powershell
-server\scripts\push-secrets.ps1                 # wartości z 1Password (secrets.tpl.json)
-server\scripts\push-secrets.ps1 -Source prompt  # pytanie o każdy klucz
+```bash
+cd server
+./scripts/push-secrets.sh              # wartości z pliku produkcyjnego repozytorium
+./scripts/push-secrets.sh <ścieżka>    # inny plik w formacie KLUCZ=wartość
+./scripts/push-secrets.sh --op         # 1Password wg secrets.tpl.json
 ```
+
+Skrypt bierze wyłącznie 12 kluczy Workera (reszta zmiennych zostaje na miejscu),
+pyta o potwierdzenie i woła wranglera przez `node` — shim `npx` gubi strumień,
+a PowerShell dokleja do niego BOM, przez co `secret bulk` widzi puste wejście.
 
 Skrypt na koniec sprawdza, czy Worker widzi komplet kluczy. Nowa wersja Workera
 nie zawsze dziedziczy sekrety po poprzedniej — po każdym `wrangler deploy` warto

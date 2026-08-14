@@ -1,0 +1,4 @@
+* text=auto
+
+# Skrypty powłoki muszą mieć LF — CRLF psuje shebang i zwraca "bad interpreter".
+*.sh text eol=lf
