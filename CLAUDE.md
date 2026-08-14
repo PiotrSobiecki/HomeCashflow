@@ -20,9 +20,9 @@ Aplikacja do zarządzania budżetem domowym ze wspólnymi kontami. Polski interf
 ## Commands
 
 ```bash
-npm run dev          # Frontend dev server (Vite)
-npm run build        # Frontend production build
-npm run preview      # Preview production build
+pnpm run dev          # Frontend dev server (Vite)
+pnpm run build        # Frontend production build
+pnpm run preview      # Preview production build
 ```
 
 ## Project Structure

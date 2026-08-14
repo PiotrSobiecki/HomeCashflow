@@ -41,7 +41,7 @@ wrangler_js=""
 for candidate in "$server_dir/node_modules/wrangler/bin/wrangler.js" "$repo_dir/node_modules/wrangler/bin/wrangler.js"; do
   [ -f "$candidate" ] && wrangler_js="$candidate" && break
 done
-[ -n "$wrangler_js" ] || { echo "Nie znalazłem wranglera w node_modules — odpal npm install w server/."; exit 1; }
+[ -n "$wrangler_js" ] || { echo "Nie znalazłem wranglera w node_modules — odpal pnpm install w server/."; exit 1; }
 [ -f "$config" ] || { echo "Brak konfiguracji Workera: $config"; exit 1; }
 
 joined="$(IFS='|'; echo "${KEYS[*]}")"
@@ -120,11 +120,11 @@ for key in "${KEYS[@]}"; do
 done
 if [ ${#still_missing[@]} -gt 0 ]; then
   echo "Nie potwierdziłem kluczy: ${still_missing[*]}"
-  echo "Zweryfikuj recznie: npx wrangler versions view $version_id --config wrangler.toml"
+  echo "Zweryfikuj recznie: pnpm exec wrangler versions view $version_id --config wrangler.toml"
 else
   echo "Wersja $version_id ma komplet ${#KEYS[@]} kluczy."
 fi
 
 echo
 echo "Ta wersja NIE obsługuje jeszcze ruchu. Żeby ją wdrożyć:"
-echo "  npx wrangler versions deploy ${version_id}@100 --config wrangler.toml --yes"
+echo "  pnpm exec wrangler versions deploy ${version_id}@100 --config wrangler.toml --yes"

@@ -89,10 +89,10 @@ aplikacje (powyzsze sekrety), a tokeny per uzytkownik trafiaja zaszyfrowane do b
 ```bash
 # terminal 1: backend
 cd server
-npm run dev
+pnpm run dev
 
 # terminal 2: frontend
-npm run dev
+pnpm run dev
 ```
 
 - Frontend: http://localhost:5173
@@ -102,7 +102,7 @@ npm run dev
 
 ```bash
 cd server
-npm test
+pnpm test
 ```
 
 ## Migracje bazy danych
@@ -125,27 +125,27 @@ cd server
 # 1. Edytuj src/db/schema.js (dodaj kolumne / tabele / index itp.)
 
 # 2. Wygeneruj plik migracji SQL (powstanie w drizzle/NNNN_xxx.sql)
-npm run drizzle:dev:generate
+pnpm run drizzle:dev:generate
 
 # 3. Przejrzyj wygenerowany SQL i zaaplikuj na dev
-npm run drizzle:dev:migrate
+pnpm run drizzle:dev:migrate
 
 # 4. Zacommituj zmiany w schema.js + drizzle/
 
 # 5. Na prod (ten sam plik migracji, ma 3-sekundowy bezpiecznik)
-npm run drizzle:prod:migrate
+pnpm run drizzle:prod:migrate
 ```
 
 ### Wszystkie skroty
 
 ```bash
-npm run drizzle:dev:generate    # wygeneruj migracje z diffu schema vs dev DB
-npm run drizzle:dev:migrate     # zaaplikuj pending migracje na dev
-npm run drizzle:dev:check       # sanity check spojnosci historii migracji
-npm run drizzle:dev:studio      # GUI do przegladania devowej bazy
+pnpm run drizzle:dev:generate    # wygeneruj migracje z diffu schema vs dev DB
+pnpm run drizzle:dev:migrate     # zaaplikuj pending migracje na dev
+pnpm run drizzle:dev:check       # sanity check spojnosci historii migracji
+pnpm run drizzle:dev:studio      # GUI do przegladania devowej bazy
 
-npm run drizzle:prod:generate   # zwykle niepotrzebne — generuj na devie i commituj
-npm run drizzle:prod:migrate    # aplikuj pending migracje na prod
+pnpm run drizzle:prod:generate   # zwykle niepotrzebne — generuj na devie i commituj
+pnpm run drizzle:prod:migrate    # aplikuj pending migracje na prod
 ```
 
 ### Migracja danych z legacy JSON do tabel relacyjnych
@@ -167,11 +167,11 @@ node scripts/run-migration-002.js --dry-run                 # dev
 node scripts/run-migration-002.js --production --dry-run    # prod
 
 # Wlasciwa migracja danych
-npm run migrate:relational                                  # dev
+pnpm run migrate:relational                                  # dev
 node scripts/run-migration-002.js --production              # prod
 
 # Weryfikacja: sumy z odszyfrowanego JSON-a vs sumy w nowych tabelach
-npm run migrate:relational:verify                           # dev
+pnpm run migrate:relational:verify                           # dev
 node scripts/verify-migration-002.js --production           # prod
 
 # Opcjonalnie: migracja jednego konkretnego household
@@ -195,13 +195,16 @@ tylko archiwalne.
 Z katalogu repozytorium:
 
 ```bash
-npm run deploy:server   # backend  (wrangler deploy --config server/wrangler.toml)
-npm run deploy          # frontend (build + wrangler deploy --config wrangler.jsonc)
+pnpm run deploy:server   # backend  (wrangler deploy --config server/wrangler.toml)
+pnpm run deploy          # frontend (build + wrangler deploy --config wrangler.jsonc)
 ```
 
 Konfiguracja **musi być podana jawnie**. Samo `wrangler deploy` — nawet z katalogu
 `server/` — bierze `wrangler.jsonc` z katalogu repozytorium i wypycha frontend.
-Dlatego backend ma własne polecenie; w `server/` działa też `npm run deploy`.
+Dlatego backend ma własne polecenie; w `server/` działa też `pnpm run deploy`.
+
+Zawsze `pnpm run deploy`, nigdy `pnpm deploy` — to drugie jest wbudowaną komendą
+pnpm (kopiowaniem paczki z workspace'u), nie naszym skryptem.
 
 `SMARTTHINGS_REDIRECT_URI` nie jest sekretem — jest ustawiany w `[vars]` w `server/wrangler.toml`.
 
@@ -209,7 +212,7 @@ Dlatego backend ma własne polecenie; w `server/` działa też `npm run deploy`.
 
 ```bash
 cd server
-npm run secrets:push                        # wartości z pliku produkcyjnego repozytorium
+pnpm run secrets:push                        # wartości z pliku produkcyjnego repozytorium
 bash scripts/push-secrets.sh <ścieżka>      # inny plik w formacie KLUCZ=wartość
 bash scripts/push-secrets.sh --op           # 1Password wg secrets.tpl.json
 ```
@@ -223,7 +226,7 @@ polecenie `wrangler versions deploy <id>@100`, którym się ją wdraża. Zwykłe
 `secret bulk` odpada, gdy wdrożona wersja nie jest ostatnią wgraną (czyli po każdym
 rollbacku) — Cloudflare odrzuca to błędem 10215.
 
-Po wdrożeniu sprawdź `npx wrangler versions secret list --config wrangler.toml`:
+Po wdrożeniu sprawdź `pnpm exec wrangler versions secret list --config wrangler.toml`:
 brak choćby jednego sekretu to 500 na każdym zapytaniu. Nowa wersja nie zawsze
 dziedziczy sekrety po poprzedniej.
 
@@ -236,7 +239,7 @@ z urzadzen smart home (`device_energy_snapshots`).
 Frontend serwuje Worker `homecashflow` (konfiguracja w `wrangler.jsonc`), nie Pages.
 
 ```bash
-npm run deploy          # = vite build && wrangler deploy --config wrangler.jsonc
+pnpm run deploy          # = vite build && wrangler deploy --config wrangler.jsonc
 ```
 
 `VITE_API_URL` ustaw w `.env.production` na publiczny adres backendu. Bez niego
