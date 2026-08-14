@@ -3,6 +3,7 @@ node_modules/
 .pnpm-migration-backup/
 # Build output
 dist/
+.wrangler/
 
 # Environment
 .env
@@ -12,6 +13,11 @@ server/.env.production
 # Wrangler local secrets (gdyby kiedyś użyć `wrangler dev`; projekt zwykle czyta .env.local)
 .dev.vars
 server/.dev.vars
+
+# Lokalne pliki z wartościami sekretów (szablon z referencjami op:// zostaje)
+server/secrets.json
+server/secrets.*.json
+!server/secrets.tpl.json
 
 # IDE
 .vscode/

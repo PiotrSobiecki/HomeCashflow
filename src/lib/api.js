@@ -1,4 +1,7 @@
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+// Build produkcyjny bez VITE_API_URL wskazywał na localhost i cała aplikacja była martwa.
+const API_URL =
+  import.meta.env.VITE_API_URL ||
+  (import.meta.env.PROD ? 'https://api.homecashflow.org' : 'http://localhost:3000');
 
 export const getApiUrl = () => API_URL;
 

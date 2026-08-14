@@ -1,0 +1,10 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "homecashflow",
+  "compatibility_date": "2026-08-14",
+  "assets": {
+    "directory": "./dist",
+    // SPA: /dashboard i inne trasy klienta muszą zwracać index.html
+    "not_found_handling": "single-page-application"
+  }
+}
