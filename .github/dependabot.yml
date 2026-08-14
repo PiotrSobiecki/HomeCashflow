@@ -5,8 +5,8 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
-      day: "wednesday"
-      time: "07:00"
+      day: "friday"
+      time: "14:00"
       timezone: "Europe/Warsaw"
     open-pull-requests-limit: 3
     labels:
@@ -28,8 +28,8 @@ updates:
     directory: "/server"
     schedule:
       interval: "weekly"
-      day: "wednesday"
-      time: "07:30"
+      day: "friday"
+      time: "14:00"
       timezone: "Europe/Warsaw"
     open-pull-requests-limit: 3
     labels:
@@ -50,6 +50,8 @@ updates:
     directory: "/"
     schedule:
       interval: "monthly"
+      time: "14:00"
+      timezone: "Europe/Warsaw"
     labels:
       - "dependencies"
     commit-message:
