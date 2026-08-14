@@ -10,27 +10,30 @@ Zawsze `secret bulk`, nigdy dwanaście razy `secret put`: pojedyncze puty tworz�
 kolejne wersje, a pierwsza z nich zostaje z jednym kluczem i produkcja leży,
 dopóki nie wklepiesz reszty.
 
-Skrypt nie skanuje katalogów i nie czyta niczego sam z siebie — bierze dokładnie
-to źródło, które wskażesz. Wartości trafiają do wranglera strumieniem: nie są
-wypisywane ani zapisywane na dysk. W trybie file przepuszcza tylko klucze z listy
-poniżej, więc plik deweloperski nie wywiezie na produkcję przypadkowych zmiennych.
+Wartości idą do wranglera strumieniem — nie są wypisywane ani zapisywane na dysk.
+Ze wskazanego pliku brane są wyłącznie klucze z listy $Keys, więc reszta zmiennych
+(VITE_*, adresy testowej bazy) nigdzie nie wyjeżdża.
 
 .EXAMPLE
 .\push-secrets.ps1
+Wartości z pliku produkcyjnego w katalogu repozytorium.
+
+.EXAMPLE
+.\push-secrets.ps1 -Path D:\tmp\wartosci.json
+Inny plik: JSON albo KEY=VALUE.
+
+.EXAMPLE
+.\push-secrets.ps1 -Source op
 Wartości z 1Password przez `op inject` na podstawie secrets.tpl.json.
 
 .EXAMPLE
-.\push-secrets.ps1 -Source file -Path D:\tmp\wartosci.json
-Twój plik: JSON albo KEY=VALUE. Skasuj go po wszystkim.
-
-.EXAMPLE
 .\push-secrets.ps1 -Source prompt
-Pyta o każdy klucz po kolei, nic nie dotyka dysku.
+Pyta o każdy klucz po kolei, nic nie czyta z dysku.
 #>
 [CmdletBinding()]
 param(
-  [ValidateSet('op', 'file', 'prompt')]
-  [string]$Source = 'op',
+  [ValidateSet('file', 'op', 'prompt')]
+  [string]$Source = 'file',
   [string]$Path,
   [string]$Template = (Join-Path $PSScriptRoot '..\secrets.tpl.json'),
   [switch]$Yes
@@ -58,8 +61,22 @@ $Keys = @(
   'WEATHER_GOOGLE_API_KEY'
 )
 
+# Wrangler wolamy przez node, nie przez npx: shim .cmd gubi strumien wejsciowy
+# w PowerShellu i `secret bulk` dostaje puste wejscie ("No content found in file").
+$WranglerJs = @(
+  (Join-Path $PSScriptRoot '..\node_modules\wrangler\bin\wrangler.js'),
+  (Join-Path $PSScriptRoot '..\..\node_modules\wrangler\bin\wrangler.js')
+) | Where-Object { Test-Path $_ } | Select-Object -First 1
+if (-not $WranglerJs) { throw "Nie znalazlem wranglera w node_modules - odpal `npm install` w server\." }
+
+function Invoke-Wrangler {
+  param([string[]]$Arguments, [string]$StdIn)
+  if ($null -ne $StdIn) { return ($StdIn | & node $WranglerJs @Arguments) }
+  return (& node $WranglerJs @Arguments)
+}
+
 function Get-WorkerSecretNames {
-  $raw = (npx wrangler secret list --config $Config) -join "`n"
+  $raw = (Invoke-Wrangler -Arguments @('secret', 'list', '--config', $Config)) -join "`n"
   $start = $raw.IndexOf('[')
   if ($start -lt 0) { return @() }
   $parsed = $raw.Substring($start) | ConvertFrom-Json
@@ -75,16 +92,16 @@ function Read-ValuesFromFile([string]$FilePath) {
     foreach ($key in $Keys) {
       if ($present -contains $key) { $picked[$key] = [string]$obj.$key }
     }
+    return $picked
   }
-  else {
-    foreach ($line in ($text -split "`r?`n")) {
-      if ($line -match '^\s*#') { continue }
-      $eq = $line.IndexOf('=')
-      if ($eq -lt 1) { continue }
-      $key = $line.Substring(0, $eq).Trim()
-      if ($Keys -notcontains $key) { continue }
-      $picked[$key] = $line.Substring($eq + 1).Trim().Trim('"').Trim("'")
-    }
+  foreach ($line in ($text -split "`r?`n")) {
+    if ($line -match '^\s*#') { continue }
+    $entry = $line -replace '^\s*export\s+', ''
+    $eq = $entry.IndexOf('=')
+    if ($eq -lt 1) { continue }
+    $key = $entry.Substring(0, $eq).Trim()
+    if ($Keys -notcontains $key) { continue }
+    $picked[$key] = $entry.Substring($eq + 1).Trim().Trim('"').Trim("'")
   }
   return $picked
 }
@@ -100,16 +117,25 @@ function Send-Values($Values) {
     Write-Host "`nTo idzie na PRODUKCJE (homecashflow-api). Upewnij sie, ze to wartosci produkcyjne,"
     Write-Host "a nie deweloperskie - inaczej aplikacja zacznie pisac do innej bazy."
     $answer = Read-Host "Wpisz TAK, zeby kontynuowac"
-    if ($answer -ne 'TAK') { throw "Przerwane - nic nie zostalo wypchniete." }
+    if ($answer -cne 'TAK') { throw "Przerwane - nic nie zostalo wypchniete." }
   }
-  ($Values | ConvertTo-Json -Compress) | npx wrangler secret bulk --config $Config
+  $json = $Values | ConvertTo-Json -Compress
+  Invoke-Wrangler -Arguments @('secret', 'bulk', '--config', $Config) -StdIn $json
   if ($LASTEXITCODE -ne 0) { throw "secret bulk zwrocil blad ($LASTEXITCODE) - sekrety NIE zostaly wypchniete." }
 }
 
-Write-Host "Worker: homecashflow-api ($Config)"
+Write-Host "Worker: homecashflow-api"
 Write-Host "Zrodlo wartosci: $Source`n"
 
 switch ($Source) {
+  'file' {
+    if (-not $Path) { $Path = Join-Path $PSScriptRoot '..\..\.env.production' }
+    if (-not (Test-Path $Path)) {
+      throw "Nie ma pliku $Path - wskaz go przez -Path albo uzyj -Source prompt."
+    }
+    Write-Host "Plik: $Path"
+    Send-Values (Read-ValuesFromFile $Path)
+  }
   'op' {
     if (-not (Get-Command op -ErrorAction SilentlyContinue)) {
       throw "Nie znalazlem 1Password CLI (op). Uzyj -Source file albo -Source prompt."
@@ -117,14 +143,14 @@ switch ($Source) {
     if (-not (Test-Path $Template)) {
       throw "Brak szablonu $Template - ma zawierac wylacznie referencje op://, bez wartosci."
     }
-    op inject -i $Template | npx wrangler secret bulk --config $Config
-    if ($LASTEXITCODE -ne 0) { throw "secret bulk zwrocil blad ($LASTEXITCODE) - sekrety NIE zostaly wypchniete." }
-  }
-  'file' {
-    if (-not $Path) { throw "Tryb file wymaga -Path do pliku z wartosciami." }
-    if (-not (Test-Path $Path)) { throw "Nie ma pliku: $Path" }
-    Send-Values (Read-ValuesFromFile $Path)
-    Write-Host "`nSkasuj teraz $Path - trzyma wartosci otwartym tekstem."
+    # op inject rozwiazuje referencje op:// na stdout - wartosci zostaja w pamieci
+    $injected = ((op inject -i $Template) | Out-String) | ConvertFrom-Json
+    $present = $injected.PSObject.Properties.Name
+    $values = [ordered]@{}
+    foreach ($key in $Keys) {
+      if ($present -contains $key) { $values[$key] = [string]$injected.$key }
+    }
+    Send-Values $values
   }
   'prompt' {
     $values = [ordered]@{}
