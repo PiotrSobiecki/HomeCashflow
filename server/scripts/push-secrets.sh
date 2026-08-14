@@ -98,25 +98,33 @@ if [ "${SKIP_CONFIRM:-}" != "1" ]; then
   [ "$answer" = "TAK" ] || { echo "Przerwane — nic nie zostało wypchnięte."; exit 1; }
 fi
 
-# Wrangler czyta stdin: najpierw próbuje JSON, potem formatu KLUCZ=wartość.
-# Wołamy go przez node, bo shim npx gubi strumień na Windows.
-printf '%s\n' "$payload" | node "$wrangler_js" secret bulk --config "$config"
+# Sekrety trafiają do NOWEJ wersji Workera, która nie obsługuje jeszcze ruchu.
+# Zwykłe `secret bulk` odbija się o błąd 10215, gdy wdrożona wersja nie jest ostatnią
+# (tak jest po każdym rollbacku). Wrangler czyta stdin: JSON albo KLUCZ=wartość.
+out="$(printf '%s\n' "$payload" | node "$wrangler_js" versions secret bulk --config "$config" --message "Komplet sekretow Workera" 2>&1)"
+printf '%s\n' "$out"
 
-echo
-echo "Sprawdzam, co Worker widzi po wypchnięciu..."
-live="$(node "$wrangler_js" secret list --config "$config" | sed -n '/\[/,$p')"
-still_missing=()
-for key in "${KEYS[@]}"; do
-  printf '%s' "$live" | grep -q "\"$key\"" || still_missing+=("$key")
-done
-
-echo "Kluczy na Workerze: $(( ${#KEYS[@]} - ${#still_missing[@]} )) / ${#KEYS[@]}"
-if [ ${#still_missing[@]} -gt 0 ]; then
+version_id="$(printf '%s' "$out" | grep -oiE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | tail -1)"
+if [ -z "$version_id" ]; then
   echo
-  echo "BRAKUJE: ${still_missing[*]}"
-  echo "NIE wdrażaj kodu, dopóki lista nie jest kompletna — wyjdzie 500 na każdym zapytaniu."
+  echo "Nie widzę identyfikatora nowej wersji — sekrety mogły nie wejść. Sprawdź komunikat powyżej."
   exit 1
 fi
 
 echo
-echo "Komplet. Następny krok: npx wrangler deploy (z katalogu server/)."
+echo "Sprawdzam sekrety w nowej wersji..."
+live="$(node "$wrangler_js" versions secret list --config "$config" --version-id "$version_id" 2>/dev/null || true)"
+still_missing=()
+for key in "${KEYS[@]}"; do
+  printf '%s' "$live" | grep -q "$key" || still_missing+=("$key")
+done
+if [ ${#still_missing[@]} -gt 0 ]; then
+  echo "Nie potwierdziłem kluczy: ${still_missing[*]}"
+  echo "Zweryfikuj recznie: npx wrangler versions view $version_id --config wrangler.toml"
+else
+  echo "Wersja $version_id ma komplet ${#KEYS[@]} kluczy."
+fi
+
+echo
+echo "Ta wersja NIE obsługuje jeszcze ruchu. Żeby ją wdrożyć:"
+echo "  npx wrangler versions deploy ${version_id}@100 --config wrangler.toml --yes"

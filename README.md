@@ -192,38 +192,40 @@ tylko archiwalne.
 
 ### Backend (Workers)
 
+Z katalogu repozytorium:
+
 ```bash
-cd server
-npx wrangler login
-npx wrangler secret put DATABASE_URL
-npx wrangler secret put NEXTAUTH_SECRET
-npx wrangler secret put GOOGLE_CLIENT_ID
-npx wrangler secret put GOOGLE_CLIENT_SECRET
-npx wrangler secret put RESEND_API_KEY
-npx wrangler secret put FINANCE_DATA_KEY
-npx wrangler secret put SMARTTHINGS_CLIENT_ID       # opcjonalnie (integracja SmartThings)
-npx wrangler secret put SMARTTHINGS_CLIENT_SECRET   # opcjonalnie (integracja SmartThings)
-npx wrangler deploy
+npm run deploy:server   # backend  (wrangler deploy --config server/wrangler.toml)
+npm run deploy          # frontend (build + wrangler deploy --config wrangler.jsonc)
 ```
+
+Konfiguracja **musi być podana jawnie**. Samo `wrangler deploy` — nawet z katalogu
+`server/` — bierze `wrangler.jsonc` z katalogu repozytorium i wypycha frontend.
+Dlatego backend ma własne polecenie; w `server/` działa też `npm run deploy`.
 
 `SMARTTHINGS_REDIRECT_URI` nie jest sekretem — jest ustawiany w `[vars]` w `server/wrangler.toml`.
 
-Sekrety wypychaj skryptem, jednym żądaniem — nie po jednym `secret put`:
+#### Sekrety
 
 ```bash
 cd server
-./scripts/push-secrets.sh              # wartości z pliku produkcyjnego repozytorium
-./scripts/push-secrets.sh <ścieżka>    # inny plik w formacie KLUCZ=wartość
-./scripts/push-secrets.sh --op         # 1Password wg secrets.tpl.json
+npm run secrets:push                        # wartości z pliku produkcyjnego repozytorium
+bash scripts/push-secrets.sh <ścieżka>      # inny plik w formacie KLUCZ=wartość
+bash scripts/push-secrets.sh --op           # 1Password wg secrets.tpl.json
 ```
 
 Skrypt bierze wyłącznie 12 kluczy Workera (reszta zmiennych zostaje na miejscu),
 pyta o potwierdzenie i woła wranglera przez `node` — shim `npx` gubi strumień,
 a PowerShell dokleja do niego BOM, przez co `secret bulk` widzi puste wejście.
 
-Skrypt na koniec sprawdza, czy Worker widzi komplet kluczy. Nowa wersja Workera
-nie zawsze dziedziczy sekrety po poprzedniej — po każdym `wrangler deploy` warto
-zerknąć na `npx wrangler secret list`, bo brak sekretu to 500 na każdym zapytaniu.
+Sekrety lądują w **nowej wersji**, która nie obsługuje jeszcze ruchu; skrypt wypisze
+polecenie `wrangler versions deploy <id>@100`, którym się ją wdraża. Zwykłe
+`secret bulk` odpada, gdy wdrożona wersja nie jest ostatnią wgraną (czyli po każdym
+rollbacku) — Cloudflare odrzuca to błędem 10215.
+
+Po wdrożeniu sprawdź `npx wrangler versions secret list --config wrangler.toml`:
+brak choćby jednego sekretu to 500 na każdym zapytaniu. Nowa wersja nie zawsze
+dziedziczy sekrety po poprzedniej.
 
 Backend ma tez cron (konfiguracja w `server/wrangler.toml`) uruchamiany co 5 minut:
 obsluguje wylaczniki czasowe urzadzen IR oraz co 15 minut zbiera pomiary energii
@@ -234,8 +236,7 @@ z urzadzen smart home (`device_energy_snapshots`).
 Frontend serwuje Worker `homecashflow` (konfiguracja w `wrangler.jsonc`), nie Pages.
 
 ```bash
-npm run build
-npx wrangler deploy
+npm run deploy          # = vite build && wrangler deploy --config wrangler.jsonc
 ```
 
 `VITE_API_URL` ustaw w `.env.production` na publiczny adres backendu. Bez niego
