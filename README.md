@@ -192,14 +192,16 @@ tylko archiwalne.
 
 ### Backend (Workers)
 
+Z katalogu repozytorium:
+
 ```bash
-cd server
-npm run deploy          # = wrangler deploy --config wrangler.toml
+npm run deploy:server   # backend  (wrangler deploy --config server/wrangler.toml)
+npm run deploy          # frontend (build + wrangler deploy --config wrangler.jsonc)
 ```
 
 Konfiguracja **musi być podana jawnie**. Samo `wrangler deploy` — nawet z katalogu
 `server/` — bierze `wrangler.jsonc` z katalogu repozytorium i wypycha frontend.
-Z katalogu repozytorium backend wdrożysz przez `npm run deploy:api`.
+Dlatego backend ma własne polecenie; w `server/` działa też `npm run deploy`.
 
 `SMARTTHINGS_REDIRECT_URI` nie jest sekretem — jest ustawiany w `[vars]` w `server/wrangler.toml`.
 
@@ -234,7 +236,7 @@ z urzadzen smart home (`device_energy_snapshots`).
 Frontend serwuje Worker `homecashflow` (konfiguracja w `wrangler.jsonc`), nie Pages.
 
 ```bash
-npm run deploy:web      # = vite build && wrangler deploy --config wrangler.jsonc
+npm run deploy          # = vite build && wrangler deploy --config wrangler.jsonc
 ```
 
 `VITE_API_URL` ustaw w `.env.production` na publiczny adres backendu. Bez niego
