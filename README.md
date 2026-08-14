@@ -212,12 +212,17 @@ Backend ma tez cron (konfiguracja w `server/wrangler.toml`) uruchamiany co 5 min
 obsluguje wylaczniki czasowe urzadzen IR oraz co 15 minut zbiera pomiary energii
 z urzadzen smart home (`device_energy_snapshots`).
 
-### Frontend (Pages)
+### Frontend (Worker ze statycznymi assetami)
 
-1. Cloudflare Dashboard -> Workers & Pages -> Create -> Pages -> Connect to Git
-2. Repo: `PiotrSobiecki/HomeCashflow`
-3. Build command: `npm run build`, output: `dist/`
-4. Ustaw `VITE_API_URL` na publiczny adres backendu
+Frontend serwuje Worker `homecashflow` (konfiguracja w `wrangler.jsonc`), nie Pages.
+
+```bash
+npm run build
+npx wrangler deploy
+```
+
+`VITE_API_URL` ustaw w `.env.production` na publiczny adres backendu. Bez niego
+build produkcyjny wpada na fallback `https://api.homecashflow.org` (`src/lib/api.js`).
 
 ### Google OAuth
 
