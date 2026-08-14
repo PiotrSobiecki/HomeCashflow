@@ -14,6 +14,11 @@ server/.env.production
 .dev.vars
 server/.dev.vars
 
+# Lokalne pliki z wartościami sekretów (szablon z referencjami op:// zostaje)
+server/secrets.json
+server/secrets.*.json
+!server/secrets.tpl.json
+
 # IDE
 .vscode/
 .idea/

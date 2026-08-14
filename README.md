@@ -208,6 +208,17 @@ npx wrangler deploy
 
 `SMARTTHINGS_REDIRECT_URI` nie jest sekretem — jest ustawiany w `[vars]` w `server/wrangler.toml`.
 
+Sekrety wypychaj skryptem, jednym żądaniem — nie po jednym `secret put`:
+
+```powershell
+server\scripts\push-secrets.ps1                 # wartości z 1Password (secrets.tpl.json)
+server\scripts\push-secrets.ps1 -Source prompt  # pytanie o każdy klucz
+```
+
+Skrypt na koniec sprawdza, czy Worker widzi komplet kluczy. Nowa wersja Workera
+nie zawsze dziedziczy sekrety po poprzedniej — po każdym `wrangler deploy` warto
+zerknąć na `npx wrangler secret list`, bo brak sekretu to 500 na każdym zapytaniu.
+
 Backend ma tez cron (konfiguracja w `server/wrangler.toml`) uruchamiany co 5 minut:
 obsluguje wylaczniki czasowe urzadzen IR oraz co 15 minut zbiera pomiary energii
 z urzadzen smart home (`device_energy_snapshots`).
