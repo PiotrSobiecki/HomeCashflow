@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend
+        run: pnpm run build
+
+      - name: Test frontend
+        run: pnpm test
+
+  # Dependabot: patch/minor mergujemy sami po zielonym CI, majory zostaja do
+  # recznego przejrzenia. Repo nie ma branch protection, wiec `gh pr merge --auto`
+  # merguje natychmiast, nie czekajac na testy — stad merge jako osobny job
+  # z `needs: verify`.
+  #
+  # Testy server/ nie sa tu wlaczone: bija w realna baze Neon przez
+  # DATABASE_URL_TEST i wymagaja sekretu, ktorego to repo (publiczne) nie
+  # udostepnia workflowom wywolanym przez Dependabota bez jawnej konfiguracji
+  # w Settings > Secrets and variables > Dependabot. Bramka opiera sie na tym,
+  # co da sie zweryfikowac bez poswiadczen.
+  dependabot-automerge:
+    needs: verify
+    if: github.event_name == 'pull_request' && github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@v3
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Merge patch/minor
+        if: steps.metadata.outputs.update-type != 'version-update:semver-major'
+        run: gh pr merge --squash "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
