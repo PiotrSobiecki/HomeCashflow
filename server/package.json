@@ -36,8 +36,8 @@
     "@pushforge/builder": "^2.0.5",
     "drizzle-kit": "^0.31.10",
     "drizzle-orm": "^0.45.2",
-    "hono": "^4.7.0",
-    "jose": "^6.0.0"
+    "hono": "^4.13.3",
+    "jose": "^6.2.9"
   },
   "devDependencies": {
     "dotenv": "^17.0.0",
