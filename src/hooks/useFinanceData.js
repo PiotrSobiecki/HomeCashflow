@@ -386,17 +386,20 @@ export const useFinanceData = () => {
   const liveCreate = async (kind, monthIdx, fields) => {
     const tempId = `temp-${Date.now()}-${Math.random()}`;
     const txnDate = buildTxnDate(fields.date, monthIdx);
+    // Miesiąc wynika z daty wpisu — wydatek z 31.08 dodany 1 września w widoku
+    // września ma trafić do sierpnia. Backend liczy tak samo (txnDateYearMonth).
+    const targetMonth = txnDateMonthIndex(txnDate) ?? monthIdx;
     const optimistic = { id: tempId, ...fields, date: txnDate, updatedAt: null };
-    insertTxnLocal(kind, monthIdx, optimistic);
+    insertTxnLocal(kind, targetMonth, optimistic);
     setSaving(true);
     try {
       const saved = await createTransaction({
         kind, name: fields.name, amount: fields.amount, txnDate,
-        year: CURRENT_YEAR, month: monthIdx,
+        year: parseInt(txnDate.slice(0, 4), 10) || CURRENT_YEAR, month: targetMonth,
         isFixed: !!fields.isFixed,
         ...(kind === 'expense' && !fields.isFixed && fields.category ? { category: fields.category } : {}),
       });
-      upsertTxnLocal(kind, monthIdx, it => it.id === tempId, {
+      upsertTxnLocal(kind, targetMonth, it => it.id === tempId, {
         id: saved.id, name: saved.name, amount: saved.amount,
         isFixed: saved.isFixed, date: saved.txnDate, updatedAt: saved.updatedAt,
         createdBy: saved.createdBy ?? null,
@@ -404,7 +407,7 @@ export const useFinanceData = () => {
       });
     } catch (err) {
       console.error(`add ${kind} error:`, err);
-      removeTxnLocal(kind, monthIdx, it => it.id === tempId);
+      removeTxnLocal(kind, targetMonth, it => it.id === tempId);
     } finally {
       setSaving(false);
     }
@@ -442,12 +445,21 @@ export const useFinanceData = () => {
     };
     try {
       const saved = await patchTransaction(id, prevItem.updatedAt, changes);
-      upsertTxnLocal(kind, monthIdx, it => it.id === id, {
+      const savedItem = {
         id: saved.id, name: saved.name, amount: saved.amount,
         isFixed: saved.isFixed, date: saved.txnDate, updatedAt: saved.updatedAt,
         createdBy: saved.createdBy ?? null,
         ...(saved.category ? { category: saved.category } : {}),
-      });
+      };
+      // Zmiana daty na inny miesiąc przenosi wpis między kubełkami (backend
+      // przeliczył year/month z txnDate).
+      const targetMonth = txnDateMonthIndex(saved.txnDate) ?? monthIdx;
+      if (targetMonth !== monthIdx) {
+        removeTxnLocal(kind, monthIdx, it => it.id === id);
+        insertTxnLocal(kind, targetMonth, savedItem);
+      } else {
+        upsertTxnLocal(kind, monthIdx, it => it.id === id, savedItem);
+      }
     } catch (err) {
       if (err instanceof ConflictError) {
         setConflict({
@@ -653,12 +665,13 @@ export const useFinanceData = () => {
   const addIncome = (name, amount, isFixed = false, date = '') => {
     const amt = parseFloat(amount);
     if (!isLive) {
+      const bucket = txnDateMonthIndex(date) ?? selectedMonth;
       updateData(prev => ({
         ...prev,
-        activityLog: appendActivity(prev, { action: 'add', kind: 'income', month: selectedMonth, label: name, amount: amt }),
-        months: { ...prev.months, [selectedMonth]: {
-          ...prev.months[selectedMonth],
-          incomes: [...prev.months[selectedMonth].incomes, { id: Date.now(), name, amount: amt, isFixed, date }],
+        activityLog: appendActivity(prev, { action: 'add', kind: 'income', month: bucket, label: name, amount: amt }),
+        months: { ...prev.months, [bucket]: {
+          ...prev.months[bucket],
+          incomes: [...prev.months[bucket].incomes, { id: Date.now(), name, amount: amt, isFixed, date }],
         }},
       }));
       return;
@@ -712,12 +725,13 @@ export const useFinanceData = () => {
     if (!isFixed && (!category || !allowedCategories.has(category))) return;
     const storedCategory = isFixed ? null : category;
     if (!isLive) {
+      const bucket = txnDateMonthIndex(date) ?? selectedMonth;
       updateData(prev => ({
         ...prev,
-        activityLog: appendActivity(prev, { action: 'add', kind: 'expense', month: selectedMonth, label: name, amount: amt }),
-        months: { ...prev.months, [selectedMonth]: {
-          ...prev.months[selectedMonth],
-          expenses: [...prev.months[selectedMonth].expenses, { id: Date.now(), name, amount: amt, date, isFixed, ...(storedCategory ? { category: storedCategory } : {}) }],
+        activityLog: appendActivity(prev, { action: 'add', kind: 'expense', month: bucket, label: name, amount: amt }),
+        months: { ...prev.months, [bucket]: {
+          ...prev.months[bucket],
+          expenses: [...prev.months[bucket].expenses, { id: Date.now(), name, amount: amt, date, isFixed, ...(storedCategory ? { category: storedCategory } : {}) }],
         }},
       }));
       return;

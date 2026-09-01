@@ -21,11 +21,12 @@ vi.mock('./tuya/client.js', async () => {
 vi.mock('./weather.js', () => ({
   geocodeCity: vi.fn(),
   getOutdoorTemp: vi.fn(),
+  getOutdoorWeather: vi.fn(),
 }))
 
 import { app, upsertUserAndHousehold } from './app.js'
 import { getTuyaToken, sendAcCommand, getAcStatus, getDeviceStatus } from './tuya/client.js'
-import { geocodeCity, getOutdoorTemp } from './weather.js'
+import { geocodeCity, getOutdoorTemp, getOutdoorWeather } from './weather.js'
 import { runAcThermostats } from './ac-thermostat.js'
 import { decodeFinanceDataKey } from './finance-crypto.js'
 import { neon } from '@neondatabase/serverless'
@@ -109,6 +110,7 @@ beforeEach(() => {
   vi.mocked(getDeviceStatus).mockReset()
   vi.mocked(geocodeCity).mockReset()
   vi.mocked(getOutdoorTemp).mockReset()
+  vi.mocked(getOutdoorWeather).mockReset()
   // Domyślnie: stan klimy nieznany (runner używa last_action jak wcześniej).
   vi.mocked(getAcStatus).mockResolvedValue({ power: undefined })
 })
@@ -335,7 +337,7 @@ describe('GET /api/smart-devices/:id/thermostat/temperature — aktualna temp na
   }
 
   it('zwraca bieżącą temperaturę dla zapisanej lokalizacji', async () => {
-    vi.mocked(getOutdoorTemp).mockResolvedValue(19.4)
+    vi.mocked(getOutdoorWeather).mockResolvedValue({ temp: 19.4, condition: 'CLEAR' })
     const owner = await createOwnerWithCreds()
     const hh = await householdOf(owner.user.id)
     const dev = await addIrAc(hh, owner.user.id)
@@ -344,7 +346,7 @@ describe('GET /api/smart-devices/:id/thermostat/temperature — aktualna temp na
     const res = await getTemp(owner.token, dev.id)
     expect(res.status).toBe(200)
     expect((await res.json()).temp).toBe(19.4)
-    expect(vi.mocked(getOutdoorTemp)).toHaveBeenCalledWith({ lat: 51.1, lon: 17.03 })
+    expect(vi.mocked(getOutdoorWeather)).toHaveBeenCalledWith({ lat: 51.1, lon: 17.03 }, expect.anything())
   })
 
   it('zwraca 400 gdy termostat nie ma ustawionej lokalizacji', async () => {
@@ -359,7 +361,7 @@ describe('GET /api/smart-devices/:id/thermostat/temperature — aktualna temp na
   })
 
   it('zwraca 502 gdy Open-Meteo nie odpowie', async () => {
-    vi.mocked(getOutdoorTemp).mockRejectedValue(new Error('open-meteo down'))
+    vi.mocked(getOutdoorWeather).mockRejectedValue(new Error('open-meteo down'))
     const owner = await createOwnerWithCreds()
     const hh = await householdOf(owner.user.id)
     const dev = await addIrAc(hh, owner.user.id)

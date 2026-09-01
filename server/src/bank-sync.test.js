@@ -46,6 +46,16 @@ async function createConnection({ householdId, userId, aspsp = 'ING' }, accounts
   return row
 }
 
+async function insertFixedExpense({ householdId, name, amount, month, year = 2026 }) {
+  const nameEnc = await encryptField(name, rawKey)
+  const amountEnc = await encryptField(String(amount), rawKey)
+  await sql`
+    INSERT INTO transactions (household_id, kind, name, amount, txn_date, year, month, is_fixed)
+    VALUES (${householdId}, 'expense', ${nameEnc}, ${amountEnc},
+            ${`${year}-${String(month + 1).padStart(2, '0')}-01`}, ${year}, ${month}, true)
+  `
+}
+
 const bookedTx = (over = {}) => ({
   status: 'BOOK',
   credit_debit_indicator: 'DBIT',
@@ -146,6 +156,76 @@ describe('syncBankConnection', () => {
     expect(res.imported).toBe(1)
     const rows = await sql`SELECT name FROM transactions WHERE household_id = ${ctx.householdId}`
     expect(await decryptField(rows[0].name, rawKey)).toBe('Anna Testowa')
+  })
+
+  it('skips bank entries covered by a fixed item, honoring month propagation and deletions', async () => {
+    const ctx = await createUser()
+    const conn = await createConnection({ householdId: ctx.householdId, userId: ctx.user.id })
+    // Pozycja stała tylko w czerwcu (miesiąc 5) — sierpień (7) ma ją widzieć
+    // przez propagację, dokładnie jak frontend.
+    await insertFixedExpense({ householdId: ctx.householdId, name: 'Google Workspace', amount: 61, month: 5 })
+    vi.mocked(fetchAccountTransactions).mockResolvedValue({
+      transactions: [
+        bookedTx({ entry_reference: 'gw-1', creditor: { name: 'GOOGLE *WORKSPACE' }, transaction_amount: { amount: '61.38', currency: 'PLN' } }),
+        bookedTx({ entry_reference: 'zk-1' }), // Żabka 50 zł — zwykły wydatek, wchodzi
+      ],
+      continuationKey: null,
+    })
+
+    const res = await syncBankConnection(sql, rawKey, env, conn)
+    expect(res).toEqual({ imported: 1, skipped: 1, failed: 0 })
+    const rows = await sql`
+      SELECT name FROM transactions
+      WHERE household_id = ${ctx.householdId} AND source = 'bank'
+    `
+    expect(rows).toHaveLength(1)
+    expect(await decryptField(rows[0].name, rawKey)).toBe('ZABKA Z1234')
+
+    // Usunięcie stałej w sierpniu (deleted_fixed_items) wyłącza pokrycie —
+    // kolejne obciążenie Workspace ma się zaimportować.
+    await sql`
+      INSERT INTO deleted_fixed_items (household_id, year, month, kind, name)
+      VALUES (${ctx.householdId}, 2026, 7, 'expense', 'Google Workspace')
+    `
+    const [reloaded] = await sql`SELECT * FROM bank_connections WHERE id = ${conn.id}`
+    vi.mocked(fetchAccountTransactions).mockResolvedValue({
+      transactions: [
+        bookedTx({ entry_reference: 'gw-2', creditor: { name: 'GOOGLE *WORKSPACE' }, transaction_amount: { amount: '61.38', currency: 'PLN' } }),
+      ],
+      continuationKey: null,
+    })
+    const second = await syncBankConnection(sql, rawKey, env, reloaded)
+    expect(second.imported).toBe(1)
+  })
+
+  it('keeps watermarks of healthy accounts when another account fails (429)', async () => {
+    const ctx = await createUser()
+    const okUid = `acc-ok-${uniq()}`
+    const badUid = `acc-bad-${uniq()}`
+    const conn = await createConnection({ householdId: ctx.householdId, userId: ctx.user.id }, [
+      { uid: okUid, displayName: 'Konto', maskedIban: 'PL61…2874', currency: 'PLN', lastBookedDate: null },
+      { uid: badUid, displayName: 'Oszczędnościowe', maskedIban: 'PL61…9999', currency: 'PLN', lastBookedDate: null },
+    ])
+    vi.mocked(fetchAccountTransactions).mockImplementation(async (_env, uid) => {
+      if (uid === badUid) {
+        throw new EbApiError(429, { error: 'ASPSP_RATE_LIMIT_EXCEEDED' }, `/accounts/${uid}/transactions`)
+      }
+      return { transactions: [bookedTx({ entry_reference: 'ok-1' })], continuationKey: null }
+    })
+
+    const res = await syncBankConnection(sql, rawKey, env, conn)
+    expect(res).toEqual({ imported: 1, skipped: 0, failed: 1 })
+
+    const [after] = await sql`
+      SELECT accounts, status, last_sync_at, last_sync_error
+      FROM bank_connections WHERE id = ${conn.id}
+    `
+    // Udane konto zachowuje watermark, wadliwe nie; 429 nie wygasza połączenia.
+    expect(after.accounts.find((a) => a.uid === okUid).lastBookedDate).toBe('2026-08-30')
+    expect(after.accounts.find((a) => a.uid === badUid).lastBookedDate).toBe(null)
+    expect(after.status).toBe('active')
+    expect(after.last_sync_at).toBe(null)
+    expect(after.last_sync_error).toContain('EB 429')
   })
 
   it('marks the connection expired on EB 401 and records the error', async () => {

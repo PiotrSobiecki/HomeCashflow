@@ -277,6 +277,35 @@ export function isOwnTransfer(tx, ownerFullName) {
   return nameKey(tx?.creditor?.name) === owner || nameKey(tx?.debtor?.name) === owner
 }
 
+/**
+ * Czy transakcja z banku odpowiada pozycji stałej gospodarstwa (np. abonament
+ * Google Workspace wpisany jako wydatek stały)? Taki wpis pomijamy — inaczej
+ * liczyłby się w miesiącu podwójnie.
+ *
+ * Dopasowanie celowo konserwatywne (lepiej zaimportować duplikat, który można
+ * usunąć, niż zgubić prawdziwy wydatek): wszystkie tokeny nazwy pozycji stałej
+ * muszą wystąpić w tekście transakcji (kontrahent + tytuł), a kwota może się
+ * różnić o najwyżej max(2 zł, 10%) — abonamenty w walucie pływają z kursem.
+ * "Google Workspace" złapie "GOOGLE *WORKSPACE", ale "Czynsz" nie złapie
+ * przelewu do spółdzielni bez słowa "czynsz" w tytule.
+ */
+export function matchesFixedItem(tx, mapped, fixedItems) {
+  if (!Array.isArray(fixedItems) || fixedItems.length === 0) return false
+  const haystack = normalizeName(
+    `${remittanceText(tx)} ${tx?.creditor?.name || ''} ${tx?.debtor?.name || ''}`,
+  )
+  for (const item of fixedItems) {
+    if (item.kind !== mapped.kind) continue
+    const amount = Number(item.amount)
+    if (!Number.isFinite(amount) || amount <= 0) continue
+    if (Math.abs(mapped.amount - amount) > Math.max(2, amount * 0.1)) continue
+    const tokens = normalizeName(item.name).split(' ').filter(Boolean)
+    if (tokens.length === 0 || tokens.join('').length < 3) continue
+    if (tokens.every((t) => haystack.includes(t))) return true
+  }
+  return false
+}
+
 // ====== Kategoryzacja wydatków po słowach kluczowych ======
 //
 // Wartości = domyślne nazwy kategorii z frontendu (DEFAULT_BUDGET_CATEGORIES).

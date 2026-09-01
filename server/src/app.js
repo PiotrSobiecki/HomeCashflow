@@ -606,6 +606,15 @@ function validateTransactionInput(body) {
   return null;
 }
 
+// Rok/miesiąc wpisu wynikają z txn_date — klientowe year/month bywały miesiącem
+// wybranym w UI (wydatek z datą 31.08 dodany 1 września zostawał we wrześniu).
+function txnDateYearMonth(txnDate) {
+  return {
+    year: Number(txnDate.slice(0, 4)),
+    month: Number(txnDate.slice(5, 7)) - 1,
+  };
+}
+
 app.post("/api/transactions", authMiddleware, async (c) => {
   const user = c.get("user");
   const sql = getDb(c);
@@ -627,13 +636,14 @@ app.post("/api/transactions", authMiddleware, async (c) => {
   const rawKey = getFinanceDataKey(c);
   const nameEnc = await encryptField(body.name, rawKey);
   const amountEnc = await encryptField(body.amount, rawKey);
+  const { year, month } = txnDateYearMonth(body.txnDate);
 
   const [row] = await sql`
     INSERT INTO transactions
       (household_id, kind, name, amount, txn_date, year, month, is_fixed, category, created_by)
     VALUES
       (${membership.household_id}, ${body.kind}, ${nameEnc}, ${amountEnc},
-       ${body.txnDate}, ${body.year}, ${body.month}, ${body.isFixed},
+       ${body.txnDate}, ${year}, ${month}, ${body.isFixed},
        ${body.category ?? null}, ${user.id})
     RETURNING id, updated_at
   `;
@@ -651,8 +661,8 @@ app.post("/api/transactions", authMiddleware, async (c) => {
       name: nameEnc,
       amount: amountEnc,
       txn_date: body.txnDate,
-      year: body.year,
-      month: body.month,
+      year,
+      month,
       is_fixed: body.isFixed,
       category: body.category ?? null,
       created_by: user.id,
@@ -666,8 +676,8 @@ app.post("/api/transactions", authMiddleware, async (c) => {
       name: body.name,
       amount: body.amount,
       txnDate: body.txnDate,
-      year: body.year,
-      month: body.month,
+      year,
+      month,
       isFixed: body.isFixed,
       category: body.category ?? null,
       createdBy: user.id,
@@ -730,6 +740,10 @@ app.patch("/api/transactions/:id", authMiddleware, async (c) => {
   const amountEnc =
     nextAmount !== null ? await encryptField(nextAmount, rawKey) : row.amount;
   const txnDateVal = nextTxnDate !== null ? nextTxnDate : row.txn_date;
+  const { year: yearVal, month: monthVal } =
+    nextTxnDate !== null
+      ? txnDateYearMonth(nextTxnDate)
+      : { year: row.year, month: row.month };
   const isFixedVal = body.isFixed !== undefined ? body.isFixed : row.is_fixed;
   // Kategoria dotyczy tylko wydatków; wydatek stały nie ma kategorii
   const categoryVal =
@@ -744,6 +758,8 @@ app.patch("/api/transactions/:id", authMiddleware, async (c) => {
     SET name = ${nameEnc},
         amount = ${amountEnc},
         txn_date = ${txnDateVal},
+        year = ${yearVal},
+        month = ${monthVal},
         is_fixed = ${isFixedVal},
         category = ${categoryVal},
         updated_at = NOW()
@@ -763,6 +779,8 @@ app.patch("/api/transactions/:id", authMiddleware, async (c) => {
       name: nameEnc,
       amount: amountEnc,
       txn_date: txnDateVal,
+      year: yearVal,
+      month: monthVal,
       is_fixed: isFixedVal,
       category: categoryVal,
     }),
@@ -3277,7 +3295,7 @@ app.get("/api/smart-devices/:id/thermostat/temperature", authMiddleware, async (
   try {
     const w = await getOutdoorWeather(
       { lat: Number(t.lat), lon: Number(t.lon) },
-      { apiKey: c.env.WEATHER_GOOGLE_API_KEY },
+      { apiKey: getEnv(c, "WEATHER_GOOGLE_API_KEY") },
     );
     return c.json({ temp: w?.temp ?? null, condition: w?.condition ?? null });
   } catch (err) {

@@ -61,6 +61,15 @@ describe('POST /api/transactions', () => {
     expect(typeof body.updatedAt).toBe('string')
   })
 
+  it('derives year/month from txnDate, ignoring client-sent month', async () => {
+    const { token } = await setupUserWithHousehold()
+    // 1 września user w widoku września (month=8) dodaje wydatek z datą 31.08 —
+    // wpis ma trafić do sierpnia.
+    const created = await createTransaction(token, { txnDate: '2026-08-31', year: 2026, month: 8 })
+    expect(created.month).toBe(7)
+    expect(created.year).toBe(2026)
+  })
+
   it('returns 401 without auth', async () => {
     const res = await app.request('/api/transactions', {
       method: 'POST',
@@ -124,6 +133,27 @@ describe('PATCH /api/transactions/:id', () => {
     expect(body.name).toBe('Dinner')
     expect(body.amount).toBe(99.99)
     expect(body.updatedAt).not.toBe(created.updatedAt)
+  })
+
+  it('recomputes year/month when txnDate moves to another month', async () => {
+    const { token } = await setupUserWithHousehold()
+    const created = await createTransaction(token) // 2026-05-16 → month 4
+
+    await new Promise(r => setTimeout(r, 50))
+
+    const res = await app.request(`/api/transactions/${created.id}`, {
+      method: 'PATCH',
+      headers: {
+        cookie: `token=${token}`,
+        'Content-Type': 'application/json',
+        'If-Match': created.updatedAt,
+      },
+      body: JSON.stringify({ txnDate: '2026-06-02' }),
+    })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.month).toBe(5)
+    expect(body.year).toBe(2026)
   })
 
   it('updates category of an existing expense', async () => {

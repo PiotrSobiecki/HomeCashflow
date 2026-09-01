@@ -29,6 +29,18 @@ function consumeCallbackFlash() {
   return bank
 }
 
+// Techniczny last_sync_error → komunikat dla człowieka. 429 to wyczerpany
+// dobowy limit PSD2 (4 pobrania/dobę per konto), nie awaria.
+function syncErrorMessage(conn) {
+  const err = conn.lastSyncError || ''
+  if (!err) return null
+  if (err.includes('429') || err.includes('RATE_LIMIT')) {
+    return 'Dzienny limit zapytań do banku wyczerpany (PSD2: 4 pobrania na dobę) — synchronizacja uda się jutro. Ręczne „Synchronizuj teraz" też zużywa ten limit.'
+  }
+  if (conn.status !== 'active') return null // badge „Wygasło" już to komunikuje
+  return `Błąd ostatniej synchronizacji: ${err.slice(0, 160)}`
+}
+
 function formatSyncTime(iso) {
   if (!iso) return 'nigdy'
   try {
@@ -135,7 +147,8 @@ export const BankIntegration = ({ isOwner, onAfterSync }) => {
       {connections.length > 0 && (
         <div className="space-y-2 mb-4">
           {connections.map((conn) => (
-            <div key={conn.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 p-3 bg-slate-800/60 border border-slate-700/60 rounded-xl text-sm">
+            <div key={conn.id} className="p-3 bg-slate-800/60 border border-slate-700/60 rounded-xl text-sm">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
               <span className="font-medium text-white">{conn.aspspName}</span>
               <span className="text-slate-400">{conn.userName}</span>
               {conn.accounts.map((a, i) => (
@@ -171,6 +184,12 @@ export const BankIntegration = ({ isOwner, onAfterSync }) => {
                   </button>
                 )
               )}
+            </div>
+            {syncErrorMessage(conn) && (
+              <div className="mt-2 px-2.5 py-1.5 bg-amber-500/10 border border-amber-500/30 rounded-lg text-xs text-amber-300">
+                {syncErrorMessage(conn)}
+              </div>
+            )}
             </div>
           ))}
         </div>
