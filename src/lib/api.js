@@ -264,6 +264,50 @@ export const disconnectSmartThings = async () => {
   return true;
 };
 
+// ===== Integracja bankowa (Enable Banking) =====
+
+export const fetchBankStatus = async () => {
+  const res = await fetch(`${API_URL}/api/bank/status`, {
+    method: 'GET',
+    credentials: 'include',
+    headers: { Accept: 'application/json' },
+  });
+  if (!res.ok) {
+    const err = new Error(`GET /api/bank/status: ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
+  return res.json();
+};
+
+/** Redirect do autoryzacji w banku (domyślnie ING/PL). */
+export const connectBank = (aspsp = 'ING', country = 'PL') => {
+  window.location.href = `${API_URL}/api/bank/connect?aspsp=${encodeURIComponent(aspsp)}&country=${encodeURIComponent(country)}`;
+};
+
+export const syncBankNow = async () => {
+  const res = await fetch(`${API_URL}/api/bank/sync`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { Accept: 'application/json' },
+  });
+  if (!res.ok) {
+    throw new Error(`POST /api/bank/sync: ${res.status}`);
+  }
+  return res.json();
+};
+
+export const disconnectBank = async (connectionId) => {
+  const res = await fetch(`${API_URL}/api/bank/connections/${connectionId}`, {
+    method: 'DELETE',
+    credentials: 'include',
+  });
+  if (!res.ok && res.status !== 204) {
+    throw new Error(`DELETE /api/bank/connections: ${res.status}`);
+  }
+  return true;
+};
+
 // ===== Urządzenia Tuya (Slice 2) =====
 
 const jsonOrThrow = async (res, label) => {

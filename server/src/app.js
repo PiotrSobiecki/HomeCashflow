@@ -47,6 +47,8 @@ import {
   writeFinanceToRelational,
 } from "./finance-relational.js";
 import { logAction } from "./action-log.js";
+import { startBankAuth, createBankSession, mapSessionAccount } from "./enable-banking.js";
+import { syncBankConnections } from "./bank-sync.js";
 import { geocodeCity, getOutdoorWeather } from "./weather.js";
 import { thermostatThresholdGap } from "./ac-thermostat.js";
 import { notifyHouseholdAcPower, notifyHouseholdCycleComplete, notifyUserPush, pushConfigured } from "./push.js";
@@ -1617,6 +1619,199 @@ app.delete("/api/smartthings/disconnect", authMiddleware, async (c) => {
   // Urządzenia Tuya zostają nietknięte.
   await sql`DELETE FROM smart_devices WHERE household_id = ${membership.household_id} AND provider = 'smartthings'`;
   await sql`DELETE FROM smartthings_credentials WHERE household_id = ${membership.household_id}`;
+  return c.body(null, 204);
+});
+
+// ============ INTEGRACJA BANKOWA (Enable Banking) ============
+//
+// Każdy członek podpina WŁASNY bank (sesja per user); transakcje lądują we
+// wspólnym budżecie gospodarstwa. Zaksięgowane obciążenie → wydatek, uznanie →
+// przychód; auto-kategoryzacja po słowach kluczowych. Szczegóły: PRD issue #70.
+
+function bankEnv(c) {
+  return {
+    ENABLE_BANKING_APP_ID: getEnv(c, "ENABLE_BANKING_APP_ID"),
+    ENABLE_BANKING_PRIVATE_KEY: getEnv(c, "ENABLE_BANKING_PRIVATE_KEY"),
+  };
+}
+
+// Status połączeń gospodarstwa — bez sekretów (session_id nie wychodzi).
+app.get("/api/bank/status", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+  const membership = await getMembershipWithOwner(sql, user.id);
+  if (!membership) return c.json({ connections: [] });
+  const rows = await sql`
+    SELECT bc.id, bc.user_id, bc.aspsp_name, bc.aspsp_country, bc.accounts,
+           bc.status, bc.valid_until, bc.last_sync_at, bc.last_sync_error,
+           u.name AS user_name
+    FROM bank_connections bc
+    LEFT JOIN users u ON u.id = bc.user_id
+    WHERE bc.household_id = ${membership.household_id}
+    ORDER BY bc.created_at
+  `;
+  return c.json({
+    configured: !!(bankEnv(c).ENABLE_BANKING_APP_ID && bankEnv(c).ENABLE_BANKING_PRIVATE_KEY),
+    connections: rows.map((r) => ({
+      id: r.id,
+      aspspName: r.aspsp_name,
+      aspspCountry: r.aspsp_country,
+      accounts: (Array.isArray(r.accounts) ? r.accounts : []).map((a) => ({
+        displayName: a.displayName,
+        maskedIban: a.maskedIban,
+        currency: a.currency,
+      })),
+      status: r.status,
+      validUntil: toIso(r.valid_until),
+      lastSyncAt: toIso(r.last_sync_at),
+      lastSyncError: r.last_sync_error,
+      userId: r.user_id,
+      userName: r.user_name,
+      isMine: r.user_id === user.id,
+    })),
+  });
+});
+
+// Start autoryzacji PSD2 — redirect do banku. Każdy członek podpina swój bank.
+app.get("/api/bank/connect", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+  const membership = await getMembershipWithOwner(sql, user.id);
+  if (!membership) return c.json({ error: "No household" }, 400);
+
+  const env = bankEnv(c);
+  if (!env.ENABLE_BANKING_APP_ID || !env.ENABLE_BANKING_PRIVATE_KEY) {
+    return c.json({ error: "config_bank" }, 500);
+  }
+  const aspspName = (c.req.query("aspsp") || "ING").trim();
+  const aspspCountry = (c.req.query("country") || "PL").trim().toUpperCase();
+
+  try {
+    const { url } = await startBankAuth(env, {
+      aspspName,
+      aspspCountry,
+      redirectUrl: `${getApiBaseUrl(c)}/api/bank/callback`,
+      state: crypto.randomUUID(),
+    });
+    return c.redirect(url);
+  } catch (err) {
+    console.error("[bank/connect]", err);
+    return c.json({ error: "bank_auth_failed", detail: String(err?.message || err) }, 502);
+  }
+});
+
+// Callback z banku: ?code= → sesja EB → zapis połączenia → pierwsza synchronizacja
+// w tle → redirect na front. User jest zalogowany (cookie przy top-level redirect).
+app.get("/api/bank/callback", async (c) => {
+  const frontend = getEnv(c, "FRONTEND_URL") || "http://localhost:5173";
+  const fail = (st) => c.redirect(`${frontend}/?bank=${st}`);
+
+  if (c.req.query("error")) return fail("error");
+  const code = c.req.query("code");
+  if (!code) return fail("error");
+
+  try {
+    const token = parseCookie(c.req.header("cookie"), "token");
+    const { payload } = await jwtVerify(token, getSecret(c));
+    const sql = getDb(c);
+    const membership = await getMembershipWithOwner(sql, payload.userId);
+    if (!membership) return fail("error");
+
+    const env = bankEnv(c);
+    const session = await createBankSession(env, code);
+    if (!session.sessionId || session.accounts.length === 0) return fail("error");
+
+    const rawKey = getFinanceDataKey(c);
+    const sessionIdEnc = await encryptField(session.sessionId, rawKey);
+    const aspspName = session.aspsp?.name || "ING";
+    const aspspCountry = session.aspsp?.country || "PL";
+    const accounts = session.accounts.map(mapSessionAccount);
+
+    // Ponowne połączenie tego samego banku nadpisuje sesję, ale zachowuje
+    // lastBookedDate kont o tym samym uid (żeby nie importować od zera).
+    const [existing] = await sql`
+      SELECT id, accounts FROM bank_connections
+      WHERE household_id = ${membership.household_id}
+        AND user_id = ${payload.userId} AND aspsp_name = ${aspspName}
+    `;
+    if (existing) {
+      const prev = new Map(
+        (Array.isArray(existing.accounts) ? existing.accounts : []).map((a) => [a.uid, a]),
+      );
+      for (const a of accounts) {
+        const p = prev.get(a.uid);
+        if (p?.lastBookedDate) a.lastBookedDate = p.lastBookedDate;
+      }
+      await sql`
+        UPDATE bank_connections
+        SET session_id_enc = ${sessionIdEnc},
+            accounts = ${JSON.stringify(accounts)}::jsonb,
+            aspsp_country = ${aspspCountry},
+            status = 'active',
+            valid_until = ${session.validUntil},
+            last_sync_error = NULL,
+            updated_at = NOW()
+        WHERE id = ${existing.id}
+      `;
+    } else {
+      await sql`
+        INSERT INTO bank_connections
+          (household_id, user_id, aspsp_name, aspsp_country, session_id_enc,
+           accounts, status, valid_until)
+        VALUES
+          (${membership.household_id}, ${payload.userId}, ${aspspName}, ${aspspCountry},
+           ${sessionIdEnc}, ${JSON.stringify(accounts)}::jsonb, 'active', ${session.validUntil})
+      `;
+    }
+
+    // Pierwsza synchronizacja w tle — redirect nie czeka na ING.
+    const initialSync = syncBankConnections(sql, rawKey, env, {
+      householdId: membership.household_id,
+    }).catch((err) => console.error("[bank/callback] initial sync", err));
+    try {
+      c.executionCtx.waitUntil(initialSync);
+    } catch {
+      /* poza Workers (dev/testy) — leci w tle bez waitUntil */
+    }
+
+    return fail("connected");
+  } catch (err) {
+    console.error("[bank/callback]", err);
+    return fail("error");
+  }
+});
+
+// Ręczna synchronizacja gospodarstwa ("Synchronizuj teraz").
+app.post("/api/bank/sync", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+  const membership = await getMembershipWithOwner(sql, user.id);
+  if (!membership) return c.json({ error: "No household" }, 400);
+
+  const totals = await syncBankConnections(sql, getFinanceDataKey(c), bankEnv(c), {
+    householdId: membership.household_id,
+  });
+  return c.json(totals);
+});
+
+// Rozłączenie banku — właściciel połączenia albo owner gospodarstwa.
+// Wpisy zaimportowane do budżetu zostają.
+app.delete("/api/bank/connections/:id", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+  const id = c.req.param("id");
+  const membership = await getMembershipWithOwner(sql, user.id);
+  if (!membership) return c.json({ error: "No household" }, 400);
+
+  const [row] = await sql`
+    SELECT user_id FROM bank_connections
+    WHERE id = ${id} AND household_id = ${membership.household_id}
+  `;
+  if (!row) return c.json({ error: "Not found" }, 404);
+  if (row.user_id !== user.id && membership.owner_id !== user.id) {
+    return c.json({ error: "forbidden" }, 403);
+  }
+  await sql`DELETE FROM bank_connections WHERE id = ${id}`;
   return c.body(null, 204);
 });
 

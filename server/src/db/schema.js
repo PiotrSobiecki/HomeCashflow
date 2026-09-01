@@ -72,11 +72,48 @@ export const transactions = pgTable('transactions', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
   legacyId: text('legacy_id'),
+  // Import z banku: 'manual' = wpis ręczny, 'bank' = synchronizacja Enable Banking.
+  source: text('source').notNull().default('manual'),
+  // Klucz dedupu importu: "<accountUid>:<entry_reference|fallback>". NULL dla ręcznych.
+  bankTxnRef: text('bank_txn_ref'),
 }, (t) => ({
   kindCheck: check('transactions_kind_check', sql`${t.kind} IN ('income', 'expense')`),
   monthCheck: check('transactions_month_check', sql`${t.month} BETWEEN 0 AND 11`),
+  sourceCheck: check('transactions_source_check', sql`${t.source} IN ('manual', 'bank')`),
   byHouseholdMonth: index('idx_transactions_household_month').on(t.householdId, t.year, t.month),
   byHouseholdKind: index('idx_transactions_household_kind').on(t.householdId, t.kind),
+  // Idempotentny import: ta sama transakcja bankowa nie wejdzie dwa razy.
+  uniqBankRef: uniqueIndex('uniq_transactions_bank_ref').on(t.householdId, t.bankTxnRef)
+    .where(sql`${t.bankTxnRef} IS NOT NULL`),
+}))
+
+// ====== Integracja bankowa (Enable Banking) ======
+//
+// Połączenie = sesja Enable Banking per użytkownik (każdy członek podpina WŁASNY bank;
+// transakcje lądują we wspólnym budżecie gospodarstwa). session_id szyfrowany (ff1:…).
+// `accounts` (jsonb): [{ uid, displayName, maskedIban, currency, lastBookedDate }] —
+// uid to wewnętrzny identyfikator konta w Enable Banking (bezużyteczny bez naszego
+// klucza aplikacji), IBAN trzymamy tylko zamaskowany (…1234). lastBookedDate steruje
+// oknem synchronizacji per konto.
+export const bankConnections = pgTable('bank_connections', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  householdId: uuid('household_id').notNull().references(() => households.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  aspspName: text('aspsp_name').notNull(),
+  aspspCountry: text('aspsp_country').notNull().default('PL'),
+  sessionIdEnc: text('session_id_enc').notNull(), // ciphertext
+  accounts: jsonb('accounts').notNull().default(sql`'[]'::jsonb`),
+  status: text('status').notNull().default('active'),
+  validUntil: timestamp('valid_until', { withTimezone: true }),
+  lastSyncAt: timestamp('last_sync_at', { withTimezone: true }),
+  lastSyncError: text('last_sync_error'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  statusCheck: check('bank_connections_status_check', sql`${t.status} IN ('active', 'expired', 'revoked')`),
+  byHousehold: index('idx_bank_connections_household').on(t.householdId),
+  // Jeden aktywny bank per (user, household) — ponowne połączenie nadpisuje sesję.
+  uniqUserAspsp: uniqueIndex('uniq_bank_connections_user_aspsp').on(t.householdId, t.userId, t.aspspName),
 }))
 
 export const deletedFixedItems = pgTable('deleted_fixed_items', {
