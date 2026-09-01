@@ -27,6 +27,7 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { ConflictDialog } from "./ConflictDialog";
 import { ActivityHistory } from "./ActivityHistory";
 import { CategoryBudgets } from "./CategoryBudgets";
+import { BankIntegration } from "./BankIntegration";
 import { MonthlySummaryModal } from "./MonthlySummaryModal";
 
 export const Dashboard = () => {
@@ -279,6 +280,12 @@ export const Dashboard = () => {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {!isGuest && <HouseholdMembers />}
+        {!isGuest && (
+          <BankIntegration
+            isOwner={isHouseholdOwner === true}
+            onAfterSync={refetchFromApi}
+          />
+        )}
         <SavingsGoal
           savingsGoal={savingsGoal}
           savingsGoalData={savingsGoalData}

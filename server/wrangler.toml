@@ -23,6 +23,9 @@ SMARTTHINGS_REDIRECT_URI = "https://api.homecashflow.org/api/smartthings/callbac
 # - SMARTTHINGS_CLIENT_SECRET  (j.w. — tokeny per user idą do tabeli smartthings_credentials, nie tu)
 # - WEATHER_GOOGLE_API_KEY      (Google Weather API — główne źródło pogody; brak/błąd → fallback Open-Meteo.
 #                               Klucz MUSI mieć Application restrictions = None, bo Worker woła server-side bez referrera)
+# - ENABLE_BANKING_APP_ID       (UUID aplikacji z panelu enablebanking.com)
+# - ENABLE_BANKING_PRIVATE_KEY  (klucz prywatny RSA aplikacji, PKCS#8 PEM lub base64(PEM) w jednej linii;
+#                               redirect URL callbacku MUSI być dodany w panelu EB: <NEXTAUTH_URL>/api/bank/callback)
 # - VAPID_PUBLIC_KEY            (Web Push — klucz publiczny base64url; `npx @pushforge/builder vapid`)
 # - VAPID_PRIVATE_JWK           (Web Push — klucz prywatny JSON JWK z tego samego polecenia)
 # - PUSH_ADMIN_CONTACT          (opcjonalnie mailto:… dla VAPID; domyślnie support@homecashflow.org)

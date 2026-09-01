@@ -11,6 +11,7 @@ import { runAcThermostats } from './ac-thermostat.js'
 import { getOutdoorTemp } from './weather.js'
 import { notifyHouseholdAcPower, notifyHouseholdCycleComplete, notifyHouseholdPlugPower } from './push.js'
 import { pollCycleDevices } from './device-notifications.js'
+import { syncBankConnections } from './bank-sync.js'
 
 export default {
   fetch: app.fetch,
@@ -63,6 +64,18 @@ export default {
           if (res.checked || res.switched || res.failed) console.log('[cron] ac thermostats', res)
         } catch (err) {
           console.error('[cron] ac thermostats failed', err)
+        }
+      }
+
+      // Bank (Enable Banking): co 6 h (:00 o 0/6/12/18) — PSD2 pozwala na
+      // 4 odpytania/dobę bez obecności usera, więcej ticków = błędy z banku.
+      const bankHour = new Date(event.scheduledTime).getUTCHours()
+      if (minute === 0 && bankHour % 6 === 0) {
+        try {
+          const res = await syncBankConnections(sql, rawKey, env)
+          if (res.connections) console.log('[cron] bank sync', res)
+        } catch (err) {
+          console.error('[cron] bank sync failed', err)
         }
       }
 
