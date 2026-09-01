@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   signEbJwt, maskIban, mapBankTransaction, mapSessionAccount,
-  categorizeExpense, isOwnTransfer, transactionDisplayName,
+  categorizeExpense, isOwnTransfer, transactionDisplayName, matchesFixedItem,
 } from './enable-banking.js'
 
 function b64urlToJson(part) {
@@ -135,6 +135,42 @@ describe('categorizeExpense', () => {
 
   it('never assigns a category the household does not have', () => {
     expect(categorizeExpense('ROSSMANN 123', budgets)).toBe(null)
+  })
+})
+
+describe('matchesFixedItem', () => {
+  const raw = {
+    creditor: { name: 'GOOGLE *WORKSPACE' },
+    remittance_information: ['gsuite.google.com'],
+  }
+  const mapped = { kind: 'expense', amount: 61.38 }
+  const workspace = { kind: 'expense', name: 'Google Workspace', amount: 61 }
+
+  it('matches when all name tokens appear and amount is within tolerance', () => {
+    expect(matchesFixedItem(raw, mapped, [workspace])).toBe(true)
+    // FX-owy dryf kwoty w granicach 10%
+    expect(matchesFixedItem(raw, { ...mapped, amount: 66 }, [workspace])).toBe(true)
+  })
+
+  it('rejects amount outside max(2 zł, 10%) tolerance', () => {
+    expect(matchesFixedItem(raw, { ...mapped, amount: 122 }, [workspace])).toBe(false)
+    // małe kwoty: tolerancja 2 zł, nie 10%
+    expect(matchesFixedItem(raw, { ...mapped, amount: 11.5 }, [{ ...workspace, amount: 10 }])).toBe(true)
+  })
+
+  it('requires every token — generic names without textual trace do not match', () => {
+    const czynsz = { kind: 'expense', name: 'Czynsz', amount: 61 }
+    expect(matchesFixedItem(raw, mapped, [czynsz])).toBe(false)
+    expect(matchesFixedItem(
+      { remittance_information: ['CZYNSZ 09/2026'] }, mapped, [czynsz],
+    )).toBe(true)
+  })
+
+  it('respects kind and ignores degenerate fixed items', () => {
+    expect(matchesFixedItem(raw, { ...mapped, kind: 'income' }, [workspace])).toBe(false)
+    expect(matchesFixedItem(raw, mapped, [{ kind: 'expense', name: '', amount: 61 }])).toBe(false)
+    expect(matchesFixedItem(raw, mapped, [{ kind: 'expense', name: 'ok', amount: NaN }])).toBe(false)
+    expect(matchesFixedItem(raw, mapped, [])).toBe(false)
   })
 })
 
