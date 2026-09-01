@@ -144,8 +144,18 @@ describe('isOwnTransfer', () => {
     expect(isOwnTransfer({ debtor: { name: 'jozef  zolc' } }, 'Józef Żółć')).toBe(true)
   })
 
+  it('matches reversed word order (banks often use SURNAME FIRSTNAME)', () => {
+    expect(isOwnTransfer({ creditor: { name: 'SOBIECKI PIOTR' } }, 'Piotr Sobiecki')).toBe(true)
+  })
+
+  it('matches "przelew własny" in the remittance info regardless of counterparty', () => {
+    expect(isOwnTransfer({ remittance_information: ['PRZELEW WŁASNY'] }, 'Piotr Sobiecki')).toBe(true)
+    expect(isOwnTransfer({ remittance_information: ['Przelew wlasny na oszczednosciowe'] }, null)).toBe(true)
+  })
+
   it('does not match a different person with the same surname', () => {
     expect(isOwnTransfer({ creditor: { name: 'Anna Kowalska' } }, 'Jan Kowalski')).toBe(false)
+    expect(isOwnTransfer({ creditor: { name: 'Przelew do znajomego' } }, 'Jan Kowalski')).toBe(false)
   })
 
   it('requires a full (two-word) owner name', () => {

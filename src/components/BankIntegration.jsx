@@ -2,15 +2,20 @@ import { useState, useEffect } from 'react'
 import { Loader2, Check, X, Trash2, Landmark, RefreshCw } from 'lucide-react'
 import { fetchBankStatus, connectBank, syncBankNow, disconnectBank } from '../lib/api'
 
-// Nazwy ASPSP muszą odpowiadać nazwom w Enable Banking (kraj: PL).
+// Nazwy ASPSP dokładnie jak w Enable Banking (GET /aspsps?country=PL, 2026-09).
+// Santandera brak na liście EB dla PL.
 const BANKS = [
-  'ING',
+  'ING Bank Śląski',
   'mBank',
   'PKO Bank Polski',
   'Bank Pekao',
-  'Santander Bank Polska',
   'Bank Millennium',
   'Alior Bank',
+  'BNP Paribas',
+  'Credit Agricole',
+  'Nest Bank',
+  'VeloBank',
+  'Revolut',
 ]
 
 // Komunikat zwrotny z callbacku autoryzacji (?bank=connected|error w URL).
@@ -116,9 +121,15 @@ export const BankIntegration = ({ isOwner, onAfterSync }) => {
         )}
       </div>
 
-      <p className="text-sm text-slate-300 mb-4">
+      <p className="text-sm text-slate-300 mb-2">
         Podepnij swoje konto bankowe — zaksięgowane wydatki i przychody będą same
-        trafiać do budżetu (z datą, kwotą i kategorią). Synchronizacja co 6 godzin.
+        trafiać do budżetu (z datą, kwotą i kategorią), licząc od dnia połączenia.
+        Synchronizacja co 6 godzin.
+      </p>
+      <p className="text-xs text-slate-500 mb-4">
+        Synchronizują się tylko konta dodane do białej listy aplikacji w panelu
+        Enable Banking. Jeśli Twoje konto nie jest na liście, autoryzacja przejdzie,
+        ale dane nie będą pobierane — poproś administratora integracji o dodanie konta.
       </p>
 
       {connections.length > 0 && (
@@ -187,7 +198,7 @@ export const BankIntegration = ({ isOwner, onAfterSync }) => {
 
       {flash === 'connected' && (
         <div className="mt-3 p-2.5 bg-emerald-500/20 border border-emerald-500/30 rounded-xl text-sm text-emerald-300">
-          Bank połączony. Pierwsza synchronizacja (30 dni wstecz) trwa — wpisy pojawią się za chwilę.
+          Bank połączony. Pierwsza synchronizacja (od dziś) trwa — nowe wpisy pojawią się za chwilę.
         </div>
       )}
       {flash === 'error' && (

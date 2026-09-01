@@ -26,16 +26,31 @@ function b64urlFromString(str) {
   return b64urlFromBytes(new TextEncoder().encode(str))
 }
 
-/** PEM (lub base64(PEM) w jednej linii) → ArrayBuffer DER (PKCS#8). */
+/** PEM (lub base64(PEM), lub sam base64-owy środek PEM = base64(DER)) → ArrayBuffer DER (PKCS#8). */
 function pemToDer(pemOrB64) {
-  let pem = String(pemOrB64 || '').trim()
+  // Sekrety z env bywają z literalnymi "\n" zamiast łamań linii — normalizujemy.
+  let pem = String(pemOrB64 || '').replace(/\\n/g, '\n').trim()
   if (!pem.includes('-----BEGIN')) {
-    // sekret jako base64 całego pliku PEM
+    let decoded
     try {
-      pem = atob(pem.replace(/\s+/g, ''))
+      decoded = atob(pem.replace(/\s+/g, ''))
     } catch {
-      throw new Error('ENABLE_BANKING_PRIVATE_KEY is neither PEM nor base64(PEM)')
+      throw new Error('ENABLE_BANKING_PRIVATE_KEY is neither PEM nor base64(PEM/DER)')
     }
+    if (!decoded.includes('-----BEGIN')) {
+      // Nie PEM po odkodowaniu → to sam środek PEM, czyli base64(DER PKCS#8).
+      // DER zaczyna się od SEQUENCE (0x30); PEM tekstem — rozróżnienie jest pewne.
+      if (decoded.charCodeAt(0) !== 0x30) {
+        throw new Error('ENABLE_BANKING_PRIVATE_KEY decodes to neither PEM nor PKCS#8 DER')
+      }
+      const der = new Uint8Array(decoded.length)
+      for (let i = 0; i < decoded.length; i++) der[i] = decoded.charCodeAt(i)
+      return der.buffer
+    }
+    pem = decoded
+  }
+  if (pem.includes('-----BEGIN RSA PRIVATE KEY-----') || pem.includes('-----BEGIN EC ')) {
+    throw new Error('ENABLE_BANKING_PRIVATE_KEY must be PKCS#8 (BEGIN PRIVATE KEY); convert with: openssl pkcs8 -topk8 -nocrypt')
   }
   if (!pem.includes('-----BEGIN PRIVATE KEY-----')) {
     throw new Error('ENABLE_BANKING_PRIVATE_KEY must be an unencrypted PKCS#8 PEM (BEGIN PRIVATE KEY)')
@@ -44,6 +59,9 @@ function pemToDer(pemOrB64) {
     .replace(/-----BEGIN PRIVATE KEY-----/, '')
     .replace(/-----END PRIVATE KEY-----/, '')
     .replace(/\s+/g, '')
+  if (!body) {
+    throw new Error('ENABLE_BANKING_PRIVATE_KEY has an empty PEM body — a multiline value got truncated to its first line; put base64 of the WHOLE .pem file in one line instead')
+  }
   const bin = atob(body)
   const der = new Uint8Array(bin.length)
   for (let i = 0; i < bin.length; i++) der[i] = bin.charCodeAt(i)
@@ -233,18 +251,30 @@ function normalizeName(s) {
     .trim()
 }
 
+/** Klucz porównawczy nazwiska: znormalizowane tokeny posortowane alfabetycznie —
+ * banki piszą raz "IMIĘ NAZWISKO", raz "NAZWISKO IMIĘ". */
+function nameKey(s) {
+  return normalizeName(s).split(' ').filter(Boolean).sort().join(' ')
+}
+
 /**
- * Przelew między własnymi kontami usera? Kontrahent (odbiorca przy wydatku,
- * nadawca przy wpływie) równy PEŁNEMU imieniu i nazwisku właściciela połączenia
- * → pomijamy, żeby nie zawyżać wydatków/przychodów. Celowo pełne dopasowanie,
- * nie samo nazwisko — przelew od domownika o tym samym nazwisku ma wejść.
+ * Przelew między własnymi kontami usera? Pomijamy, żeby nie zawyżać
+ * wydatków/przychodów. Dwa sygnały:
+ *  1. kontrahent (odbiorca/nadawca) = PEŁNE imię i nazwisko właściciela
+ *     połączenia (kolejność słów obojętna — "SOBIECKI PIOTR" też łapie);
+ *     celowo pełne dopasowanie, nie samo nazwisko — przelew od domownika
+ *     o tym samym nazwisku ma wejść,
+ *  2. tytuł/kontrahent zawiera "przelew własny" (tak banki oznaczają
+ *     przeksięgowania między rachunkami, np. na konto oszczędnościowe).
  */
 export function isOwnTransfer(tx, ownerFullName) {
-  const owner = normalizeName(ownerFullName)
+  const haystack = normalizeName(
+    `${remittanceText(tx)} ${tx?.creditor?.name || ''} ${tx?.debtor?.name || ''}`,
+  )
+  if (haystack.includes('przelew wlasny')) return true
+  const owner = nameKey(ownerFullName)
   if (!owner || !owner.includes(' ')) return false
-  const creditor = normalizeName(tx?.creditor?.name)
-  const debtor = normalizeName(tx?.debtor?.name)
-  return creditor === owner || debtor === owner
+  return nameKey(tx?.creditor?.name) === owner || nameKey(tx?.debtor?.name) === owner
 }
 
 // ====== Kategoryzacja wydatków po słowach kluczowych ======

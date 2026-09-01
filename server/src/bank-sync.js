@@ -6,15 +6,16 @@
  * idempotentny, więc okna synchronizacji mogą się nakładać.
  *
  * Okno: od lastBookedDate konta minus 4 dni (przelewy księgują się z opóźnieniem),
- * pierwszy sync — 30 dni wstecz. PSD2 ogranicza dostęp bez obecności usera do
- * 4 wywołań/dobę per konto, dlatego cron woła to co 6 h.
+ * pierwszy sync — od DNIA POŁĄCZENIA (wcześniejsza historia jest wpisana ręcznie;
+ * data utworzenia połączenia to twarda podłoga, więc overlap nie cofnie się przed
+ * nią i nie wskrzesi ręcznie usuniętych importów). PSD2 ogranicza dostęp bez
+ * obecności usera do 4 wywołań/dobę per konto, dlatego cron woła to co 6 h.
  */
 import { encryptField, decryptField } from './finance-crypto.js'
 import {
   fetchAccountTransactions, mapBankTransaction, categorizeExpense, isOwnTransfer, EbApiError,
 } from './enable-banking.js'
 
-const FIRST_SYNC_DAYS = 30
 const OVERLAP_DAYS = 4
 const MAX_PAGES_PER_ACCOUNT = 10
 
@@ -48,11 +49,17 @@ export async function syncBankConnection(sql, rawKey, env, connection) {
   let skipped = 0
 
   try {
+    // Podłoga okna: dzień utworzenia połączenia — przed nim nigdy nie sięgamy.
+    const floorDate = connection.created_at
+      ? new Date(connection.created_at).toISOString().slice(0, 10)
+      : isoDateDaysAgo(0)
+
     for (const account of accounts) {
       if (!account?.uid) continue
-      const dateFrom = account.lastBookedDate
+      let dateFrom = account.lastBookedDate
         ? isoDateDaysAgo(OVERLAP_DAYS, new Date(account.lastBookedDate))
-        : isoDateDaysAgo(FIRST_SYNC_DAYS)
+        : floorDate
+      if (dateFrom < floorDate) dateFrom = floorDate
 
       let continuationKey = null
       let pages = 0

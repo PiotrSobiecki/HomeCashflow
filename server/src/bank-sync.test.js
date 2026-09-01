@@ -162,6 +162,23 @@ describe('syncBankConnection', () => {
     expect(after.last_sync_error).toContain('EB 401')
   })
 
+  it('first sync starts at the connection creation date, and overlap never goes below it', async () => {
+    const ctx = await createUser()
+    const conn = await createConnection({ householdId: ctx.householdId, userId: ctx.user.id })
+    const createdDate = new Date(conn.created_at).toISOString().slice(0, 10)
+    vi.mocked(fetchAccountTransactions).mockResolvedValue({ transactions: [], continuationKey: null })
+
+    // Pierwszy sync — od dnia utworzenia połączenia, nie 30 dni wstecz.
+    await syncBankConnection(sql, rawKey, env, conn)
+    expect(vi.mocked(fetchAccountTransactions).mock.calls[0][2].dateFrom).toBe(createdDate)
+
+    // lastBookedDate tuż po utworzeniu → overlap −4 dni obcięty do podłogi.
+    const [reloaded] = await sql`SELECT * FROM bank_connections WHERE id = ${conn.id}`
+    reloaded.accounts[0].lastBookedDate = createdDate
+    await syncBankConnection(sql, rawKey, env, reloaded)
+    expect(vi.mocked(fetchAccountTransactions).mock.calls[1][2].dateFrom).toBe(createdDate)
+  })
+
   it('follows continuation pages', async () => {
     const ctx = await createUser()
     const conn = await createConnection({ householdId: ctx.householdId, userId: ctx.user.id })

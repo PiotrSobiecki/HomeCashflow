@@ -1683,14 +1683,18 @@ app.get("/api/bank/connect", authMiddleware, async (c) => {
   if (!env.ENABLE_BANKING_APP_ID || !env.ENABLE_BANKING_PRIVATE_KEY) {
     return c.json({ error: "config_bank" }, 500);
   }
-  const aspspName = (c.req.query("aspsp") || "ING").trim();
+  const aspspName = (c.req.query("aspsp") || "ING Bank Śląski").trim();
   const aspspCountry = (c.req.query("country") || "PL").trim().toUpperCase();
 
   try {
     const { url } = await startBankAuth(env, {
       aspspName,
       aspspCountry,
-      redirectUrl: `${getApiBaseUrl(c)}/api/bank/callback`,
+      // EB wymaga https w redirect URL — dev nadpisuje env-em na lokalny proxy TLS
+      // (np. https://localhost:3443/api/bank/callback); prod zostaje przy NEXTAUTH_URL.
+      redirectUrl:
+        getEnv(c, "ENABLE_BANKING_REDIRECT_URI") ||
+        `${getApiBaseUrl(c)}/api/bank/callback`,
       state: crypto.randomUUID(),
     });
     return c.redirect(url);
