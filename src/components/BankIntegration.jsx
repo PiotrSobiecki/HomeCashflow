@@ -127,9 +127,9 @@ export const BankIntegration = ({ isOwner, onAfterSync }) => {
         Synchronizacja co 6 godzin.
       </p>
       <p className="text-xs text-slate-500 mb-4">
-        Synchronizują się tylko konta dodane do białej listy aplikacji w panelu
-        Enable Banking. Jeśli Twoje konto nie jest na liście, autoryzacja przejdzie,
-        ale dane nie będą pobierane — poproś administratora integracji o dodanie konta.
+        Integracja bankowa jest w trakcie wdrażania i działa dla ograniczonej listy
+        kont. Jeśli chcesz podpiąć swoje konto, skontaktuj się z administratorem
+        aplikacji — bez tego autoryzacja przejdzie, ale transakcje nie będą pobierane.
       </p>
 
       {connections.length > 0 && (
