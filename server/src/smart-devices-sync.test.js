@@ -75,7 +75,7 @@ describe('collectEnergySnapshots', () => {
     ])
 
     const res = await collectEnergySnapshots(sql, rawKey, { householdId: hh })
-    expect(res).toEqual({ inserted: 1, events: 2, skipped: 0 })
+    expect(res).toEqual({ inserted: 1, events: 2, skipped: 0, powerAlerts: 0 })
 
     // Wiersz mocy (energy_reported_at NULL) + dwie paczki energii.
     const power = await sql`SELECT * FROM device_energy_snapshots WHERE device_id = ${dev.id} AND energy_reported_at IS NULL`
@@ -122,7 +122,7 @@ describe('collectEnergySnapshots', () => {
     })
 
     const res = await collectEnergySnapshots(sql, rawKey, { householdId: hh })
-    expect(res).toEqual({ inserted: 1, events: 0, skipped: 1 })
+    expect(res).toEqual({ inserted: 1, events: 0, skipped: 1, powerAlerts: 0 })
 
     const rows = await sql`SELECT device_id FROM device_energy_snapshots WHERE device_id = ${a.id}`
     expect(rows).toHaveLength(1)

@@ -3295,7 +3295,7 @@ app.get("/api/smart-devices/:id/thermostat/temperature", authMiddleware, async (
   try {
     const w = await getOutdoorWeather(
       { lat: Number(t.lat), lon: Number(t.lon) },
-      { apiKey: c.env.WEATHER_GOOGLE_API_KEY },
+      { apiKey: getEnv(c, "WEATHER_GOOGLE_API_KEY") },
     );
     return c.json({ temp: w?.temp ?? null, condition: w?.condition ?? null });
   } catch (err) {
