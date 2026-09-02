@@ -117,6 +117,24 @@ describe('mapBankTransaction', () => {
     expect(tx.name).toBe('BLIK P2P telefon')
     expect(transactionDisplayName({}, 'expense')).toBe('Transakcja bankowa')
   })
+
+  it('names PKO BLIK payments "Płatność BLIK" — the bank sends only a counter and a type code', () => {
+    const blik = (code) => mapBankTransaction({
+      ...base, creditor: null, remittance_information: ['00000094845686115', code],
+    }, 'a')
+    expect(blik('MOBILE-PAYMENT-POS-TX-CODE').name).toBe('Płatność BLIK')
+    expect(blik('MOBILE-PAYMENT-POS-NO-CARD-TX-CODE').name).toBe('Płatność BLIK')
+    expect(blik('MOBILE-PAYMENT-POS-TX-CODE').ref).toBe('a:REF-1')
+  })
+
+  it('drops bank type-code lines from the description, keeps the merchant text', () => {
+    const tx = mapBankTransaction({
+      ...base, creditor: null,
+      remittance_information: ['WARSZAWAAUT. 2718 MERA [M2 DW.PL', 'CARD-PAYMENT'],
+    }, 'a')
+    expect(tx.name).toBe('WARSZAWAAUT. 2718 MERA [M2 DW.PL')
+    expect(transactionDisplayName({ remittance_information: ['CARD-PAYMENT'] }, 'expense')).toBe('Transakcja bankowa')
+  })
 })
 
 describe('categorizeExpense', () => {

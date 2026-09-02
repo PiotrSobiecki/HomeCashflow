@@ -195,18 +195,34 @@ export async function fetchAccountTransactions(env, accountUid, { dateFrom, date
 
 // ====== Mapowanie transakcji EB → model HomeCashflow ======
 
-/** Pierwsza niepusta linia remittance info (opis przelewu). */
-function remittanceText(tx) {
+function remittanceLines(tx) {
   const ri = tx.remittance_information
-  if (Array.isArray(ri)) return ri.filter((s) => typeof s === 'string' && s.trim()).join(' ').trim()
-  if (typeof ri === 'string') return ri.trim()
-  return ''
+  if (Array.isArray(ri)) return ri.filter((s) => typeof s === 'string' && s.trim()).map((s) => s.trim())
+  if (typeof ri === 'string' && ri.trim()) return [ri.trim()]
+  return []
 }
 
-/** Czytelna nazwa wpisu: kontrahent, a gdy go brak — opis przelewu. */
+/** Wszystkie linie remittance info sklejone spacją (opis przelewu). */
+function remittanceText(tx) {
+  return remittanceLines(tx).join(' ')
+}
+
+// PKO przez EB dokleja do opisu kod typu operacji (CARD-PAYMENT, TRANSFER,
+// MOBILE-PAYMENT-POS-TX-CODE…), a przy BLIK-u zamiast sklepu daje tylko licznik
+// systemu BLIK — nazwy sklepu nie ma w żadnym polu.
+const TYPE_CODE_LINE = /^[A-Z]+(?:-[A-Z]+)+$/
+const BLIK_TYPE_CODE = /^MOBILE-PAYMENT-/
+const COUNTER_LINE = /^\d{10,}$/
+
+/** Czytelna nazwa wpisu: kontrahent, a gdy go brak — opis bez kodów banku. */
 export function transactionDisplayName(tx, kind) {
   const party = kind === 'expense' ? tx.creditor?.name : tx.debtor?.name
-  const name = (party || '').trim() || remittanceText(tx)
+  let name = (party || '').trim()
+  if (!name) {
+    const lines = remittanceLines(tx)
+    name = lines.filter((l) => !TYPE_CODE_LINE.test(l) && !COUNTER_LINE.test(l)).join(' ')
+    if (!name && lines.some((l) => BLIK_TYPE_CODE.test(l))) name = 'Płatność BLIK'
+  }
   return (name || 'Transakcja bankowa').slice(0, 120)
 }
 
