@@ -102,6 +102,15 @@ export const ExpenseSection = ({
   });
   const fixedExpenses = expenses.filter((e) => e.isFixed);
   const variableExpenses = expenses.filter((e) => !e.isFixed);
+  // Wpisy z banku (np. BLIK bez nazwy sklepu) wchodzą bez kategorii — przypisuje się ją
+  // jednym wyborem prosto z listy, bez otwierania pełnej edycji.
+  const isUncategorized = (e) => !e.isFixed && !e.category;
+  const uncategorizedCount = variableExpenses.filter(isUncategorized).length;
+
+  const handleQuickCategory = (expense, category) => {
+    if (!category) return;
+    updateExpense(expense.id, expense.name, expense.amount, expense.date, false, category);
+  };
 
   useEffect(() => {
     const openAddExpense = () => {
@@ -126,6 +135,11 @@ export const ExpenseSection = ({
             <p className="text-xs text-slate-400">
               <span className="text-rose-400">{fixedExpenses.length} stalych</span> •{' '}
               <span className="text-orange-400">{variableExpenses.length} zmiennych</span>
+              {uncategorizedCount > 0 && (
+                <>
+                  {' '}• <span className="text-amber-300">{uncategorizedCount} bez kategorii</span>
+                </>
+              )}
             </p>
           </div>
         </div>
@@ -236,7 +250,13 @@ export const ExpenseSection = ({
           sortedExpenses.map((expense) => (
             <div
               key={expense.id}
-              className={`finance-entry-row flex items-center justify-between p-4 rounded-xl border transition-all ${expense.isFixed ? 'bg-rose-500/10 border-rose-500/30 hover:border-rose-400/50' : 'bg-slate-700/30 border-slate-600/30 hover:border-orange-500/30'}`}
+              className={`finance-entry-row flex items-center justify-between p-4 rounded-xl border transition-all ${
+                expense.isFixed
+                  ? 'bg-rose-500/10 border-rose-500/30 hover:border-rose-400/50'
+                  : isUncategorized(expense)
+                    ? 'bg-amber-500/5 border-amber-500/40 hover:border-amber-400/60'
+                    : 'bg-slate-700/30 border-slate-600/30 hover:border-orange-500/30'
+              }`}
             >
               {editingId === expense.id ? (
                 <div className="flex-1 flex flex-col gap-3">
@@ -319,6 +339,25 @@ export const ExpenseSection = ({
                       {expense.isFixed && <span className="px-1.5 py-0.5 bg-rose-500/20 text-rose-400 text-xs rounded">staly</span>}
                       {!expense.isFixed && expense.category && (
                         <span className="px-1.5 py-0.5 bg-violet-500/20 text-violet-400 text-xs rounded">{expense.category}</span>
+                      )}
+                      {isUncategorized(expense) && (
+                        hasCategories && canMutateEntry(expense, currentUserId, isOwner) ? (
+                          <select
+                            value=""
+                            onChange={(e) => handleQuickCategory(expense, e.target.value)}
+                            aria-label="Przypisz kategorie"
+                            className="px-2 py-0.5 bg-amber-500/15 border border-amber-500/40 rounded text-amber-200 text-xs focus:outline-none focus:border-amber-400"
+                          >
+                            <option value="">Przypisz kategorie…</option>
+                            {categoryBudgets.map((c) => (
+                              <option key={c.id} value={c.name}>
+                                {c.name}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-300 text-xs rounded">bez kategorii</span>
+                        )
                       )}
                     </div>
                     {expense.date && (
