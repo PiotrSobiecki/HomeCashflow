@@ -13,6 +13,18 @@ import { notifyHouseholdAcPower, notifyHouseholdCycleComplete, notifyHouseholdPl
 import { pollCycleDevices } from './device-notifications.js'
 import { syncBankConnections } from './bank-sync.js'
 
+// Godziny synchronizacji banku w czasie polskim (cron tyka w UTC, DST
+// przesuwa offset o godzinę).
+export const BANK_SYNC_HOURS = [8, 14, 20]
+
+export function isBankSyncHour(ts, hours = BANK_SYNC_HOURS) {
+  const hour = Number(
+    new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Warsaw', hour: '2-digit', hourCycle: 'h23' })
+      .format(new Date(ts)),
+  )
+  return hours.includes(hour)
+}
+
 export default {
   fetch: app.fetch,
 
@@ -67,10 +79,10 @@ export default {
         }
       }
 
-      // Bank (Enable Banking): co 6 h (:00 o 0/6/12/18) — PSD2 pozwala na
-      // 4 odpytania/dobę bez obecności usera, więcej ticków = błędy z banku.
-      const bankHour = new Date(event.scheduledTime).getUTCHours()
-      if (minute === 0 && bankHour % 6 === 0) {
+      // Bank (Enable Banking): 3 razy dziennie o 8, 14 i 20 czasu polskiego —
+      // PSD2 pozwala na 4 odpytania/dobę bez obecności usera, więcej ticków
+      // = błędy z banku; jedno zostaje na "Synchronizuj teraz".
+      if (minute === 0 && isBankSyncHour(event.scheduledTime)) {
         try {
           const res = await syncBankConnections(sql, rawKey, env)
           if (res.connections) console.log('[cron] bank sync', res)
