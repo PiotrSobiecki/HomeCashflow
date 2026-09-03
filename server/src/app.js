@@ -841,6 +841,75 @@ app.delete("/api/transactions/:id", authMiddleware, async (c) => {
   return c.body(null, 204);
 });
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Scalenie wpisu z banku z pozycją stałą tego samego rodzaju: wpis z banku znika,
+// a pozycja stała przejmuje jego bank_txn_ref. Dzięki temu okno synchronizacji
+// nie wskrzesi tej transakcji, a kolejne obciążenia na dokładnie tę kwotę
+// bank-sync traktuje jako tę pozycję (matchesFixedItem, bankLinked).
+app.post("/api/transactions/:id/merge-into-fixed", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const sql = getDb(c);
+  const id = c.req.param("id");
+  let body;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+  const fixedId = body?.fixedId;
+  if (typeof fixedId !== "string" || !UUID_RE.test(fixedId))
+    return c.json({ error: "fixedId must be a transaction id" }, 400);
+  if (!UUID_RE.test(id)) return c.json({ error: "not found" }, 404);
+  if (fixedId === id)
+    return c.json({ error: "cannot merge entry into itself" }, 400);
+
+  const rows = await sql`
+    SELECT t.*, h.owner_id AS household_owner_id
+    FROM transactions t
+    JOIN household_members hm ON hm.household_id = t.household_id
+    JOIN households h ON h.id = t.household_id
+    WHERE t.id IN (${id}, ${fixedId}) AND hm.user_id = ${user.id}
+  `;
+  const bankRow = rows.find((r) => r.id === id);
+  const fixedRow = rows.find((r) => r.id === fixedId);
+  if (!bankRow || !fixedRow || bankRow.household_id !== fixedRow.household_id)
+    return c.json({ error: "not found" }, 404);
+  if (bankRow.source !== "bank" || bankRow.is_fixed || !bankRow.bank_txn_ref)
+    return c.json({ error: "entry must be a bank import" }, 400);
+  if (!fixedRow.is_fixed)
+    return c.json({ error: "target must be a fixed item" }, 400);
+  if (fixedRow.kind !== bankRow.kind)
+    return c.json({ error: "kind mismatch" }, 400);
+  for (const row of [bankRow, fixedRow]) {
+    const permErr = assertCanMutateResource({
+      isOwner: row.household_owner_id === user.id,
+      createdBy: row.created_by,
+      userId: user.id,
+    });
+    if (permErr) return c.json(permErr.body, permErr.status);
+  }
+
+  // Ref jest unikalny per gospodarstwo: najpierw znika wpis z banku, dopiero
+  // potem przejmuje go pozycja stała — obie zmiany w jednej transakcji.
+  await sql.transaction([
+    sql`DELETE FROM transactions WHERE id = ${id}`,
+    sql`UPDATE transactions SET bank_txn_ref = ${bankRow.bank_txn_ref} WHERE id = ${fixedId}`,
+  ]);
+
+  await safeLogAction(sql, {
+    householdId: bankRow.household_id,
+    actorId: user.id,
+    operation: "DELETE",
+    resourceType: "transaction",
+    resourceId: id,
+    before: snapshotTransaction(bankRow),
+    after: null,
+  });
+
+  return c.json({ ok: true, fixedId });
+});
+
 // ============ SAVINGS ACCOUNTS (per-row) ============
 
 function validateSavingsAccountInput(body) {

@@ -5,6 +5,7 @@ import {
   createTransaction,
   patchTransaction,
   deleteTransaction,
+  mergeTransactionIntoFixed,
   createSavingsAccount,
   patchSavingsAccount,
   deleteSavingsAccount as apiDeleteSavingsAccount,
@@ -531,6 +532,25 @@ export const useFinanceData = () => {
         // Rollback: wstaw z powrotem
         if (prevItem) insertTxnLocal(kind, monthIdx, prevItem);
       }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Scalenie wpisu z banku z pozycją stałą tego samego rodzaju — wpis znika z listy,
+  // pozycja stała zostaje bez zmian (serwer dopina do niej referencję bankową).
+  const mergeIntoFixed = async (kind, id, fixedId) => {
+    if (!isLive) return;
+    const listKey = kind === 'income' ? 'incomes' : 'expenses';
+    const prevItem = data.months[selectedMonth]?.[listKey].find(it => it.id === id) ?? null;
+    if (!prevItem?.updatedAt) return;
+    removeTxnLocal(kind, selectedMonth, it => it.id === id);
+    setSaving(true);
+    try {
+      await mergeTransactionIntoFixed(id, fixedId);
+    } catch (err) {
+      console.error(`merge ${kind} error:`, err);
+      insertTxnLocal(kind, selectedMonth, prevItem);
     } finally {
       setSaving(false);
     }
@@ -1208,7 +1228,7 @@ export const useFinanceData = () => {
 
   return {
     data, selectedMonth, setSelectedMonth, currentMonthData, totalIncome, totalExpenses, fixedExpenses, variableExpenses, balance,
-    yearlySummary, monthlySummaries, addIncome, updateIncome, deleteIncome, addExpense, updateExpense, deleteExpense, clearAllData,
+    yearlySummary, monthlySummaries, addIncome, updateIncome, deleteIncome, addExpense, updateExpense, deleteExpense, mergeIntoFixed, clearAllData,
     financialRunway, forecastData, guiltFreeBurn, savingsGoal: data.savingsGoal, savingsGoalData, updateSavingsGoal,
     savingsAccounts: data.savingsAccounts, totalSavingsAccounts, addSavingsAccount, updateSavingsAccount, deleteSavingsAccount,
     categoryBudgets: data.categoryBudgets, categorySpending, totalCategoryLimits,

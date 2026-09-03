@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { TrendingDown, Plus, Pencil, Trash2, Check, X, CalendarDays, Lock, ShoppingBag } from 'lucide-react';
+import { TrendingDown, Plus, Pencil, Trash2, Check, X, CalendarDays, Lock, ShoppingBag, Merge } from 'lucide-react';
 import { ConfirmDialog } from './ConfirmDialog';
 import { ReadOnlyEntryActions } from './ReadOnlyEntryActions';
+import { MergeIntoFixedControl, mergeCandidates, mergeDescription } from './MergeIntoFixedControl';
 
 const formatCurrency = (amount) =>
   new Intl.NumberFormat('pl-PL', {
@@ -22,6 +23,7 @@ export const ExpenseSection = ({
   addExpense,
   updateExpense,
   deleteExpense,
+  mergeIntoFixed = null,
   categoryBudgets = [],
   currentUserId = null,
   isOwner = false,
@@ -45,6 +47,7 @@ export const ExpenseSection = ({
   const [editIsFixed, setEditIsFixed] = useState(false);
   const [editCategory, setEditCategory] = useState('');
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [mergeTarget, setMergeTarget] = useState(null);
   const [formError, setFormError] = useState('');
 
   const hasCategories = categoryBudgets.length > 0;
@@ -111,6 +114,10 @@ export const ExpenseSection = ({
     if (!category) return;
     updateExpense(expense.id, expense.name, expense.amount, expense.date, false, category);
   };
+
+  const canMutate = (item) => canMutateEntry(item, currentUserId, isOwner);
+  const mergeCandidatesFor = (expense) =>
+    mergeIntoFixed && canMutate(expense) ? mergeCandidates(expense, fixedExpenses, canMutate) : [];
 
   useEffect(() => {
     const openAddExpense = () => {
@@ -359,6 +366,10 @@ export const ExpenseSection = ({
                           <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-300 text-xs rounded">bez kategorii</span>
                         )
                       )}
+                      <MergeIntoFixedControl
+                        candidates={mergeCandidatesFor(expense)}
+                        onPick={(fixed) => setMergeTarget({ entry: expense, fixed })}
+                      />
                     </div>
                     {expense.date && (
                       <p className="text-sm text-slate-400 flex items-center gap-1 mt-1">
@@ -418,6 +429,21 @@ export const ExpenseSection = ({
         confirmLabel="Tak, usun"
         cancelLabel="Anuluj"
         variant="danger"
+      />
+
+      <ConfirmDialog
+        open={mergeTarget !== null}
+        onClose={() => setMergeTarget(null)}
+        onConfirm={() => {
+          if (mergeTarget) mergeIntoFixed('expense', mergeTarget.entry.id, mergeTarget.fixed.id);
+          setMergeTarget(null);
+        }}
+        title="Scalić z wydatkiem stałym?"
+        description={mergeTarget ? mergeDescription(mergeTarget, 'wydatek stały') : ''}
+        confirmLabel="Tak, scal"
+        cancelLabel="Anuluj"
+        variant="warning"
+        icon={Merge}
       />
     </div>
   );

@@ -53,6 +53,7 @@ export const Dashboard = () => {
     addExpense,
     updateExpense,
     deleteExpense,
+    mergeIntoFixed,
     clearAllData,
     financialRunway,
     forecastData,
@@ -346,6 +347,7 @@ export const Dashboard = () => {
               addIncome={addIncome}
               updateIncome={updateIncome}
               deleteIncome={deleteIncome}
+              mergeIntoFixed={mergeIntoFixed}
               currentUserId={user?.id ?? null}
               isOwner={isHouseholdOwner === true}
             />
@@ -356,6 +358,7 @@ export const Dashboard = () => {
               addExpense={addExpense}
               updateExpense={updateExpense}
               deleteExpense={deleteExpense}
+              mergeIntoFixed={mergeIntoFixed}
               categoryBudgets={categoryBudgets}
               currentUserId={user?.id ?? null}
               isOwner={isHouseholdOwner === true}

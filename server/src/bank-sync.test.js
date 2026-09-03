@@ -46,13 +46,13 @@ async function createConnection({ householdId, userId, aspsp = 'ING' }, accounts
   return row
 }
 
-async function insertFixedExpense({ householdId, name, amount, month, year = 2026 }) {
+async function insertFixedExpense({ householdId, name, amount, month, year = 2026, bankTxnRef = null }) {
   const nameEnc = await encryptField(name, rawKey)
   const amountEnc = await encryptField(String(amount), rawKey)
   await sql`
-    INSERT INTO transactions (household_id, kind, name, amount, txn_date, year, month, is_fixed)
+    INSERT INTO transactions (household_id, kind, name, amount, txn_date, year, month, is_fixed, bank_txn_ref)
     VALUES (${householdId}, 'expense', ${nameEnc}, ${amountEnc},
-            ${`${year}-${String(month + 1).padStart(2, '0')}-01`}, ${year}, ${month}, true)
+            ${`${year}-${String(month + 1).padStart(2, '0')}-01`}, ${year}, ${month}, true, ${bankTxnRef})
   `
 }
 
@@ -196,6 +196,35 @@ describe('syncBankConnection', () => {
     })
     const second = await syncBankConnection(sql, rawKey, env, reloaded)
     expect(second.imported).toBe(1)
+  })
+
+  it('skips exact-amount entries for a fixed item merged earlier with a bank entry', async () => {
+    const ctx = await createUser()
+    const conn = await createConnection({ householdId: ctx.householdId, userId: ctx.user.id })
+    // Lipiec: pozycja scalona ręcznie (ma bank_txn_ref). Sierpień dziedziczy ją przez
+    // propagację — bez ref, ale nadal "bankową" po (kind, name).
+    await insertFixedExpense({ householdId: ctx.householdId, name: 'Google Workspace', amount: 46.49, month: 6, bankTxnRef: `acc:${uniq()}` })
+    await insertFixedExpense({ householdId: ctx.householdId, name: 'Google Workspace', amount: 46.49, month: 7 })
+    const cardTx = (over) => bookedTx({
+      creditor: null,
+      remittance_information: ['Płatność kartą 01.09.2026 Nr karty 5472xx7776'],
+      ...over,
+    })
+    vi.mocked(fetchAccountTransactions).mockResolvedValue({
+      transactions: [
+        cardTx({ entry_reference: 'card-1', transaction_amount: { amount: '46.49', currency: 'PLN' } }),
+        cardTx({ entry_reference: 'card-2', transaction_amount: { amount: '46.50', currency: 'PLN' } }),
+      ],
+      continuationKey: null,
+    })
+
+    const res = await syncBankConnection(sql, rawKey, env, conn)
+    expect(res).toEqual({ imported: 1, skipped: 1, failed: 0 })
+    const rows = await sql`
+      SELECT amount FROM transactions WHERE household_id = ${ctx.householdId} AND source = 'bank'
+    `
+    expect(rows).toHaveLength(1)
+    expect(await decryptField(rows[0].amount, rawKey)).toBe('46.5')
   })
 
   it('keeps watermarks of healthy accounts when another account fails (429)', async () => {

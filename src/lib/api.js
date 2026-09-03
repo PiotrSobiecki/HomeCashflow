@@ -100,6 +100,21 @@ export const deleteTransaction = async (id, updatedAt) => {
   }
 };
 
+// Wpis z banku znika, pozycja stała przejmuje jego referencję bankową.
+export const mergeTransactionIntoFixed = async (id, fixedId) => {
+  const res = await fetch(`${API_URL}/api/transactions/${id}/merge-into-fixed`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+    body: JSON.stringify({ fixedId }),
+  });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    throw new Error(detail.error || `POST /api/transactions/${id}/merge-into-fixed: ${res.status}`);
+  }
+  return res.json();
+};
+
 // ===== Per-row endpointy: savings_accounts, category_budgets, savings_goal (Phase 3) =====
 
 const mutateWithMatch = async (url, method, ifMatch, body) => {
