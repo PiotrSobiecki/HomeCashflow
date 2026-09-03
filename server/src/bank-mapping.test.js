@@ -184,6 +184,16 @@ describe('matchesFixedItem', () => {
     )).toBe(true)
   })
 
+  it('matches a bank-linked item by exact amount alone, without any name trace', () => {
+    // PKO: płatność kartą bez kontrahenta — w tekście nie ma "google" ani "workspace".
+    const card = { remittance_information: ['Płatność kartą 01.09.2026 Nr karty 5472xx7776'] }
+    const linked = { ...workspace, amount: 46.49, bankLinked: true }
+    expect(matchesFixedItem(card, { ...mapped, amount: 46.49 }, [linked])).toBe(true)
+    // Grosz różnicy wystarczy, żeby nie łapać — i bez flagi nadal liczy się nazwa.
+    expect(matchesFixedItem(card, { ...mapped, amount: 46.5 }, [linked])).toBe(false)
+    expect(matchesFixedItem(card, { ...mapped, amount: 46.49 }, [{ ...linked, bankLinked: false }])).toBe(false)
+  })
+
   it('respects kind and ignores degenerate fixed items', () => {
     expect(matchesFixedItem(raw, { ...mapped, kind: 'income' }, [workspace])).toBe(false)
     expect(matchesFixedItem(raw, mapped, [{ kind: 'expense', name: '', amount: 61 }])).toBe(false)

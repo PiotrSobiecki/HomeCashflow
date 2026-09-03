@@ -45,19 +45,32 @@ async function loadCategoryNames(sql, householdId, rawKey) {
  */
 async function loadFixedIndex(sql, householdId, rawKey) {
   const [rows, deleted] = await Promise.all([
-    sql`SELECT kind, name, amount, year, month FROM transactions
+    sql`SELECT kind, name, amount, year, month, bank_txn_ref FROM transactions
         WHERE household_id = ${householdId} AND is_fixed = true`,
     sql`SELECT kind, name, year, month FROM deleted_fixed_items
         WHERE household_id = ${householdId}`,
   ])
-  const byMonth = new Map()
+  const decoded = []
   for (const r of rows) {
     const name = await decryptField(r.name, rawKey)
     const amount = Number(await decryptField(r.amount, rawKey))
     if (!name) continue
+    decoded.push({ ...r, name, amount })
+  }
+  // Pozycja, którą user kiedykolwiek scalił z wpisem z banku (POST
+  // /api/transactions/:id/merge-into-fixed), jest "bankowa" we wszystkich
+  // miesiącach — dalej wystarczy jej sama kwota, bez dopasowania nazwy.
+  const bankLinked = new Set(
+    decoded.filter((r) => r.bank_txn_ref).map((r) => `${r.kind}:${r.name}`),
+  )
+  const byMonth = new Map()
+  for (const r of decoded) {
     const key = `${r.year}-${r.month}`
     if (!byMonth.has(key)) byMonth.set(key, [])
-    byMonth.get(key).push({ kind: r.kind, name, amount })
+    byMonth.get(key).push({
+      kind: r.kind, name: r.name, amount: r.amount,
+      bankLinked: bankLinked.has(`${r.kind}:${r.name}`),
+    })
   }
   const deletedByMonth = new Map()
   for (const d of deleted) {

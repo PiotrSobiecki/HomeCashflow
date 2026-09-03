@@ -304,6 +304,10 @@ export function isOwnTransfer(tx, ownerFullName) {
  * różnić o najwyżej max(2 zł, 10%) — abonamenty w walucie pływają z kursem.
  * "Google Workspace" złapie "GOOGLE *WORKSPACE", ale "Czynsz" nie złapie
  * przelewu do spółdzielni bez słowa "czynsz" w tytule.
+ *
+ * Wyjątek: pozycja z flagą bankLinked (user raz scalił ją ręcznie z wpisem
+ * z banku) łapie po samej kwocie co do grosza — PKO przy płatności kartą nie
+ * podaje kontrahenta, więc nazwa nie ma się do czego dopasować.
  */
 export function matchesFixedItem(tx, mapped, fixedItems) {
   if (!Array.isArray(fixedItems) || fixedItems.length === 0) return false
@@ -314,6 +318,7 @@ export function matchesFixedItem(tx, mapped, fixedItems) {
     if (item.kind !== mapped.kind) continue
     const amount = Number(item.amount)
     if (!Number.isFinite(amount) || amount <= 0) continue
+    if (item.bankLinked && Math.abs(mapped.amount - amount) < 0.005) return true
     if (Math.abs(mapped.amount - amount) > Math.max(2, amount * 0.1)) continue
     const tokens = normalizeName(item.name).split(' ').filter(Boolean)
     if (tokens.length === 0 || tokens.join('').length < 3) continue

@@ -3,6 +3,7 @@ import { Trash2 } from 'lucide-react'
 /**
  * Modal potwierdzenia (ten sam wzorzec co przy usuwaniu gospodarstwa).
  * @param {'danger' | 'warning'} variant — danger = czerwony przycisk akcji, warning = bursztynowy (np. pierwszy krok)
+ * @param icon — komponent ikony lucide w nagłówku (domyślnie kosz)
  */
 export function ConfirmDialog({
   open,
@@ -13,6 +14,7 @@ export function ConfirmDialog({
   confirmLabel = 'Potwierdź',
   cancelLabel = 'Anuluj',
   variant = 'danger',
+  icon: Icon = Trash2,
 }) {
   if (!open) return null
 
@@ -41,7 +43,7 @@ export function ConfirmDialog({
       >
         <div className="flex items-center gap-3 mb-4">
           <div className={`p-2.5 rounded-xl ${iconWrap}`}>
-            <Trash2 className={`w-5 h-5 ${iconColor}`} />
+            <Icon className={`w-5 h-5 ${iconColor}`} />
           </div>
           <h4 id="confirm-dialog-title" className="text-lg font-semibold text-white">
             {title}
