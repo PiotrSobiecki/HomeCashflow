@@ -36,12 +36,12 @@
     "@pushforge/builder": "^2.0.5",
     "drizzle-kit": "^0.31.10",
     "drizzle-orm": "^0.45.2",
-    "hono": "^4.13.4",
+    "hono": "^4.13.5",
     "jose": "^6.2.10"
   },
   "devDependencies": {
     "dotenv": "^17.0.0",
     "vitest": "^4.1.11",
-    "wrangler": "^4.125.0"
+    "wrangler": "^4.127.1"
   }
 }
