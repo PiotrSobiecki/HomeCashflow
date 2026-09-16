@@ -69,6 +69,7 @@ export const transactions = pgTable('transactions', {
   isFixed: boolean('is_fixed').notNull().default(false),
   category: text('category'),
   excludeFromAnalysis: boolean('exclude_from_analysis').notNull().default(false),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
   createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),

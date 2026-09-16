@@ -279,7 +279,11 @@ export const useFinanceData = () => {
     const deletedFixedExpenseNames = new Set(monthData.deletedFixed?.expenses ?? []);
 
     const newFixedIncomes = source.incomes
-      .filter(i => i.isFixed && !existingIncomeNames.has(i.name) && !deletedFixedIncomeNames.has(i.name))
+      .filter(i => {
+        if (!i.isFixed || existingIncomeNames.has(i.name) || deletedFixedIncomeNames.has(i.name)) return false;
+        existingIncomeNames.add(i.name);
+        return true;
+      })
       .map(i => ({
         name: i.name,
         amount: i.amount,
@@ -288,7 +292,11 @@ export const useFinanceData = () => {
         date: shiftFixedDateToMonth(i.date, selectedMonth),
       }));
     const newFixedExpenses = source.expenses
-      .filter(e => e.isFixed && !existingExpenseNames.has(e.name) && !deletedFixedExpenseNames.has(e.name))
+      .filter(e => {
+        if (!e.isFixed || existingExpenseNames.has(e.name) || deletedFixedExpenseNames.has(e.name)) return false;
+        existingExpenseNames.add(e.name);
+        return true;
+      })
       .map(e => ({
         name: e.name,
         amount: e.amount,
@@ -318,11 +326,12 @@ export const useFinanceData = () => {
 
     // Live mode — per-row POST per kopiowaną stałą (liveCreate wstawia optimistic + utrwala)
     for (const inc of newFixedIncomes) {
-      liveCreate('income', selectedMonth, { name: inc.name, amount: inc.amount, isFixed: true, date: inc.date });
+      liveCreate('income', selectedMonth, { name: inc.name, amount: inc.amount, isFixed: true, date: inc.date, inherited: true });
     }
     for (const exp of newFixedExpenses) {
       liveCreate('expense', selectedMonth, {
         name: exp.name,
+        inherited: true,
         amount: exp.amount,
         isFixed: true,
         date: exp.date,
@@ -398,6 +407,7 @@ export const useFinanceData = () => {
         kind, name: fields.name, amount: fields.amount, txnDate,
         year: parseInt(txnDate.slice(0, 4), 10) || CURRENT_YEAR, month: targetMonth,
         isFixed: !!fields.isFixed,
+        ...(fields.inherited ? { inherited: true } : {}),
         ...(kind === 'expense' && !fields.isFixed && fields.category ? { category: fields.category } : {}),
       });
       upsertTxnLocal(kind, targetMonth, it => it.id === tempId, {
@@ -509,10 +519,12 @@ export const useFinanceData = () => {
   };
 
   const liveDelete = async (kind, monthIdx, id) => {
-    let prevItem = null;
+    const listKey = kind === 'income' ? 'incomes' : 'expenses';
+    const previousMonth = data.months[monthIdx];
+    const prevItem = previousMonth?.[listKey].find(it => it.id === id);
+    if (!prevItem?.updatedAt) return;
     setData(prev => {
       const list = prev.months[monthIdx][kind === 'income' ? 'incomes' : 'expenses'];
-      prevItem = list.find(it => it.id === id) ?? null;
       const monthData = prev.months[monthIdx];
       const prevDeleted = monthData.deletedFixed ?? { incomes: [], expenses: [] };
       const deletedFixed = prevItem?.isFixed
@@ -528,18 +540,20 @@ export const useFinanceData = () => {
         }},
       };
     });
-    if (!prevItem?.updatedAt) return; // niezpersystowany jeszcze rekord
     setSaving(true);
     try {
       await deleteTransaction(id, prevItem.updatedAt);
     } catch (err) {
+      // Przywróć zarówno wpis, jak i lokalną listę wykluczeń.
+      setData(prev => ({ ...prev, months: { ...prev.months, [monthIdx]: {
+        ...prev.months[monthIdx],
+        deletedFixed: previousMonth.deletedFixed,
+        [listKey]: [...prev.months[monthIdx][listKey].filter(it => it.id !== id), prevItem],
+      } } }));
       if (err instanceof ConflictError) {
-        console.warn(`Konflikt przy DELETE ${id} — ktoś inny zmienił. Odświeżam stan po prostu nic nie robiąc.`);
-        // Optymistycznie usunęliśmy lokalnie — to OK; przy najbliższym GET zobaczymy świeży stan.
+        await refetchFromApi();
       } else {
         console.error(`delete ${kind} error:`, err);
-        // Rollback: wstaw z powrotem
-        if (prevItem) insertTxnLocal(kind, monthIdx, prevItem);
       }
     } finally {
       setSaving(false);
@@ -728,7 +742,7 @@ export const useFinanceData = () => {
   };
 
   const deleteIncome = (id) => {
-    if (!isLive || String(id).startsWith('temp-')) {
+    if (!isLive) {
       updateData(prev => {
         const inc = prev.months[selectedMonth]?.incomes.find(i => i.id === id);
         const monthData = prev.months[selectedMonth];
@@ -744,7 +758,7 @@ export const useFinanceData = () => {
       });
       return;
     }
-    liveDelete('income', selectedMonth, id);
+    return liveDelete('income', selectedMonth, id);
   };
 
   // ============ CRUD DLA WYDATKÓW ============
@@ -791,29 +805,8 @@ export const useFinanceData = () => {
     liveUpdate('expense', selectedMonth, id, { name, amount: amt, isFixed, date, category: storedCategory });
   };
 
-  const toggleExpenseAnalysis = async (id) => {
-    const expense = data.months[selectedMonth]?.expenses.find(e => e.id === id);
-    if (!expense || expense.source !== 'bank' || !expense.updatedAt) return;
-    setSaving(true);
-    try {
-      const saved = await patchTransaction(id, expense.updatedAt, {
-        excludeFromAnalysis: !expense.excludeFromAnalysis,
-      });
-      upsertTxnLocal('expense', selectedMonth, it => it.id === id, {
-        ...expense,
-        excludeFromAnalysis: saved.excludeFromAnalysis,
-        updatedAt: saved.updatedAt,
-      });
-    } catch (err) {
-      if (err instanceof ConflictError) await refetchFromApi();
-      throw err;
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const deleteExpense = (id) => {
-    if (!isLive || String(id).startsWith('temp-')) {
+    if (!isLive) {
       updateData(prev => {
         const exp = prev.months[selectedMonth]?.expenses.find(e => e.id === id);
         const monthData = prev.months[selectedMonth];
@@ -829,7 +822,7 @@ export const useFinanceData = () => {
       });
       return;
     }
-    liveDelete('expense', selectedMonth, id);
+    return liveDelete('expense', selectedMonth, id);
   };
 
   // ============ CEL OSZCZĘDNOŚCIOWY ============
@@ -1258,7 +1251,7 @@ export const useFinanceData = () => {
 
   return {
     data, selectedMonth, setSelectedMonth, currentMonthData, totalIncome, totalExpenses, fixedExpenses, variableExpenses, balance,
-    yearlySummary, monthlySummaries, addIncome, updateIncome, deleteIncome, addExpense, updateExpense, deleteExpense, toggleExpenseAnalysis, mergeIntoFixed, clearAllData,
+    yearlySummary, monthlySummaries, addIncome, updateIncome, deleteIncome, addExpense, updateExpense, deleteExpense, mergeIntoFixed, clearAllData,
     financialRunway, forecastData, guiltFreeBurn, savingsGoal: data.savingsGoal, savingsGoalData, updateSavingsGoal,
     savingsAccounts: data.savingsAccounts, totalSavingsAccounts, addSavingsAccount, updateSavingsAccount, deleteSavingsAccount,
     categoryBudgets: data.categoryBudgets, categorySpending, totalCategoryLimits,

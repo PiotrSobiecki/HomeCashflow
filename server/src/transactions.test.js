@@ -290,6 +290,30 @@ describe('DELETE /api/transactions/:id', () => {
     await cleanDb()
   })
 
+  it('persists a monthly fixed-item exclusion, rejects stale auto-copy and allows undo', async () => {
+    const { token } = await setupUserWithHousehold()
+    const created = await createTransaction(token, { name: 'Kredyt', amount: 1950.57, isFixed: true })
+    const res = await app.request(`/api/transactions/${created.id}`, {
+      method: 'DELETE', headers: { cookie: `token=${token}`, 'If-Match': created.updatedAt },
+    })
+    expect(res.status).toBe(204)
+    const read = async () => (await (await app.request('/api/finance', { headers: { cookie: `token=${token}` } })).json()).data
+    expect((await read()).months[created.month].deletedFixed.expenses).toContain('Kredyt')
+    const copy = await app.request('/api/transactions', {
+      method: 'POST', headers: { cookie: `token=${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...created, inherited: true }),
+    })
+    expect(copy.status).toBe(409)
+    const [entry] = await sql`SELECT id FROM action_log WHERE resource_id = ${created.id} AND operation = 'DELETE'`
+    const undo = await app.request(`/api/action-log/${entry.id}/undo`, {
+      method: 'POST', headers: { cookie: `token=${token}` },
+    })
+    expect(undo.status).toBe(200)
+    const restored = await read()
+    expect(restored.months[created.month].deletedFixed.expenses).not.toContain('Kredyt')
+    expect(restored.months[created.month].expenses.some(e => e.id === created.id)).toBe(true)
+  })
+
   it('deletes transaction and returns 204', async () => {
     const { token } = await setupUserWithHousehold()
     const created = await createTransaction(token)

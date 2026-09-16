@@ -1,12 +1,12 @@
 import { renderHook, waitFor, act } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { useFinanceData } from './useFinanceData';
-import { fetchFinanceData, patchTransaction } from '../lib/api';
+import { fetchFinanceData, deleteTransaction } from '../lib/api';
 
 vi.mock('../contexts/AuthContext', () => ({ useAuth: () => ({ user: user, isGuest: false }) }));
 vi.mock('./usePolling', () => ({ usePolling: () => {} }));
 vi.mock('../lib/api', async (importOriginal) => ({
-  ...await importOriginal(), fetchFinanceData: vi.fn(), patchTransaction: vi.fn(),
+  ...await importOriginal(), fetchFinanceData: vi.fn(), patchTransaction: vi.fn(), deleteTransaction: vi.fn(),
 }));
 const user = { id: 'user' };
 const month = new Date().getMonth();
@@ -37,19 +37,37 @@ it('keeps ignored transfers visible but excludes them from every financial summa
   expect(result.current.guiltFreeBurn.todaySpent).toBe(100);
   expect(result.current.savingsGoalData.currentSavings).toBe(4900);
 
-  patchTransaction.mockResolvedValue({ excludeFromAnalysis: false, updatedAt: 'after' });
-  await act(() => result.current.toggleExpenseAnalysis('bank'));
-  expect(patchTransaction).toHaveBeenCalledWith('bank', 'before', { excludeFromAnalysis: false });
-  expect(result.current.totalExpenses).toBe(2100);
 });
 
-it('retains the saved setting if saving fails', async () => {
+it('sends deletion to the server even when React defers state updates', async () => {
   const { result } = renderHook(() => useFinanceData());
   await waitFor(() => expect(result.current.loading).toBe(false));
-  patchTransaction.mockRejectedValue(new Error('offline'));
-  await act(async () => {
-    await expect(result.current.toggleExpenseAnalysis('bank')).rejects.toThrow('offline');
-  });
-  expect(result.current.totalExpenses).toBe(100);
-  expect(result.current.saving).toBe(false);
+  deleteTransaction.mockResolvedValue(undefined);
+  await act(() => result.current.deleteExpense('bank'));
+  expect(deleteTransaction).toHaveBeenCalledWith('bank', 'before');
+  expect(result.current.currentMonthData.expenses.some(e => e.id === 'bank')).toBe(false);
+});
+
+it('restores a fixed item and its exclusion list if deletion fails', async () => {
+  const payload = await fetchFinanceData();
+  payload.data.months[month].expenses[0].isFixed = true;
+  const { result } = renderHook(() => useFinanceData());
+  await waitFor(() => expect(result.current.loading).toBe(false));
+  const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+  deleteTransaction.mockRejectedValue(new Error('offline'));
+  await act(() => result.current.deleteExpense('bank'));
+  expect(result.current.currentMonthData.expenses.some(e => e.id === 'bank')).toBe(true);
+  expect(result.current.currentMonthData.deletedFixed.expenses).toEqual([]);
+  errorLog.mockRestore();
+});
+
+it('does not pretend to delete a transaction that is still being saved', async () => {
+  const payload = await fetchFinanceData();
+  payload.data.months[month].expenses[0].id = 'temp-bank';
+  payload.data.months[month].expenses[0].updatedAt = null;
+  const { result } = renderHook(() => useFinanceData());
+  await waitFor(() => expect(result.current.loading).toBe(false));
+  await act(() => result.current.deleteExpense('temp-bank'));
+  expect(deleteTransaction).not.toHaveBeenCalled();
+  expect(result.current.currentMonthData.expenses.some(e => e.id === 'temp-bank')).toBe(true);
 });

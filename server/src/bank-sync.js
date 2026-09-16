@@ -45,7 +45,7 @@ async function loadCategoryNames(sql, householdId, rawKey) {
  */
 async function loadFixedIndex(sql, householdId, rawKey) {
   const [rows, deleted] = await Promise.all([
-    sql`SELECT kind, name, amount, year, month, bank_txn_ref FROM transactions
+    sql`SELECT kind, name, amount, year, month, bank_txn_ref, deleted_at FROM transactions
         WHERE household_id = ${householdId} AND is_fixed = true`,
     sql`SELECT kind, name, year, month FROM deleted_fixed_items
         WHERE household_id = ${householdId}`,
@@ -53,6 +53,10 @@ async function loadFixedIndex(sql, householdId, rawKey) {
   const decoded = []
   for (const r of rows) {
     const name = await decryptField(r.name, rawKey)
+    if (r.deleted_at) {
+      deleted.push({ ...r, name })
+      continue
+    }
     const amount = Number(await decryptField(r.amount, rawKey))
     if (!name) continue
     decoded.push({ ...r, name, amount })

@@ -75,6 +75,31 @@ afterEach(async () => {
 })
 
 describe('syncBankConnection', () => {
+  it.each([
+    ['DBIT', false], ['DBIT', true], ['CRDT', false], ['CRDT', true],
+  ])('does not reimport a deleted bank transaction (%s, fixed=%s), but imports a new payment', async (direction, isFixed) => {
+    const ctx = await createUser()
+    const conn = await createConnection({ householdId: ctx.householdId, userId: ctx.user.id })
+    const payment = bookedTx({ entry_reference: 'deleted-payment', credit_debit_indicator: direction })
+    vi.mocked(fetchAccountTransactions).mockResolvedValue({ transactions: [payment], continuationKey: null })
+    expect((await syncBankConnection(sql, rawKey, env, conn)).imported).toBe(1)
+    const [row] = await sql`UPDATE transactions SET is_fixed = ${isFixed}
+      WHERE household_id = ${ctx.householdId} RETURNING id, updated_at`
+    const res = await app.request(`/api/transactions/${row.id}`, {
+      method: 'DELETE', headers: { cookie: `token=${ctx.token}`, 'If-Match': new Date(row.updated_at).toISOString() },
+    })
+    expect(res.status).toBe(204)
+    expect(await syncBankConnection(sql, rawKey, env, conn)).toEqual({ imported: 0, skipped: 1, failed: 0 })
+    const [deleted] = await sql`SELECT deleted_at, bank_txn_ref FROM transactions WHERE id = ${row.id}`
+    expect(deleted.deleted_at).not.toBeNull()
+    expect(deleted.bank_txn_ref).toBeTruthy()
+    const finance = await (await app.request('/api/finance', { headers: { cookie: `token=${ctx.token}` } })).json()
+    const visible = Object.values(finance.data.months).flatMap(m => [...m.incomes, ...m.expenses])
+    expect(visible.some(t => t.id === row.id)).toBe(false)
+    vi.mocked(fetchAccountTransactions).mockResolvedValue({ transactions: [payment, bookedTx({ entry_reference: 'next-payment' })], continuationKey: null })
+    expect(await syncBankConnection(sql, rawKey, env, conn)).toEqual({ imported: 1, skipped: 1, failed: 0 })
+  })
+
   it('imports booked transactions as encrypted budget entries with category', async () => {
     const ctx = await createUser()
     // Budżet kategorii "Żywność" — auto-kategoryzacja ma go dopasować.

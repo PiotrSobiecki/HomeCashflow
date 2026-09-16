@@ -75,9 +75,9 @@ describe('POST /api/action-log/:id/undo', () => {
     const undoBody = await undoRes.json()
     expect(undoBody.ok).toBe(true)
 
-    // Zasób ma już nie istnieć
-    const [exists] = await sql`SELECT 1 FROM transactions WHERE id = ${created.id}`
-    expect(exists).toBeUndefined()
+    // Wpis zostaje w bazie, ale nie jest już aktywny.
+    const [deleted] = await sql`SELECT deleted_at FROM transactions WHERE id = ${created.id}`
+    expect(deleted.deleted_at).not.toBeNull()
 
     // Oryginalny wpis oznaczony jako undone, pojawił się wpis UNDO
     const [orig] = await sql`SELECT undone_at, undone_by FROM action_log WHERE id = ${logRow.id}`

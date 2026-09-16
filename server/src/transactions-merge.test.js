@@ -95,7 +95,7 @@ describe('POST /api/transactions/:id/merge-into-fixed', () => {
     expect(await res.json()).toEqual({ ok: true, fixedId })
 
     const rows = await sql`
-      SELECT id, bank_txn_ref FROM transactions WHERE household_id = ${ctx.householdId}
+      SELECT id, bank_txn_ref FROM transactions WHERE household_id = ${ctx.householdId} AND deleted_at IS NULL
     `
     expect(rows).toHaveLength(1)
     expect(rows[0].id).toBe(fixedId)

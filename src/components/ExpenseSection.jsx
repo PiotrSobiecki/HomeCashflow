@@ -24,7 +24,6 @@ export const ExpenseSection = ({
   addExpense,
   updateExpense,
   deleteExpense,
-  toggleExpenseAnalysis = null,
   mergeIntoFixed = null,
   categoryBudgets = [],
   currentUserId = null,
@@ -51,8 +50,6 @@ export const ExpenseSection = ({
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [mergeTarget, setMergeTarget] = useState(null);
   const [formError, setFormError] = useState('');
-  const [analysisPending, setAnalysisPending] = useState(null);
-  const [analysisError, setAnalysisError] = useState('');
 
   const hasCategories = categoryBudgets.length > 0;
 
@@ -254,7 +251,6 @@ export const ExpenseSection = ({
         </div>
       )}
 
-      {analysisError && <p role="alert" className="text-sm text-rose-300 mb-3">{analysisError}</p>}
       <div className="finance-entry-list space-y-3">
         {sortedExpenses.length === 0 ? (
           <p className="text-slate-500 text-center py-8">Brak wydatkow w tym miesiacu</p>
@@ -348,24 +344,6 @@ export const ExpenseSection = ({
                     <div className="flex items-center gap-2 flex-wrap min-w-0">
                       {expense.isFixed && <Lock className="w-3.5 h-3.5 text-rose-400 shrink-0" />}
                       <EntryName name={expense.name} />
-                      {expense.excludeFromAnalysis && <span className="text-xs text-slate-400">Pomijany w analizie</span>}
-                      {expense.source === 'bank' && expense.updatedAt && toggleExpenseAnalysis && canMutate(expense) && (
-                        <button
-                          type="button"
-                          disabled={analysisPending !== null}
-                          onClick={async () => {
-                            setAnalysisPending(expense.id);
-                            setAnalysisError('');
-                            try { await toggleExpenseAnalysis(expense.id); }
-                            catch { setAnalysisError('Nie udało się zapisać zmiany. Spróbuj ponownie.'); }
-                            finally { setAnalysisPending(null); }
-                          }}
-                          title="Pomijaj ten wydatek w podsumowaniach, wykresach i budżetach"
-                          className="px-2 py-0.5 text-xs text-slate-300 border border-slate-500 rounded hover:bg-slate-600 disabled:opacity-50"
-                        >
-                          {expense.excludeFromAnalysis ? 'Uwzględnij w analizie' : 'Nie analizuj'}
-                        </button>
-                      )}
                       {expense.isFixed && <span className="px-1.5 py-0.5 bg-rose-500/20 text-rose-400 text-xs rounded">staly</span>}
                       {!expense.isFixed && expense.category && (
                         <span className="px-1.5 py-0.5 bg-violet-500/20 text-violet-400 text-xs rounded">{expense.category}</span>
@@ -413,6 +391,7 @@ export const ExpenseSection = ({
                         </button>
                         <button
                           type="button"
+                          disabled={String(expense.id).startsWith('temp-')}
                           onClick={() =>
                             setDeleteTarget({
                               id: expense.id,
@@ -446,7 +425,7 @@ export const ExpenseSection = ({
         title="Usunac wydatek?"
         description={
           deleteTarget
-            ? `Wpis „${deleteTarget.name}” (${deleteTarget.amountLabel}) zostanie trwale usuniety z tego miesiaca. Tej operacji nie mozna cofnac.`
+            ? `Wpis „${deleteTarget.name}” (${deleteTarget.amountLabel}) zniknie z listy i podsumowań tego miesiąca. Synchronizacja nie przywróci tej operacji.`
             : ''
         }
         confirmLabel="Tak, usun"

@@ -28,7 +28,7 @@ function pickDate(item, year, month) {
  */
 export async function readFinanceFromRelational(sql, householdId, rawKey) {
   const [txns, deleted, savings, categories, goalRows, activity] = await Promise.all([
-    sql`SELECT id, kind, name, amount, txn_date, year, month, is_fixed, category, created_by, updated_at, source, exclude_from_analysis
+    sql`SELECT id, kind, name, amount, txn_date, year, month, is_fixed, category, created_by, updated_at, source, exclude_from_analysis, deleted_at
         FROM transactions WHERE household_id = ${householdId}
         ORDER BY year, month, txn_date`,
     sql`SELECT year, month, kind, name FROM deleted_fixed_items WHERE household_id = ${householdId}`,
@@ -45,6 +45,13 @@ export async function readFinanceFromRelational(sql, householdId, rawKey) {
 
   for (const t of txns) {
     const name = await decryptField(t.name, rawKey)
+    if (t.deleted_at) {
+      if (t.is_fixed) {
+        const bucket = months[t.month] ?? (months[t.month] = emptyMonth())
+        bucket.deletedFixed[t.kind === 'income' ? 'incomes' : 'expenses'].push(name)
+      }
+      continue
+    }
     const amountStr = await decryptField(t.amount, rawKey)
     const amount = amountStr == null ? 0 : Number(amountStr)
     const item = {

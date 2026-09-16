@@ -75,6 +75,7 @@ function snapshotTransaction(row) {
     category: row.category,
     exclude_from_analysis: row.exclude_from_analysis ?? false,
     source: row.source ?? "manual",
+    bank_txn_ref: row.bank_txn_ref ?? null,
     created_by: row.created_by ?? null,
   };
 }
@@ -545,10 +546,10 @@ async function loadTransactionForMutation(sql, userId, id, ifMatch, rawKey) {
     FROM transactions t
     JOIN household_members hm ON hm.household_id = t.household_id
     JOIN households h ON h.id = t.household_id
-    WHERE t.id = ${id} AND hm.user_id = ${userId}
+    WHERE t.id = ${id} AND hm.user_id = ${userId} AND t.deleted_at IS NULL
   `;
   if (!row) {
-    const [exists] = await sql`SELECT 1 FROM transactions WHERE id = ${id}`;
+    const [exists] = await sql`SELECT 1 FROM transactions WHERE id = ${id} AND deleted_at IS NULL`;
     return {
       error: {
         status: exists ? 403 : 404,
@@ -645,12 +646,18 @@ app.post("/api/transactions", authMiddleware, async (c) => {
   const [row] = await sql`
     INSERT INTO transactions
       (household_id, kind, name, amount, txn_date, year, month, is_fixed, category, created_by)
-    VALUES
-      (${membership.household_id}, ${body.kind}, ${nameEnc}, ${amountEnc},
+    SELECT
+       ${membership.household_id}, ${body.kind}, ${nameEnc}, ${amountEnc},
        ${body.txnDate}, ${year}, ${month}, ${body.isFixed},
-       ${body.category ?? null}, ${user.id})
+       ${body.category ?? null}, ${user.id}
+    WHERE NOT (${body.inherited === true} AND ${body.isFixed}) OR NOT EXISTS (
+      SELECT 1 FROM deleted_fixed_items
+      WHERE household_id = ${membership.household_id} AND year = ${year} AND month = ${month}
+        AND kind = ${body.kind} AND name = ${body.name}
+    )
     RETURNING id, updated_at
   `;
+  if (!row) return c.json({ error: "fixed item was deleted in this month" }, 409);
 
   await safeLogAction(sql, {
     householdId: membership.household_id,
@@ -841,7 +848,19 @@ app.delete("/api/transactions/:id", authMiddleware, async (c) => {
   });
   if (permErr) return c.json(permErr.body, permErr.status);
 
-  await sql`DELETE FROM transactions WHERE id = ${id}`;
+  const deletedRow = result.row;
+  const deletions = [];
+  if (deletedRow.is_fixed) {
+    const name = await decryptField(deletedRow.name, rawKey);
+    deletions.push(sql`
+      INSERT INTO deleted_fixed_items (household_id, year, month, kind, name)
+      VALUES (${deletedRow.household_id}, ${deletedRow.year}, ${deletedRow.month}, ${deletedRow.kind}, ${name})
+      ON CONFLICT DO NOTHING
+    `);
+  }
+  // Zachowany bank_txn_ref nadal blokuje ponowny import tej samej operacji.
+  deletions.push(sql`UPDATE transactions SET deleted_at = NOW(), updated_at = NOW() WHERE id = ${id}`);
+  await sql.transaction(deletions);
 
   await safeLogAction(sql, {
     householdId: result.row.household_id,
@@ -884,7 +903,7 @@ app.post("/api/transactions/:id/merge-into-fixed", authMiddleware, async (c) => 
     FROM transactions t
     JOIN household_members hm ON hm.household_id = t.household_id
     JOIN households h ON h.id = t.household_id
-    WHERE t.id IN (${id}, ${fixedId}) AND hm.user_id = ${user.id}
+    WHERE t.id IN (${id}, ${fixedId}) AND hm.user_id = ${user.id} AND t.deleted_at IS NULL
   `;
   const bankRow = rows.find((r) => r.id === id);
   const fixedRow = rows.find((r) => r.id === fixedId);
@@ -908,7 +927,7 @@ app.post("/api/transactions/:id/merge-into-fixed", authMiddleware, async (c) => 
   // Ref jest unikalny per gospodarstwo: najpierw znika wpis z banku, dopiero
   // potem przejmuje go pozycja stała — obie zmiany w jednej transakcji.
   await sql.transaction([
-    sql`DELETE FROM transactions WHERE id = ${id}`,
+    sql`UPDATE transactions SET deleted_at = NOW(), updated_at = NOW(), bank_txn_ref = NULL WHERE id = ${id}`,
     sql`UPDATE transactions SET bank_txn_ref = ${bankRow.bank_txn_ref} WHERE id = ${fixedId}`,
   ]);
 
@@ -3854,7 +3873,7 @@ app.post("/api/action-log/:id/undo", authMiddleware, async (c) => {
           { error: "Cannot undo DELETE without 'before' snapshot" },
           500,
         );
-      await applyDeleteRevert(sql, rt, entry.household_id, before);
+      await applyDeleteRevert(sql, rt, entry.household_id, before, getFinanceDataKey(c));
     } else {
       return c.json({ error: `Unsupported operation: ${op}` }, 400);
     }
@@ -3890,9 +3909,9 @@ async function applyCreateRevert(sql, rt, householdId, resourceId) {
   }
   if (rt === "transaction") {
     const [exists] =
-      await sql`SELECT 1 FROM transactions WHERE id = ${resourceId}`;
+      await sql`SELECT 1 FROM transactions WHERE id = ${resourceId} AND deleted_at IS NULL`;
     if (!exists) return false;
-    await sql`DELETE FROM transactions WHERE id = ${resourceId}`;
+    await sql`UPDATE transactions SET deleted_at = NOW(), updated_at = NOW() WHERE id = ${resourceId}`;
     return true;
   }
   if (rt === "savings_account") {
@@ -3964,24 +3983,30 @@ async function applyUpdateRevert(sql, rt, householdId, resourceId, before) {
   }
 }
 
-async function applyDeleteRevert(sql, rt, householdId, before) {
+async function applyDeleteRevert(sql, rt, householdId, before, rawKey) {
   // Spróbuj z tym samym id; jeśli już zajęte przez inny rekord → insert bez id (auto-gen).
   if (rt === "transaction") {
     const [exists] =
-      await sql`SELECT 1 FROM transactions WHERE id = ${before.id}`;
-    if (!exists) {
-      await sql`
-        INSERT INTO transactions (id, household_id, kind, name, amount, txn_date, year, month, is_fixed, category, created_by, exclude_from_analysis, source)
-        VALUES (${before.id}, ${householdId}, ${before.kind}, ${before.name}, ${before.amount}, ${before.txn_date},
-                ${before.year}, ${before.month}, ${before.is_fixed}, ${before.category ?? null}, ${before.created_by ?? null}, ${before.exclude_from_analysis ?? false}, ${before.source ?? "manual"})
-      `;
-    } else {
-      await sql`
-        INSERT INTO transactions (household_id, kind, name, amount, txn_date, year, month, is_fixed, category, created_by, exclude_from_analysis, source)
-        VALUES (${householdId}, ${before.kind}, ${before.name}, ${before.amount}, ${before.txn_date},
-                ${before.year}, ${before.month}, ${before.is_fixed}, ${before.category ?? null}, ${before.created_by ?? null}, ${before.exclude_from_analysis ?? false}, ${before.source ?? "manual"})
-      `;
+      await sql`SELECT deleted_at FROM transactions WHERE id = ${before.id} AND household_id = ${householdId}`;
+    const restoredId = exists ? crypto.randomUUID() : before.id;
+    const changes = [];
+    if (before.is_fixed) {
+      const name = await decryptField(before.name, rawKey);
+      changes.push(sql`DELETE FROM deleted_fixed_items
+        WHERE household_id = ${householdId} AND year = ${before.year} AND month = ${before.month}
+          AND kind = ${before.kind} AND name = ${name}`);
     }
+    if (exists?.deleted_at) {
+      changes.push(sql`UPDATE transactions SET deleted_at = NULL, updated_at = NOW()
+        WHERE id = ${before.id} AND household_id = ${householdId}`);
+    } else changes.push(sql`
+      INSERT INTO transactions (id, household_id, kind, name, amount, txn_date, year, month, is_fixed, category, created_by, exclude_from_analysis, source, bank_txn_ref)
+      VALUES (${restoredId}, ${householdId}, ${before.kind}, ${before.name}, ${before.amount}, ${before.txn_date},
+              ${before.year}, ${before.month}, ${before.is_fixed}, ${before.category ?? null}, ${before.created_by ?? null}, ${before.exclude_from_analysis ?? false}, ${before.source ?? "manual"},
+              CASE WHEN EXISTS (SELECT 1 FROM transactions WHERE household_id = ${householdId} AND bank_txn_ref = ${before.bank_txn_ref ?? null})
+                THEN NULL ELSE ${before.bank_txn_ref ?? null} END)
+    `);
+    await sql.transaction(changes);
   } else if (rt === "savings_account") {
     const [exists] =
       await sql`SELECT 1 FROM savings_accounts WHERE id = ${before.id}`;
