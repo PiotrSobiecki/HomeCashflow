@@ -41,3 +41,26 @@
   min-height: var(--finance-row-height);
   box-sizing: border-box;
 }
+
+/* Nazwa wpisu: opisy z banku są długie i bez spacji, więc przycinamy je do
+   dwóch linii (tapnięcie rozwija) i łamiemy w dowolnym miejscu, żeby wiersz
+   nie rozpychał karty na wąskich ekranach. */
+.finance-entry-name {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.finance-entry-name.is-expanded {
+  display: block;
+  -webkit-line-clamp: unset;
+  line-clamp: unset;
+  overflow: visible;
+}

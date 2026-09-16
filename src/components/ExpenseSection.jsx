@@ -3,6 +3,7 @@ import { TrendingDown, Plus, Pencil, Trash2, Check, X, CalendarDays, Lock, Shopp
 import { ConfirmDialog } from './ConfirmDialog';
 import { ReadOnlyEntryActions } from './ReadOnlyEntryActions';
 import { MergeIntoFixedControl, mergeCandidates, mergeDescription } from './MergeIntoFixedControl';
+import { EntryName } from './EntryName';
 
 const formatCurrency = (amount) =>
   new Intl.NumberFormat('pl-PL', {
@@ -131,7 +132,7 @@ export const ExpenseSection = ({
   }, [categoryBudgets]);
 
   return (
-    <div className="bg-slate-800/50 border border-slate-700/50 rounded-2xl p-6 h-full flex flex-col min-h-0">
+    <div className="bg-slate-800/50 border border-slate-700/50 rounded-2xl p-4 sm:p-6 h-full flex flex-col min-h-0">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
           <div className="bg-rose-500/20 p-2.5 rounded-xl">
@@ -339,10 +340,10 @@ export const ExpenseSection = ({
                 </div>
               ) : (
                 <>
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      {expense.isFixed && <Lock className="w-3.5 h-3.5 text-rose-400" />}
-                      <p className="font-medium text-white">{expense.name}</p>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap min-w-0">
+                      {expense.isFixed && <Lock className="w-3.5 h-3.5 text-rose-400 shrink-0" />}
+                      <EntryName name={expense.name} />
                       {expense.isFixed && <span className="px-1.5 py-0.5 bg-rose-500/20 text-rose-400 text-xs rounded">staly</span>}
                       {!expense.isFixed && expense.category && (
                         <span className="px-1.5 py-0.5 bg-violet-500/20 text-violet-400 text-xs rounded">{expense.category}</span>
@@ -378,8 +379,8 @@ export const ExpenseSection = ({
                       </p>
                     )}
                   </div>
-                  <div className="flex items-center gap-4">
-                    <span className={`font-semibold ${expense.isFixed ? 'text-rose-400' : 'text-orange-400'}`}>{formatCurrency(expense.amount)}</span>
+                  <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+                    <span className={`font-semibold whitespace-nowrap ${expense.isFixed ? 'text-rose-400' : 'text-orange-400'}`}>{formatCurrency(expense.amount)}</span>
                     {canMutateEntry(expense, currentUserId, isOwner) ? (
                       <div className="flex gap-1">
                         <button
