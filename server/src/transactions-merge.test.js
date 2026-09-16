@@ -51,6 +51,30 @@ afterEach(async () => {
 })
 
 describe('POST /api/transactions/:id/merge-into-fixed', () => {
+  it('persists and reverses analysis exclusion without changing bank deduplication', async () => {
+    const ctx = await createUser()
+    const bankTxnRef = `acc:${uniq()}`
+    const id = await insertTx({ householdId: ctx.householdId, userId: ctx.user.id,
+      name: 'Przelew', amount: 2000, source: 'bank', bankTxnRef })
+    const read = async () => {
+      const res = await app.request('/api/finance', { headers: { cookie: `token=${ctx.token}` } })
+      return (await res.json()).data.months[8].expenses.find(e => e.id === id)
+    }
+    for (const excluded of [true, false]) {
+      const item = await read()
+      const res = await app.request(`/api/transactions/${id}`, {
+        method: 'PATCH',
+        headers: { cookie: `token=${ctx.token}`, 'Content-Type': 'application/json', 'If-Match': item.updatedAt },
+        body: JSON.stringify({ excludeFromAnalysis: excluded }),
+      })
+      expect(res.status).toBe(200)
+      expect(await res.json()).toMatchObject({ excludeFromAnalysis: excluded, source: 'bank' })
+      expect(await read()).toMatchObject({ excludeFromAnalysis: excluded, amount: 2000 })
+      const [row] = await sql`SELECT bank_txn_ref FROM transactions WHERE id = ${id}`
+      expect(row.bank_txn_ref).toBe(bankTxnRef)
+    }
+  })
+
   it('removes the bank entry and hands its bank_txn_ref to the fixed item', async () => {
     const ctx = await createUser()
     const base = { householdId: ctx.householdId, userId: ctx.user.id }

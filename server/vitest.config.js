@@ -5,6 +5,7 @@ export default defineConfig({
     setupFiles: ['./src/test-setup.js'],
     testTimeout: 15000,
     pool: 'forks',
-    poolOptions: { forks: { singleFork: true } },
+    fileParallelism: false,
+    maxWorkers: 1,
   },
 })

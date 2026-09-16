@@ -1,4 +1,5 @@
 import { Merge } from 'lucide-react';
+import { nameSimilarity } from '../lib/nameSimilarity';
 
 const formatCurrency = (amount) =>
   new Intl.NumberFormat('pl-PL', { style: 'currency', currency: 'PLN', minimumFractionDigits: 2 }).format(amount);
@@ -6,18 +7,20 @@ const formatCurrency = (amount) =>
 export const sameAmount = (a, b) => Math.abs(Number(a) - Number(b)) < 0.005;
 
 /**
- * Pozycje stałe, z którymi da się scalić wpis z banku: ta sama kwota co do grosza,
+ * Pozycje stałe: ta sama kwota lub podobieństwo nazwy co najmniej 85%,
  * wiersz już zapisany na serwerze (ma updatedAt) i user może go zmieniać.
  * Wpis z banku o kwocie równej pozycji stałej to zwykle jej obciążenie, którego
  * synchronizacja nie rozpoznała po nazwie (płatność kartą w PKO nie ma kontrahenta).
  */
 export const mergeCandidates = (entry, fixedEntries, canMutate) =>
-  entry?.source === 'bank' && !entry.isFixed
-    ? fixedEntries.filter((f) => f.updatedAt && sameAmount(f.amount, entry.amount) && canMutate(f))
+  entry?.source === 'bank' && !entry.isFixed && !entry.excludeFromAnalysis
+    ? fixedEntries.filter((f) => f.updatedAt && !f.excludeFromAnalysis &&
+      (sameAmount(f.amount, entry.amount) || nameSimilarity(f.name, entry.name) >= 0.85) && canMutate(f))
     : [];
 
 export const mergeDescription = ({ entry, fixed }, targetLabel) =>
-  `Wpis z banku „${entry.name}” (${formatCurrency(entry.amount)}) zniknie z listy i będzie liczony jako ${targetLabel} „${fixed.name}”. ` +
+  `Wpis z banku „${entry.name}” (${formatCurrency(entry.amount)}) zniknie z listy i będzie liczony jako ${targetLabel} „${fixed.name}” (${formatCurrency(fixed.amount)}). ` +
+  (!sameAmount(entry.amount, fixed.amount) ? 'Kwoty są różne — w podsumowaniach pozostanie kwota pozycji stałej. ' : '') +
   'Kolejne operacje z banku na dokładnie tę kwotę synchronizacja przypisze do tej pozycji automatycznie.';
 
 const controlClass =

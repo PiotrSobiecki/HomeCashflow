@@ -53,6 +53,7 @@ export const Dashboard = () => {
     addExpense,
     updateExpense,
     deleteExpense,
+    toggleExpenseAnalysis,
     mergeIntoFixed,
     clearAllData,
     financialRunway,
@@ -355,6 +356,7 @@ export const Dashboard = () => {
           <div id="expense-section" className="h-full min-h-0">
             <ExpenseSection
               expenses={currentMonthData.expenses}
+              toggleExpenseAnalysis={toggleExpenseAnalysis}
               addExpense={addExpense}
               updateExpense={updateExpense}
               deleteExpense={deleteExpense}

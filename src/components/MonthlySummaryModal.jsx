@@ -45,6 +45,7 @@ const toAmount = (value) => {
 const buildExpenseCategoryData = (expenses) => {
   const grouped = {};
   for (const exp of expenses) {
+    if (exp.excludeFromAnalysis) continue;
     const key = exp?.isFixed ? "Stale" : (exp?.category || "Inne");
     if (!grouped[key]) {
       grouped[key] = { total: 0, fixed: 0, variable: 0 };

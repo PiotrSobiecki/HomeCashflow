@@ -1,0 +1,1 @@
+ALTER TABLE "transactions" ADD COLUMN "exclude_from_analysis" boolean DEFAULT false NOT NULL;

@@ -447,9 +447,12 @@ export const useFinanceData = () => {
     try {
       const saved = await patchTransaction(id, prevItem.updatedAt, changes);
       const savedItem = {
+        ...prevItem,
         id: saved.id, name: saved.name, amount: saved.amount,
         isFixed: saved.isFixed, date: saved.txnDate, updatedAt: saved.updatedAt,
         createdBy: saved.createdBy ?? null,
+        excludeFromAnalysis: saved.excludeFromAnalysis ?? false,
+        category: saved.category ?? null,
         ...(saved.category ? { category: saved.category } : {}),
       };
       // Zmiana daty na inny miesiąc przenosi wpis między kubełkami (backend
@@ -471,6 +474,9 @@ export const useFinanceData = () => {
             try {
               const saved = await patchTransaction(id, err.current.updatedAt, changes);
               upsertTxnLocal(kind, monthIdx, it => it.id === id, {
+                ...prevItem,
+                excludeFromAnalysis: saved.excludeFromAnalysis ?? false,
+                category: saved.category ?? null,
                 id: saved.id, name: saved.name, amount: saved.amount,
                 isFixed: saved.isFixed, date: saved.txnDate, updatedAt: saved.updatedAt,
                 ...(saved.category ? { category: saved.category } : {}),
@@ -483,6 +489,9 @@ export const useFinanceData = () => {
           },
           onCancel: () => {
             upsertTxnLocal(kind, monthIdx, it => it.id === id, {
+              ...prevItem,
+              excludeFromAnalysis: err.current.excludeFromAnalysis ?? false,
+              category: err.current.category ?? null,
               id: err.current.id, name: err.current.name, amount: err.current.amount,
               isFixed: err.current.isFixed, date: err.current.txnDate, updatedAt: err.current.updatedAt,
               ...(err.current.category ? { category: err.current.category } : {}),
@@ -782,6 +791,27 @@ export const useFinanceData = () => {
     liveUpdate('expense', selectedMonth, id, { name, amount: amt, isFixed, date, category: storedCategory });
   };
 
+  const toggleExpenseAnalysis = async (id) => {
+    const expense = data.months[selectedMonth]?.expenses.find(e => e.id === id);
+    if (!expense || expense.source !== 'bank' || !expense.updatedAt) return;
+    setSaving(true);
+    try {
+      const saved = await patchTransaction(id, expense.updatedAt, {
+        excludeFromAnalysis: !expense.excludeFromAnalysis,
+      });
+      upsertTxnLocal('expense', selectedMonth, it => it.id === id, {
+        ...expense,
+        excludeFromAnalysis: saved.excludeFromAnalysis,
+        updatedAt: saved.updatedAt,
+      });
+    } catch (err) {
+      if (err instanceof ConflictError) await refetchFromApi();
+      throw err;
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const deleteExpense = (id) => {
     if (!isLive || String(id).startsWith('temp-')) {
       updateData(prev => {
@@ -1018,12 +1048,12 @@ export const useFinanceData = () => {
   );
 
   const fixedExpenses = useMemo(() =>
-    currentMonthData.expenses.filter(exp => exp.isFixed).reduce((sum, exp) => sum + exp.amount, 0),
+    currentMonthData.expenses.filter(exp => !exp.excludeFromAnalysis && exp.isFixed).reduce((sum, exp) => sum + exp.amount, 0),
     [currentMonthData.expenses]
   );
 
   const variableExpenses = useMemo(() =>
-    currentMonthData.expenses.filter(exp => !exp.isFixed).reduce((sum, exp) => sum + exp.amount, 0),
+    currentMonthData.expenses.filter(exp => !exp.excludeFromAnalysis && !exp.isFixed).reduce((sum, exp) => sum + exp.amount, 0),
     [currentMonthData.expenses]
   );
 
@@ -1037,7 +1067,7 @@ export const useFinanceData = () => {
 
   // ============ BUDŻETY KATEGORII - OBLICZENIA ============
   const categorySpending = useMemo(() => {
-    const variableExps = currentMonthData.expenses.filter(e => !e.isFixed);
+    const variableExps = currentMonthData.expenses.filter(e => !e.excludeFromAnalysis && !e.isFixed);
     const spending = {};
     for (const exp of variableExps) {
       const cat = exp.category || null;
@@ -1064,7 +1094,7 @@ export const useFinanceData = () => {
     for (let i = 0; i <= currentMonth; i++) {
       const monthData = data.months[i] || createEmptyMonthData();
       const income = monthData.incomes.reduce((s, inc) => s + inc.amount, 0);
-      const expenses = monthData.expenses.reduce((s, exp) => s + exp.amount, 0);
+      const expenses = monthData.expenses.filter(exp => !exp.excludeFromAnalysis).reduce((s, exp) => s + exp.amount, 0);
       currentSavings += (income - expenses);
     }
 
@@ -1100,8 +1130,8 @@ export const useFinanceData = () => {
 
     const monthData = data.months[currentMonth] || createEmptyMonthData();
     const monthIncome = monthData.incomes.reduce((sum, inc) => sum + inc.amount, 0);
-    const monthFixedExpenses = monthData.expenses.filter(e => e.isFixed).reduce((sum, exp) => sum + exp.amount, 0);
-    const monthVariableExpenses = monthData.expenses.filter(e => !e.isFixed).reduce((sum, exp) => sum + exp.amount, 0);
+    const monthFixedExpenses = monthData.expenses.filter(e => !e.excludeFromAnalysis && e.isFixed).reduce((sum, exp) => sum + exp.amount, 0);
+    const monthVariableExpenses = monthData.expenses.filter(e => !e.excludeFromAnalysis && !e.isFixed).reduce((sum, exp) => sum + exp.amount, 0);
 
     const availableAfterFixed = monthIncome - monthFixedExpenses;
     const remainingAfterVariable = availableAfterFixed - monthVariableExpenses;
@@ -1109,7 +1139,7 @@ export const useFinanceData = () => {
     const guiltFreeFunds = remainingAfterVariable - monthlyTarget;
     const baseDailyLimit = daysRemaining > 0 ? guiltFreeFunds / daysRemaining : 0;
     const todaySpent = monthData.expenses
-      .filter(e => !e.isFixed && e.date === todayStr)
+      .filter(e => !e.excludeFromAnalysis && !e.isFixed && e.date === todayStr)
       .reduce((sum, exp) => sum + exp.amount, 0);
     const dailyLimit = Math.max(0, baseDailyLimit - todaySpent);
 
@@ -1136,8 +1166,8 @@ export const useFinanceData = () => {
     let income = 0, fixedExp = 0, variableExp = 0;
     Object.values(data.months).forEach(monthData => {
       income += monthData.incomes.reduce((sum, inc) => sum + inc.amount, 0);
-      fixedExp += monthData.expenses.filter(e => e.isFixed).reduce((sum, exp) => sum + exp.amount, 0);
-      variableExp += monthData.expenses.filter(e => !e.isFixed).reduce((sum, exp) => sum + exp.amount, 0);
+      fixedExp += monthData.expenses.filter(e => !e.excludeFromAnalysis && e.isFixed).reduce((sum, exp) => sum + exp.amount, 0);
+      variableExp += monthData.expenses.filter(e => !e.excludeFromAnalysis && !e.isFixed).reduce((sum, exp) => sum + exp.amount, 0);
     });
     return { income, expenses: fixedExp + variableExp, fixedExpenses: fixedExp, variableExpenses: variableExp, balance: income - fixedExp - variableExp };
   }, [data]);
@@ -1147,8 +1177,8 @@ export const useFinanceData = () => {
     return MONTHS.map((name, index) => {
       const monthData = data.months[index] || createEmptyMonthData();
       const income = monthData.incomes.reduce((sum, inc) => sum + inc.amount, 0);
-      const fixed = monthData.expenses.filter(e => e.isFixed).reduce((sum, exp) => sum + exp.amount, 0);
-      const variable = monthData.expenses.filter(e => !e.isFixed).reduce((sum, exp) => sum + exp.amount, 0);
+      const fixed = monthData.expenses.filter(e => !e.excludeFromAnalysis && e.isFixed).reduce((sum, exp) => sum + exp.amount, 0);
+      const variable = monthData.expenses.filter(e => !e.excludeFromAnalysis && !e.isFixed).reduce((sum, exp) => sum + exp.amount, 0);
       return { name: name.substring(0, 3), income, expenses: fixed + variable, fixedExpenses: fixed, variableExpenses: variable, balance: income - fixed - variable };
     });
   }, [data]);
@@ -1161,7 +1191,7 @@ export const useFinanceData = () => {
     for (let i = 0; i <= currentMonth; i++) {
       const monthData = data.months[i] || createEmptyMonthData();
       const income = monthData.incomes.reduce((sum, inc) => sum + inc.amount, 0);
-      const expenses = monthData.expenses.reduce((sum, exp) => sum + exp.amount, 0);
+      const expenses = monthData.expenses.filter(exp => !exp.excludeFromAnalysis).reduce((sum, exp) => sum + exp.amount, 0);
       totalSavings += (income - expenses);
       if (expenses > 0) { totalExpensesSum += expenses; monthsWithExpenses++; }
     }
@@ -1180,7 +1210,7 @@ export const useFinanceData = () => {
     for (let i = 0; i <= currentMonth; i++) {
       const monthData = data.months[i] || createEmptyMonthData();
       const income = monthData.incomes.reduce((sum, inc) => sum + inc.amount, 0);
-      const expenses = monthData.expenses.reduce((sum, exp) => sum + exp.amount, 0);
+      const expenses = monthData.expenses.filter(exp => !exp.excludeFromAnalysis).reduce((sum, exp) => sum + exp.amount, 0);
       if (income > 0 || expenses > 0) { totalIncomeSum += income; totalExpensesSum += expenses; monthsWithData++; }
     }
 
@@ -1194,7 +1224,7 @@ export const useFinanceData = () => {
     for (let i = 0; i < 12; i++) {
       const monthData = data.months[i] || createEmptyMonthData();
       const income = monthData.incomes.reduce((sum, inc) => sum + inc.amount, 0);
-      const expenses = monthData.expenses.reduce((sum, exp) => sum + exp.amount, 0);
+      const expenses = monthData.expenses.filter(exp => !exp.excludeFromAnalysis).reduce((sum, exp) => sum + exp.amount, 0);
       const isCurrentOrPast = i <= currentMonth;
       const hasRealData = income > 0 || expenses > 0;
 
@@ -1228,7 +1258,7 @@ export const useFinanceData = () => {
 
   return {
     data, selectedMonth, setSelectedMonth, currentMonthData, totalIncome, totalExpenses, fixedExpenses, variableExpenses, balance,
-    yearlySummary, monthlySummaries, addIncome, updateIncome, deleteIncome, addExpense, updateExpense, deleteExpense, mergeIntoFixed, clearAllData,
+    yearlySummary, monthlySummaries, addIncome, updateIncome, deleteIncome, addExpense, updateExpense, deleteExpense, toggleExpenseAnalysis, mergeIntoFixed, clearAllData,
     financialRunway, forecastData, guiltFreeBurn, savingsGoal: data.savingsGoal, savingsGoalData, updateSavingsGoal,
     savingsAccounts: data.savingsAccounts, totalSavingsAccounts, addSavingsAccount, updateSavingsAccount, deleteSavingsAccount,
     categoryBudgets: data.categoryBudgets, categorySpending, totalCategoryLimits,

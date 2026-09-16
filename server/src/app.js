@@ -73,6 +73,8 @@ function snapshotTransaction(row) {
     month: row.month,
     is_fixed: row.is_fixed,
     category: row.category,
+    exclude_from_analysis: row.exclude_from_analysis ?? false,
+    source: row.source ?? "manual",
     created_by: row.created_by ?? null,
   };
 }
@@ -576,6 +578,8 @@ async function loadTransactionForMutation(sql, userId, id, ifMatch, rawKey) {
             month: row.month,
             isFixed: row.is_fixed,
             category: row.category,
+            source: row.source,
+            excludeFromAnalysis: row.exclude_from_analysis ?? false,
             updatedAt: updatedAtIso,
           },
         },
@@ -728,6 +732,13 @@ app.patch("/api/transactions/:id", authMiddleware, async (c) => {
     return c.json({ error: "isFixed must be a boolean" }, 400);
   }
   const hasCategory = Object.prototype.hasOwnProperty.call(body, "category");
+  if (body.excludeFromAnalysis !== undefined && typeof body.excludeFromAnalysis !== "boolean") {
+    return c.json({ error: "excludeFromAnalysis must be a boolean" }, 400);
+  }
+  if (body.excludeFromAnalysis !== undefined && (row.kind !== "expense" || row.source !== "bank")) {
+    return c.json({ error: "only bank expenses can be excluded from analysis" }, 400);
+  }
+  const excludeFromAnalysis = body.excludeFromAnalysis ?? row.exclude_from_analysis ?? false;
   if (
     hasCategory &&
     body.category !== null &&
@@ -762,6 +773,7 @@ app.patch("/api/transactions/:id", authMiddleware, async (c) => {
         month = ${monthVal},
         is_fixed = ${isFixedVal},
         category = ${categoryVal},
+        exclude_from_analysis = ${excludeFromAnalysis},
         updated_at = NOW()
     WHERE id = ${id}
     RETURNING id, kind, txn_date, year, month, is_fixed, category, updated_at
@@ -783,6 +795,7 @@ app.patch("/api/transactions/:id", authMiddleware, async (c) => {
       month: monthVal,
       is_fixed: isFixedVal,
       category: categoryVal,
+      exclude_from_analysis: excludeFromAnalysis,
     }),
   });
 
@@ -796,6 +809,8 @@ app.patch("/api/transactions/:id", authMiddleware, async (c) => {
     month: updated.month,
     isFixed: updated.is_fixed,
     category: updated.category,
+    source: row.source,
+    excludeFromAnalysis,
     createdBy: row.created_by ?? null,
     updatedAt: updated.updated_at,
   });
@@ -3912,6 +3927,7 @@ async function applyUpdateRevert(sql, rt, householdId, resourceId, before) {
           month = ${before.month},
           is_fixed = ${before.is_fixed},
           category = ${before.category ?? null},
+          exclude_from_analysis = ${before.exclude_from_analysis ?? false},
           updated_at = NOW()
       WHERE id = ${resourceId}
     `;
@@ -3955,15 +3971,15 @@ async function applyDeleteRevert(sql, rt, householdId, before) {
       await sql`SELECT 1 FROM transactions WHERE id = ${before.id}`;
     if (!exists) {
       await sql`
-        INSERT INTO transactions (id, household_id, kind, name, amount, txn_date, year, month, is_fixed, category, created_by)
+        INSERT INTO transactions (id, household_id, kind, name, amount, txn_date, year, month, is_fixed, category, created_by, exclude_from_analysis, source)
         VALUES (${before.id}, ${householdId}, ${before.kind}, ${before.name}, ${before.amount}, ${before.txn_date},
-                ${before.year}, ${before.month}, ${before.is_fixed}, ${before.category ?? null}, ${before.created_by ?? null})
+                ${before.year}, ${before.month}, ${before.is_fixed}, ${before.category ?? null}, ${before.created_by ?? null}, ${before.exclude_from_analysis ?? false}, ${before.source ?? "manual"})
       `;
     } else {
       await sql`
-        INSERT INTO transactions (household_id, kind, name, amount, txn_date, year, month, is_fixed, category, created_by)
+        INSERT INTO transactions (household_id, kind, name, amount, txn_date, year, month, is_fixed, category, created_by, exclude_from_analysis, source)
         VALUES (${householdId}, ${before.kind}, ${before.name}, ${before.amount}, ${before.txn_date},
-                ${before.year}, ${before.month}, ${before.is_fixed}, ${before.category ?? null}, ${before.created_by ?? null})
+                ${before.year}, ${before.month}, ${before.is_fixed}, ${before.category ?? null}, ${before.created_by ?? null}, ${before.exclude_from_analysis ?? false}, ${before.source ?? "manual"})
       `;
     }
   } else if (rt === "savings_account") {
