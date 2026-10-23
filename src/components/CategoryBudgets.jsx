@@ -9,6 +9,13 @@ const formatCurrency = (amount) => new Intl.NumberFormat('pl-PL', { style: 'curr
 const canMutateEntry = (item, currentUserId, isOwner) =>
   isOwner || item?.createdBy == null || item.createdBy === currentUserId;
 
+// Własne przekroczenie edytowanej kategorii nie zjada jej puli — podniesiony limit je pokrywa
+export const maxEditLimit = (id, categoryBudgets, categorySpending, availablePool) =>
+  Math.max(0, categoryBudgets.reduce(
+    (free, c) => (c.id === id ? free : free - Math.max(c.limit, categorySpending[c.name] || 0)),
+    availablePool,
+  ));
+
 export const CategoryBudgets = ({
   categoryBudgets, categorySpending, totalCategoryLimits,
   addCategoryBudget, updateCategoryBudget, deleteCategoryBudget,
@@ -40,8 +47,7 @@ export const CategoryBudgets = ({
 
   // Max limit dla nowej kategorii = wolne miejsce w puli
   const maxNewLimit = Math.max(0, effectivePool - totalCategoryLimits);
-  // Max limit dla edytowanej kategorii = wolne + aktualny limit tej kategorii
-  const getMaxEditLimit = (currentLimit) => Math.max(0, effectivePool - totalCategoryLimits + currentLimit);
+  const getMaxEditLimit = (id) => maxEditLimit(id, categoryBudgets, categorySpending, availablePool);
 
   const handleAdd = () => {
     if (newName.trim() && newLimit) {
@@ -61,15 +67,14 @@ export const CategoryBudgets = ({
     setEditingId(cat.id); setEditName(cat.name); setEditLimit(cat.limit.toString());
   };
 
-  const handleSetMaxEdit = (currentLimit) => {
-    const max = getMaxEditLimit(currentLimit);
+  const handleSetMaxEdit = (id) => {
+    const max = getMaxEditLimit(id);
     setEditLimit(max > 0 ? max.toFixed(2) : '0');
   };
 
   const handleSaveEdit = (id) => {
     if (editName.trim() && editLimit) {
-      const cat = categoryBudgets.find(c => c.id === id);
-      const max = getMaxEditLimit(cat?.limit || 0);
+      const max = getMaxEditLimit(id);
       const clamped = Math.min(parseFloat(editLimit), max);
       updateCategoryBudget(id, editName.trim(), clamped);
       setEditingId(null);
@@ -164,8 +169,8 @@ export const CategoryBudgets = ({
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} className="px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-violet-500" />
                     <div className="flex gap-2">
-                      <input type="number" value={editLimit} onChange={(e) => { const v = parseFloat(e.target.value); const max = getMaxEditLimit(cat.limit); if (!e.target.value || v <= max) setEditLimit(e.target.value); }} className="flex-1 px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-violet-500" step="0.01" min="0" />
-                      <button onClick={() => handleSetMaxEdit(cat.limit)} className="px-2.5 py-2 bg-violet-500/20 hover:bg-violet-500/30 text-violet-400 rounded-lg text-xs font-medium transition-all">Max</button>
+                      <input type="number" value={editLimit} onChange={(e) => { const v = parseFloat(e.target.value); const max = getMaxEditLimit(cat.id); if (!e.target.value || v <= max) setEditLimit(e.target.value); }} className="flex-1 px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-violet-500" step="0.01" min="0" />
+                      <button onClick={() => handleSetMaxEdit(cat.id)} className="px-2.5 py-2 bg-violet-500/20 hover:bg-violet-500/30 text-violet-400 rounded-lg text-xs font-medium transition-all">Max</button>
                     </div>
                   </div>
                   <div className="flex justify-end gap-2">
