@@ -9,12 +9,16 @@ const formatCurrency = (amount) => new Intl.NumberFormat('pl-PL', { style: 'curr
 const canMutateEntry = (item, currentUserId, isOwner) =>
   isOwner || item?.createdBy == null || item.createdBy === currentUserId;
 
-// Własne przekroczenie edytowanej kategorii nie zjada jej puli — podniesiony limit je pokrywa
-export const maxEditLimit = (id, categoryBudgets, categorySpending, availablePool) =>
-  Math.max(0, categoryBudgets.reduce(
-    (free, c) => (c.id === id ? free : free - Math.max(c.limit, categorySpending[c.name] || 0)),
+// Własne przekroczenie edytowanej kategorii nie zjada jej puli — podniesiony limit je pokrywa.
+// Przy ciasnej puli limit i tak da się podnieść do kwoty już wydanej, a zapis nie obniża obecnego.
+export const maxEditLimit = (id, categoryBudgets, categorySpending, availablePool) => {
+  const own = categoryBudgets.find(c => c.id === id);
+  const free = categoryBudgets.reduce(
+    (left, c) => (c.id === id ? left : left - Math.max(c.limit, categorySpending[c.name] || 0)),
     availablePool,
-  ));
+  );
+  return Math.max(0, free, own?.limit || 0, categorySpending[own?.name] || 0);
+};
 
 export const CategoryBudgets = ({
   categoryBudgets, categorySpending, totalCategoryLimits,
@@ -173,7 +177,8 @@ export const CategoryBudgets = ({
                       <button onClick={() => handleSetMaxEdit(cat.id)} className="px-2.5 py-2 bg-violet-500/20 hover:bg-violet-500/30 text-violet-400 rounded-lg text-xs font-medium transition-all">Max</button>
                     </div>
                   </div>
-                  <div className="flex justify-end gap-2">
+                  <div className="flex items-center justify-end gap-2">
+                    <span className="mr-auto text-xs text-slate-400">Max {formatCurrency(getMaxEditLimit(cat.id))}</span>
                     <button onClick={() => handleSaveEdit(cat.id)} className="p-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg transition-all"><Check className="w-4 h-4" /></button>
                     <button onClick={() => setEditingId(null)} className="p-2 bg-slate-600 hover:bg-slate-500 text-white rounded-lg transition-all"><X className="w-4 h-4" /></button>
                   </div>
