@@ -223,6 +223,37 @@ function parseCookie(header, name) {
   return match ? match[1] : null;
 }
 
+// Ochrona CSRF przepływów OAuth: `state` z URL autoryzacji musi wrócić w callbacku
+// i zgadzać się z ciasteczkiem wydanym tej samej przeglądarce. Bez tego obca
+// strona mogła wysłać zalogowanego użytkownika na callback z własnym `code`
+// i podpiąć swoje konto (Google, SmartThings, bank) do jego sesji lub gospodarstwa.
+const OAUTH_STATE_MAX_AGE = 10 * 60;
+
+function oauthStateCookie(c, name, value) {
+  const parts = [
+    `${name}=${value}`,
+    "HttpOnly",
+    "Path=/",
+    "SameSite=Lax",
+    `Max-Age=${value ? OAUTH_STATE_MAX_AGE : 0}`,
+  ];
+  if (getApiBaseUrl(c).startsWith("https://")) parts.push("Secure");
+  return parts.join("; ");
+}
+
+/** Nowy losowy state: trafia do ciasteczka odpowiedzi i do URL autoryzacji. */
+function issueOauthState(c, name) {
+  const state = crypto.randomUUID();
+  c.header("Set-Cookie", oauthStateCookie(c, name, state), { append: true });
+  return state;
+}
+
+/** Czy state z callbacku zgadza się z ciasteczkiem tej przeglądarki. */
+function oauthStateMatches(c, name, state) {
+  const expected = parseCookie(c.req.header("cookie"), name);
+  return Boolean(expected && state && expected === state);
+}
+
 export async function upsertUserAndHousehold(sql, profile) {
   // Upsert user
   const [user] = await sql`
@@ -320,8 +351,9 @@ app.get("/api/auth/google", (c) => {
   const redirectUri = `${getApiBaseUrl(c)}/api/auth/callback`;
   const scope = "openid email profile";
 
-  // Przekaż invite token przez OAuth state parameter
-  const inviteToken = c.req.query("invite");
+  // state = losowy nonce (ciasteczko) + opcjonalny invite token po dwukropku
+  const inviteToken = c.req.query("invite") || "";
+  const state = `${issueOauthState(c, "oauth_state")}:${inviteToken}`;
 
   const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
   url.searchParams.set("client_id", clientId);
@@ -330,9 +362,7 @@ app.get("/api/auth/google", (c) => {
   url.searchParams.set("scope", scope);
   url.searchParams.set("access_type", "offline");
   url.searchParams.set("prompt", "consent");
-  if (inviteToken) {
-    url.searchParams.set("state", inviteToken);
-  }
+  url.searchParams.set("state", state);
 
   return c.redirect(url.toString());
 });
@@ -354,6 +384,11 @@ app.get("/api/auth/callback", async (c) => {
     return c.json({ error: "Missing code" }, 400);
   }
 
+  const [stateNonce, inviteFromState = ""] = String(c.req.query("state") || "").split(":");
+  if (!oauthStateMatches(c, "oauth_state", stateNonce)) {
+    return c.json({ error: "Invalid OAuth state" }, 400);
+  }
+
   try {
     const profile = await exchangeCodeForProfile(c, code);
     const sql = getDb(c);
@@ -367,9 +402,9 @@ app.get("/api/auth/callback", async (c) => {
     const frontendUrl = String(
       getEnv(c, "FRONTEND_URL") || "http://localhost:5173",
     ).replace(/\/+$/, "");
-    const inviteState = c.req.query("state");
+    const inviteState = inviteFromState;
     const redirectUrl = inviteState
-      ? `${frontendUrl}?invite=${inviteState}`
+      ? `${frontendUrl}?invite=${encodeURIComponent(inviteState)}`
       : frontendUrl;
     const cookieParts = [
       `token=${token}`,
@@ -381,13 +416,10 @@ app.get("/api/auth/callback", async (c) => {
     if (getApiBaseUrl(c).startsWith("https://")) {
       cookieParts.push("Secure");
     }
-    return new Response(null, {
-      status: 302,
-      headers: {
-        Location: redirectUrl,
-        "Set-Cookie": cookieParts.join("; "),
-      },
-    });
+    const headers = new Headers({ Location: redirectUrl });
+    headers.append("Set-Cookie", cookieParts.join("; "));
+    headers.append("Set-Cookie", oauthStateCookie(c, "oauth_state", ""));
+    return new Response(null, { status: 302, headers });
   } catch (err) {
     console.error("[auth/callback]", err);
     const message = err instanceof Error ? err.message : String(err);
@@ -400,8 +432,7 @@ app.get("/api/auth/callback", async (c) => {
     if (accept.includes("text/html")) {
       const u = new URL(frontendUrl);
       u.searchParams.set("auth_err", code);
-      const inviteState = c.req.query("state");
-      if (inviteState) u.searchParams.set("invite", inviteState);
+      if (inviteFromState) u.searchParams.set("invite", inviteFromState);
       return c.redirect(u.toString(), 302);
     }
     return c.json({ error: "Auth failed", detail: message, code }, 500);
@@ -1670,7 +1701,7 @@ app.get("/api/smartthings/connect", authMiddleware, async (c) => {
     clientId,
     redirectUri: smartthingsRedirectUri(c),
     scopes: SMARTTHINGS_SCOPES,
-    state: crypto.randomUUID(),
+    state: issueOauthState(c, "st_oauth_state"),
   });
   return c.redirect(url);
 });
@@ -1683,6 +1714,8 @@ app.get("/api/smartthings/callback", async (c) => {
   if (c.req.query("error")) return fail("error");
   const code = c.req.query("code");
   if (!code) return fail("error");
+  if (!oauthStateMatches(c, "st_oauth_state", c.req.query("state"))) return fail("error");
+  c.header("Set-Cookie", oauthStateCookie(c, "st_oauth_state", ""), { append: true });
 
   try {
     // User jest zalogowany (cookie leci przy top-level redirect) — ustal gospodarstwo.
@@ -1816,7 +1849,7 @@ app.get("/api/bank/connect", authMiddleware, async (c) => {
       redirectUrl:
         getEnv(c, "ENABLE_BANKING_REDIRECT_URI") ||
         `${getApiBaseUrl(c)}/api/bank/callback`,
-      state: crypto.randomUUID(),
+      state: issueOauthState(c, "bank_oauth_state"),
     });
     return c.redirect(url);
   } catch (err) {
@@ -1834,6 +1867,8 @@ app.get("/api/bank/callback", async (c) => {
   if (c.req.query("error")) return fail("error");
   const code = c.req.query("code");
   if (!code) return fail("error");
+  if (!oauthStateMatches(c, "bank_oauth_state", c.req.query("state"))) return fail("error");
+  c.header("Set-Cookie", oauthStateCookie(c, "bank_oauth_state", ""), { append: true });
 
   try {
     const token = parseCookie(c.req.header("cookie"), "token");
